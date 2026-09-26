@@ -1,6 +1,6 @@
 // Service Worker: macht die App offline-fähig.
 // Bei jeder Änderung an App-Dateien VERSION erhöhen, dann bekommen alle Geräte das Update angeboten.
-const VERSION = 'v1.0.0';
+const VERSION = 'v1.0.1';
 const CACHE = 'finanzen-' + VERSION;
 const DEV = ['localhost', '127.0.0.1'].includes(self.location.hostname);
 const APP = [
