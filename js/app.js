@@ -219,12 +219,20 @@ function schedule() {
 function registerSW() {
   if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
   let userAccepted = false;
+  const hadController = !!navigator.serviceWorker.controller; // beim allerersten Besuch kein Update-Hinweis
   navigator.serviceWorker.register('sw.js').then((reg) => {
     const offer = (w) => {
+      if (document.querySelector('.update-bar')) return;
       const bar = document.createElement('div');
       bar.className = 'update-bar';
       bar.innerHTML = `${icon('refresh')}<span>Neue Version verfügbar</span><button class="btn btn-sm btn-primary">Aktualisieren</button>`;
-      bar.querySelector('button').onclick = () => { userAccepted = true; w.postMessage('skipWaiting'); };
+      bar.querySelector('button').onclick = async () => {
+        userAccepted = true;
+        await store.flush();
+        (reg.waiting || w)?.postMessage('skipWaiting');
+        // Hat ein anderer Tab das Update schon übernommen, kommt kein controllerchange mehr → trotzdem neu laden
+        setTimeout(() => location.reload(), 1200);
+      };
       document.body.appendChild(bar);
     };
     if (reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);
@@ -234,7 +242,18 @@ function registerSW() {
     });
     setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
   }).catch((e) => console.warn('Service Worker nicht registriert', e));
-  navigator.serviceWorker.addEventListener('controllerchange', () => { if (userAccepted) location.reload(); });
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (userAccepted) location.reload();
+    // Update wurde in einem anderen Tab aktiviert: Hinweis anbieten, der dann einfach neu lädt
+    else if (hadController && !document.querySelector('.update-bar')) offerReload();
+  });
+  const offerReload = () => {
+    const bar = document.createElement('div');
+    bar.className = 'update-bar';
+    bar.innerHTML = `${icon('refresh')}<span>Neue Version verfügbar</span><button class="btn btn-sm btn-primary">Aktualisieren</button>`;
+    bar.querySelector('button').onclick = async () => { await store.flush(); location.reload(); };
+    document.body.appendChild(bar);
+  };
 }
 
 function netState() {
