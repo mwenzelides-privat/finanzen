@@ -1,6 +1,6 @@
-﻿// Service Worker: macht die App offline-fÃ¤hig.
-// Bei jeder Ã„nderung an App-Dateien VERSION erhÃ¶hen, dann bekommen alle GerÃ¤te das Update angeboten.
-const VERSION = 'v1.1.0';
+// Service Worker: macht die App offline-fähig.
+// Bei jeder Änderung an App-Dateien VERSION erhöhen, dann bekommen alle Geräte das Update angeboten.
+const VERSION = 'v1.1.1';
 const CACHE = 'finanzen-' + VERSION;
 const DEV = ['localhost', '127.0.0.1'].includes(self.location.hostname);
 const APP = [
@@ -42,8 +42,8 @@ self.addEventListener('fetch', (e) => {
   if (/googleapis\.com|accounts\.google\.com|gstatic\.com/.test(url.hostname)) return;
 
   if (url.origin === self.location.origin) {
-    // App-Dateien: aus dem Cache (schnell & offline), Seitenaufruf fÃ¤llt auf index.html zurÃ¼ck.
-    // Lokal (Entwicklung) zuerst Netzwerk, damit Ã„nderungen sofort sichtbar sind.
+    // App-Dateien: aus dem Cache (schnell & offline), Seitenaufruf fällt auf index.html zurück.
+    // Lokal (Entwicklung) zuerst Netzwerk, damit Änderungen sofort sichtbar sind.
     e.respondWith((async () => {
       const c = await caches.open(CACHE);
       if (DEV) {
