@@ -5,6 +5,7 @@ import {
   parseMoney, fmtDate, monthLabel,
 } from './util.js';
 import { GROUPS } from './defaults.js';
+import { depotValueAt } from './depot.js';
 
 export const cats = () => store.byId('categories');
 
@@ -79,6 +80,7 @@ export function byPayee(txs, limit = 10) {
 // ---------- Salden ----------
 // Kontostand bekannt am anchorDate (inkl. aller Buchungen bis einschließlich dieses Tages)
 export function balanceAt(acc, date, txs = store.all('transactions')) {
+  if (acc.type === 'depot' && acc.valueHistory?.length) return depotValueAt(acc, date, txs);
   let b = acc.balanceAnchor || 0;
   const a = acc.anchorDate || '0000-00-00';
   for (const t of txs) {

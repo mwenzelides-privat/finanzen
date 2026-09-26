@@ -8,6 +8,7 @@ import {
 } from '../importer.js';
 import { compileRules } from '../categorize.js';
 import { ACCOUNT_TYPES } from '../defaults.js';
+import { isDepotExport, parseDepot, commitDepot, linkedTrades } from '../depot.js';
 
 export const title = 'Import';
 
@@ -53,6 +54,8 @@ export function render(root, { params }) {
     ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
     ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
     drop.addEventListener('drop', (e) => { const f = e.dataTransfer.files[0]; if (f) start(f, presetAccount); });
+  } else if (job.kind === 'depot') {
+    renderDepotJob(root.querySelector('#job'));
   } else {
     renderJob(root.querySelector('#job'));
   }
@@ -100,6 +103,18 @@ async function start(file, presetAccount) {
     const data = await readFile(file);
     const sheet = data.sheets[0];
     if (!sheet || !sheet.rows.length) throw new Error('Die Datei enthält keine lesbaren Zeilen.');
+    // Depotübersicht (Wertpapiere mit ISIN und Kurswert) statt Kontoumsätzen?
+    if (isDepotExport(sheet.rows)) {
+      const parsed = parseDepot(sheet.rows);
+      if (!parsed.positions.length) throw new Error('In der Depotübersicht wurden keine Wertpapiere mit ISIN und Kurswert gefunden.');
+      const depots = store.all('accounts').filter((a) => a.type === 'depot' && !a.archived);
+      const match = depots.find((a) => parsed.depotNo && a.ref === parsed.depotNo) || depots.find((a) => (a.isins || []).some((i) => parsed.positions.some((p) => p.isin === i))) || depots[0];
+      const allRows = sheet.rows.slice(0, 15).map((r) => r.join(' ')).join(' ') + ' ' + file.name;
+      const bank = /\bING\b|diba/i.test(allRows) ? 'ING' : '';
+      job = { kind: 'depot', fileName: file.name, parsed, accountId: match?.id || '_new', newName: bank ? `${bank} Depot` : 'Depot', bank };
+      rerender();
+      return;
+    }
     const headerIdx = findHeaderRow(sheet.rows);
     const header = sheet.rows[headerIdx] || [];
     const sig = headerSignature(header);
@@ -245,6 +260,67 @@ function renderJob(host) {
       else job[k] = el.value;
     } else return;
     rerender();
+  });
+}
+
+function renderDepotJob(host) {
+  const p = job.parsed;
+  const gain = p.cost != null ? p.value - p.cost : null;
+  const trades = linkedTrades(p.positions.map((x) => x.isin));
+  const buys = trades.filter((t) => t.amount < 0);
+  const tradeAccs = [...new Set(trades.map((t) => store.get('accounts', t.accountId)?.name).filter(Boolean))];
+  const depots = store.all('accounts').filter((a) => a.type === 'depot' && !a.archived);
+  const existing = job.accountId !== '_new' ? store.get('accounts', job.accountId) : null;
+  const pct = (a, b) => (b ? `${a >= 0 ? '+' : ''}${((a / b) * 100).toLocaleString('de-DE', { maximumFractionDigits: 1 })} %` : '');
+  host.innerHTML = `
+    <section class="card">
+      <div class="card-h"><h2>${icon('chart')} ${esc(job.fileName)}</h2><button class="btn btn-ghost btn-sm" data-action="cancel">${icon('x')} Abbrechen</button></div>
+      <div class="notice static">${icon('check')}<span><b>Depotübersicht erkannt</b> · ${p.positions.length} Wertpapiere · Stand ${fmtDate(p.date)}${p.depotNo ? ` · Depot ${esc(mask(p.depotNo))}` : ''}</span></div>
+      <section class="stats stats-3">
+        <div class="card stat"><div class="stat-label">Depotwert</div><div class="stat-value">${money(p.value)}</div></div>
+        <div class="card stat"><div class="stat-label">Einstandswert</div><div class="stat-value">${p.cost != null ? money(p.cost) : '–'}</div></div>
+        <div class="card stat"><div class="stat-label">Gewinn / Verlust</div><div class="stat-value ${gain < 0 ? 'text-bad' : gain > 0 ? 'text-good' : ''}">${gain != null ? money(gain) : '–'}</div><div class="muted small">${gain != null ? pct(gain, p.cost) : ''}</div></div>
+      </section>
+      <div class="form-grid cols-3">
+        <label class="field"><span class="field-label">Depot-Konto</span>
+          <select data-j="accountId">${depots.map((a) => `<option value="${a.id}" ${a.id === job.accountId ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}<option value="_new" ${job.accountId === '_new' ? 'selected' : ''}>+ Neues Depot anlegen …</option></select></label>
+        ${job.accountId === '_new' ? `<label class="field"><span class="field-label">Name des Depots</span><input data-j="newName" value="${esc(job.newName)}"></label>` : ''}
+      </div>
+      ${existing?.valueHistory?.length ? `<p class="small muted">Bisher gespeicherte Stände: ${existing.valueHistory.length}, zuletzt ${fmtDate(existing.valueHistory[existing.valueHistory.length - 1].date)} mit ${money(existing.valueHistory[existing.valueHistory.length - 1].value)}. Ein Stand für denselben Stichtag wird ersetzt.</p>` : ''}
+      ${buys.length ? `<p class="small">${icon('link')} <b>${buys.length} Wertpapierkäufe</b> über zusammen <b>${money(-buys.reduce((s, t) => s + t.amount, 0))}</b> gefunden (${esc(tradeAccs.join(', '))}). Damit schätzt die App den Depotwert auch für die Zeit vor diesem Stichtag, und der Vermögensverlauf bleibt stimmig.</p>` : ''}
+    </section>
+    <section class="card">
+      <div class="card-h"><h2>Positionen</h2></div>
+      <div class="table-wrap"><table class="table compact">
+        <thead><tr><th>Wertpapier</th><th class="num hide-sm">Stück</th><th class="num hide-sm">Kurs</th><th class="num">Kurswert</th><th class="num hide-sm">Einstand</th><th class="num">G/V</th></tr></thead>
+        <tbody>${p.positions.sort((a, b) => b.value - a.value).map((x) => {
+          const g = x.cost != null ? x.value - x.cost : null;
+          return `<tr><td class="grow"><div class="tx-main">${esc(x.name)}</div><div class="tx-sub mono">${esc(x.isin)}</div></td>
+            <td class="num hide-sm">${x.qty != null ? x.qty.toLocaleString('de-DE', { maximumFractionDigits: 4 }) : '–'}</td>
+            <td class="num hide-sm">${x.price != null ? money(x.price) : '–'}</td>
+            <td class="num"><b>${money(x.value)}</b></td>
+            <td class="num hide-sm muted">${x.cost != null ? money(x.cost) : '–'}</td>
+            <td class="num ${g < 0 ? 'text-bad' : g > 0 ? 'text-good' : 'muted'}">${g != null ? `${money(g)}<div class="tx-sub">${pct(g, x.cost)}</div>` : '–'}</td></tr>`;
+        }).join('')}</tbody></table></div>
+      <div class="row-between import-foot">
+        <span class="small muted">Tipp: Die Übersicht regelmäßig neu importieren (z. B. monatlich). Jeder Stichtag wird gespeichert und ergibt den Wertverlauf.</span>
+        <button class="btn btn-primary" data-action="commitDepot" ${job.accountId !== '_new' || job.newName.trim() ? '' : 'disabled'}>${icon('check')} Depotstand übernehmen</button>
+      </div>
+    </section>`;
+  host.addEventListener('change', (e) => {
+    const k = e.target.dataset.j;
+    if (!k) return;
+    job[k] = e.target.value;
+    rerender();
+  });
+  host.querySelector('[data-action=commitDepot]').addEventListener('click', () => {
+    const id = commitDepot(p, {
+      accountId: job.accountId === '_new' ? null : job.accountId,
+      newAccount: { name: job.newName.trim() || 'Depot', bank: job.bank, ref: p.depotNo || '' },
+    });
+    job = null;
+    toast(`Depotstand vom ${fmtDate(p.date)} übernommen: ${money(p.value)}`, 'success', 6000);
+    location.hash = `#/konten?focus=${id}`;
   });
 }
 

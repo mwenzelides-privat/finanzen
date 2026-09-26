@@ -9,7 +9,8 @@ import { ACCOUNT_TYPES } from '../defaults.js';
 
 export const title = 'Konten';
 
-export function render(root) {
+export function render(root, { params } = {}) {
+  const focus = params?.get('focus') || '';
   const txs = store.all('transactions');
   const all = store.all('accounts');
   const active = all.filter((a) => !a.archived);
@@ -19,7 +20,34 @@ export function render(root) {
   const assets = active.reduce((s, a) => s + Math.max(0, currentBalance(a, txs)), 0);
   const debts = active.reduce((s, a) => s + Math.min(0, currentBalance(a, txs)), 0);
 
+  const depotCard = (a) => {
+    const bal = currentBalance(a, txs);
+    const hist = a.valueHistory || [];
+    const lastH = hist[hist.length - 1];
+    const cost = lastH?.cost;
+    const gain = cost != null ? bal - cost : null;
+    const pos = [...(a.positions || [])].sort((x, y) => y.value - x.value);
+    return `<article class="card acc-card ${a.archived ? 'archived' : ''} ${focus === a.id ? 'focus' : ''}">
+      <div class="row-between">
+        <div><h3>${esc(a.name)}</h3><div class="muted small">Depot${a.bank ? ' · ' + esc(a.bank) : ''}</div></div>
+        <button class="icon-btn" data-action="edit" data-id="${a.id}" aria-label="Bearbeiten">${icon('edit')}</button>
+      </div>
+      <div class="acc-card-bal">${money(bal)}</div>
+      ${gain != null ? `<div class="small ${gain < 0 ? 'text-bad' : 'text-good'}">${gain >= 0 ? '+' : ''}${money(gain)} (${gain >= 0 ? '+' : ''}${cost ? ((gain / cost) * 100).toLocaleString('de-DE', { maximumFractionDigits: 1 }) : 0} %) seit Kauf</div>` : ''}
+      <div class="spark"><canvas data-spark="${a.id}" aria-hidden="true"></canvas></div>
+      ${pos.length ? `<ul class="plain-list pos-list">${pos.slice(0, 5).map((p) => `<li class="row-between small"><span class="ellipsis" title="${esc(p.isin)}">${esc(p.name)}</span><b>${money(p.value)}</b></li>`).join('')}${pos.length > 5 ? `<li class="small muted">+ ${pos.length - 5} weitere</li>` : ''}</ul>` : ''}
+      <dl class="kv">
+        ${lastH ? `<div><dt>Stand vom</dt><dd>${fmtDate(lastH.date)}${hist.length > 1 ? ` · ${hist.length} Stände` : ''}</dd></div>` : ''}
+        ${cost != null ? `<div><dt>Einstandswert</dt><dd>${money(cost)}</dd></div>` : ''}
+      </dl>
+      <div class="acc-card-actions">
+        <a class="btn btn-sm" href="#/import">${icon('upload')} Depotstand importieren</a>
+      </div>
+    </article>`;
+  };
+
   const card = (a) => {
+    if (a.type === 'depot' && a.valueHistory?.length) return depotCard(a);
     const own = txs.filter((t) => t.accountId === a.id);
     const last = own.reduce((m, t) => (t.date > m ? t.date : m), '');
     const bal = currentBalance(a, txs);

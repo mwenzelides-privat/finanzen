@@ -490,3 +490,6 @@ dialog.modal footer { display: flex; gap: 8px; align-items: center; padding: 12p
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 .notice.static:hover { border-color: transparent; }
 .check-row { row-gap: 0; }
+.acc-card.focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.pos-list { margin: 0 0 12px; gap: 6px; }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

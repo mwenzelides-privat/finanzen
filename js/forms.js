@@ -93,7 +93,7 @@ export function openAccountForm(acc = null) {
       ${field('Kontoart', `<select name="type">${accountTypeOptions(acc?.type || 'giro')}</select>`)}
       ${field('Bank', `<input name="bank" value="${esc(acc?.bank || '')}">`)}
       ${field('IBAN (optional)', `<input name="iban" value="${esc(acc?.iban || '')}" autocomplete="off">`, '', 'span-2')}
-      ${field('Kontostand (€)', `<input name="balance" inputmode="decimal" value="${centsToInput(bal)}">`, 'So wie ihn die Bank anzeigt')}
+      ${field(acc?.type === 'depot' ? 'Depotwert (€)' : 'Kontostand (€)', `<input name="balance" inputmode="decimal" value="${centsToInput(bal)}">`, acc?.type === 'depot' ? 'Aktueller Kurswert laut Bank. Oder bequemer: Depotübersicht importieren.' : 'So wie ihn die Bank anzeigt')}
       ${field('Stand vom', `<input type="date" name="balanceDate" value="${todayISO()}">`, 'Inklusive aller Buchungen dieses Tages')}
       ${acc ? '<label class="check span-2"><input type="checkbox" name="archived" ' + (acc.archived ? 'checked' : '') + '> Archiviert (ausgeblendet, zählt nicht zum Vermögen)</label>' : ''}
     </div>`,
@@ -113,7 +113,17 @@ export function openAccountForm(acc = null) {
       if (!v.name.trim()) throw new Error('Bitte einen Namen eingeben.');
       const cents = parseMoney(v.balance) ?? 0;
       const rec = { ...(acc || {}), name: v.name.trim(), type: v.type, bank: v.bank.trim(), iban: v.iban.replace(/\s+/g, '').toUpperCase(), archived: !!v.archived };
-      if (!acc || cents !== bal) { rec.balanceAnchor = cents; rec.anchorDate = v.balanceDate || todayISO(); }
+      if (!acc || cents !== bal) {
+        rec.balanceAnchor = cents;
+        rec.anchorDate = v.balanceDate || todayISO();
+        // Depot: manueller Wert wird Teil des Wertverlaufs
+        if (rec.type === 'depot') {
+          const hist = (rec.valueHistory || []).filter((h) => h.date !== rec.anchorDate);
+          const prev = hist.filter((h) => h.date <= rec.anchorDate).pop();
+          hist.push({ date: rec.anchorDate, value: cents, cost: prev?.cost ?? null });
+          rec.valueHistory = hist.sort((a, b) => a.date.localeCompare(b.date));
+        }
+      }
       store.put('accounts', rec);
       toast('Konto gespeichert', 'success');
     },

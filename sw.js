@@ -1,6 +1,6 @@
 // Service Worker: macht die App offline-fähig.
 // Bei jeder Änderung an App-Dateien VERSION erhöhen, dann bekommen alle Geräte das Update angeboten.
-const VERSION = 'v1.1.1';
+const VERSION = 'v1.2.0';
 const CACHE = 'finanzen-' + VERSION;
 const DEV = ['localhost', '127.0.0.1'].includes(self.location.hostname);
 const APP = [
@@ -8,7 +8,7 @@ const APP = [
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
   'js/app.js', 'js/util.js', 'js/icons.js', 'js/crypto.js', 'js/store.js', 'js/defaults.js', 'js/calc.js',
   'js/categorize.js', 'js/charts.js', 'js/ui.js', 'js/forms.js', 'js/drive.js', 'js/sync.js',
-  'js/importer.js', 'js/demo.js',
+  'js/importer.js', 'js/depot.js', 'js/demo.js',
   'js/views/dashboard.js', 'js/views/transactions.js', 'js/views/accounts.js', 'js/views/budgets.js',
   'js/views/vacation.js', 'js/views/tax.js', 'js/views/reports.js', 'js/views/import.js', 'js/views/settings.js',
 ];

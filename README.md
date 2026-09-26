@@ -78,6 +78,25 @@ Im Online-Banking die Umsätze als **CSV** exportieren (Sparkasse: Format „CSV
 - Enthält die Datei einen Kontostand (ING, Volksbank, DKB …), wird er für den Saldo übernommen.
 - Neue Buchungen werden über **Regeln** kategorisiert. Beim Bearbeiten einer Buchung „für ähnliche merken“ anhaken, dann lernt die App dazu.
 
+### Finanzguru-Export
+
+Finanzguru → Export „Alle Buchungen“ (Excel) auf der Import-Seite ablegen. Die App erkennt das Format automatisch und übernimmt:
+- **alle Konten** (Zuordnung je Buchung über IBAN, fehlende werden angelegt, Kontostand je Konto),
+- **Haupt- und Unterkategorien**, „Sparen“ zählt als Umbuchung,
+- **Umbuchungen** zwischen eigenen Konten (zählen nicht als Einnahme/Ausgabe),
+- **Split-Buchungen** (das Original wird übersprungen, die Teile importiert),
+- **Tags und Notizen**,
+- **Regeln aus der Historie**, damit spätere Bank-CSV-Importe genauso kategorisiert werden.
+
+Spätere Exporte erneut importieren: Über die Finanzguru-Buchungs-ID kommen nur neue Buchungen dazu.
+
+### Depot (Wertpapiere)
+
+ING: *Depot → Depotübersicht → Export (CSV)*. Andere Banken: Depot- oder Bestandsübersicht mit den Spalten ISIN und Kurswert. Die Datei auf der Import-Seite ablegen.
+- Jeder Import speichert einen **Stichtag**. Mehrere Importe ergeben den Wertverlauf, am besten monatlich importieren.
+- Wertpapierkäufe auf dem Verrechnungskonto (z. B. „WP.ABRECHNUNG … Kauf ISIN …“) werden über die ISIN erkannt. Damit schätzt die App den Depotwert auch vor dem ersten Stichtag.
+- Alternativ den Depotwert per Hand pflegen: *Konten → Depot → Bearbeiten → Depotwert*.
+
 **Direkte Bankschnittstelle (automatischer Abruf):** Braucht einen PSD2-Dienst wie Enable Banking, finAPI oder Tink und einen kleinen Server, der die Zugangsschlüssel sicher verwahrt. Das ist als Ausbaustufe möglich. Der CSV-Import deckt alle Banken ohne Zusatzkosten ab.
 
 ## Updates einspielen
