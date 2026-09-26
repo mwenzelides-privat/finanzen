@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Finanzen</title>
+  <meta name="description" content="Private Finanzverwaltung – Konten, Budgets, Urlaubskasse, Steuer, Berichte">
+  <meta name="theme-color" content="#2a78d6">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/app.css">
+  <script>
+    try { var t = localStorage.getItem('fv.theme'); if (t && t !== 'auto') document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <div id="app">
+    <div class="lock"><p class="muted">Lade Finanzen …</p></div>
+  </div>
+  <div id="toasts" aria-live="polite"></div>
+  <noscript>Diese App benötigt JavaScript.</noscript>
+</body>
+</html>

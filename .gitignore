@@ -1,0 +1,7 @@
+# Niemals echte Finanzdaten ins Repository
+*.csv
+*.xlsx
+*.xls
+finanzen-backup-*.json
+finanzdaten*.json
+.claude/
