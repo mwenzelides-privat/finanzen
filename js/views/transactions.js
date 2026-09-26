@@ -190,6 +190,7 @@ function row(t, cm) {
   const acc = store.get('accounts', t.accountId);
   const k = kind(t, cm);
   const badges = [
+    t.transfer ? `<span class="badge" title="Zählt nicht als Einnahme/Ausgabe">${icon('repeat')}Umbuchung</span>` : '',
     t.taxCategory ? `<span class="badge" title="${esc(taxCat(t.taxCategory)?.label || '')}">${icon('file')}${esc(taxCat(t.taxCategory)?.short || 'Steuer')}</span>` : '',
     t.vacationId ? `<span class="badge">${icon('plane')}${esc(store.get('vacations', t.vacationId)?.name || 'Urlaub')}</span>` : '',
     ...(t.tags || []).map((g) => `<span class="badge">${icon('tag')}${esc(g)}</span>`),

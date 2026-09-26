@@ -10,6 +10,7 @@ export const cats = () => store.byId('categories');
 
 // 'income' | 'expense' | 'transfer'
 export function kind(tx, cm = cats()) {
+  if (tx.transfer) return 'transfer'; // Umbuchung zwischen eigenen Konten – Kategorie bleibt zur Info erhalten
   const c = tx.categoryId && cm.get(tx.categoryId);
   if (c) return c.type;
   return tx.amount >= 0 ? 'income' : 'expense';

@@ -488,3 +488,5 @@ dialog.modal footer { display: flex; gap: 8px; align-items: center; padding: 12p
   .tx-sub { -webkit-line-clamp: unset; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+.notice.static:hover { border-color: transparent; }
+.check-row { row-gap: 0; }

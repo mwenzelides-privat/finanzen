@@ -44,6 +44,7 @@ export function openTxForm(tx = null, preset = {}) {
         ${field('Urlaubskasse', `<select name="vacationId">${vacationOptions(t.vacationId)}</select>`, 'Ordnet die Ausgabe einer Reise zu')}
         ${field('Tags', `<input name="tags" value="${esc((t.tags || []).join(', '))}" placeholder="z. B. Garten, Hochzeit">`, 'Mit Komma trennen')}
         ${field('Notiz', `<input name="note" value="${esc(t.note || '')}">`)}
+        <label class="check span-2"><input type="checkbox" name="transfer" ${t.transfer ? 'checked' : ''}> Umbuchung zwischen eigenen Konten (zählt nicht als Einnahme oder Ausgabe)</label>
       </div>
       ${tx && tx.bookingText ? `<p class="muted small">Buchungstext der Bank: ${esc(tx.bookingText)}</p>` : ''}
       ${tx ? '<label class="check"><input type="checkbox" name="learn"> Kategorie für ähnliche Buchungen merken (Regel anlegen und anwenden)</label>' : ''}`,
@@ -70,6 +71,7 @@ export function openTxForm(tx = null, preset = {}) {
         vacationId: v.vacationId || null,
         tags: v.tags.split(',').map((s) => s.trim()).filter(Boolean),
         note: v.note.trim(),
+        transfer: v.transfer || undefined,
       };
       if (!tx || tx.categoryId !== rec.categoryId) rec.catManual = true;
       store.put('transactions', rec);

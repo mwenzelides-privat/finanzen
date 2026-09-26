@@ -1,7 +1,8 @@
-// Import von Kontoauszügen (CSV aller gängigen deutschen Banken, Excel)
+// Import von Kontoauszügen (CSV aller gängigen deutschen Banken, Excel, Finanzguru-Export)
 import { store } from './store.js';
 import { uid, loadScript, parseDate, parseMoney, norm, todayISO, hash } from './util.js';
 import { compileRules, matchRule } from './categorize.js';
+import { DEFAULT_CATEGORIES, DEFAULT_RULES } from './defaults.js';
 
 const XLSX_URL = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
 
@@ -15,13 +16,24 @@ export const FIELDS = [
   { key: 'payeeIn', label: 'Auftraggeber (bei Eingängen)' },
   { key: 'purpose', label: 'Verwendungszweck' },
   { key: 'text', label: 'Buchungstext / Umsatzart' },
-  { key: 'category', label: 'Kategorie' },
+  { key: 'categoryGroup', label: 'Hauptkategorie' },
+  { key: 'category', label: 'Kategorie / Unterkategorie' },
   { key: 'account', label: 'Konto (Name)' },
+  { key: 'accountRef', label: 'Konto (IBAN / Kennung)' },
   { key: 'balance', label: 'Saldo nach Buchung' },
+  { key: 'transferFlag', label: 'Umbuchung (ja/nein)' },
+  { key: 'tags', label: 'Tags' },
   { key: 'note', label: 'Notiz' },
+  { key: 'extId', label: 'Buchungs-ID' },
+  { key: 'splitType', label: 'Split-Typ' },
 ];
 
 const PATTERNS = {
+  extId: [/^buchungs-id$/, /^transaktions-id$/, /^transaction id$/],
+  splitType: [/^split-typ$/],
+  transferFlag: [/^analyse-umbuchung$/, /^umbuchung$/],
+  categoryGroup: [/^analyse-hauptkategorie$/, /^hauptkategorie$/],
+  accountRef: [/^referenzkonto$/, /^iban auftragskonto$/, /^auftragskonto$/],
   balance: [/saldo nach buchung/, /^saldo$/, /^saldo ?\((€|eur)\)$/, /^kontostand$/],
   date: [/^buchungstag$/, /^buchungsdatum$/, /^buchung$/, /^datum$/, /^date$/, /buchungstag/, /buchungsdatum/, /^belegdatum$/, /datum/, /valuta|wertstellung/],
   sh: [/^soll\/haben$/, /^s\/h$/, /^soll-haben/, /^kennzeichen$/],
@@ -29,14 +41,17 @@ const PATTERNS = {
   credit: [/^haben( \(eur\)| in eur)?$/, /^eingang/, /^gutschrift/, /^einnahme/],
   amount: [/^betrag$/, /^betrag ?\((€|eur)\)$/, /^umsatz$/, /umsatz in eur/, /^betrag/, /^amount$/, /betrag/, /umsatz/],
   payeeIn: [/zahlungspflichtige/, /^auftraggeber$/],
-  payee: [/zahlungsempf/, /beguenstigter|begünstigter/, /auftraggeber ?\/ ?empf/, /name zahlungsbeteiligter/, /^empf(ä|ae|a)nger/, /^name$/, /gegenkonto ?name|gegenseite|^payee$|empfänger/],
+  payee: [/zahlungsempf/, /^beguenstigter|^begünstigter/, /auftraggeber ?\/ ?empf/, /name zahlungsbeteiligter/, /^empf(ä|ae|a)nger/, /^name$/, /gegenkonto ?name|gegenseite|^payee$|empfänger/],
   purpose: [/^verwendungszweck$/, /verwendungszweck/, /buchungsdetails/, /^beschreibung$/, /^zweck/, /^memo$|^description$|^text$/],
-  text: [/^buchungstext$/, /^vorgang$/, /^umsatztyp$/, /^umsatzart$/, /buchungsart/, /^art$/, /^transaktionstyp$/],
-  category: [/^kategorie$/, /^category$/, /^hauptkategorie$/],
-  account: [/^konto$/, /^kontoname$/, /^account$/],
+  text: [/^buchungstext$/, /^vorgang$/, /^umsatztyp$/, /^umsatzart$/, /^analyse-umsatzart$/, /buchungsart/, /^art$/, /^transaktionstyp$/],
+  category: [/^analyse-unterkategorie$/, /^unterkategorie$/, /^kategorie$/, /^category$/],
+  account: [/^name referenzkonto$/, /^konto$/, /^kontoname$/, /^account$/],
+  tags: [/^tags$/, /^tag$/, /^schlagworte$/],
   note: [/^notiz$/, /^bemerkung$/, /^kommentar$/],
 };
-const AMOUNT_EXCLUDE = /saldo|ursprung|auslagen|währung|waehrung|fremdw/;
+const AMOUNT_EXCLUDE = /saldo|ursprung|auslagen|währung|waehrung|fremdw|analyse/;
+const ORDER = ['extId', 'splitType', 'transferFlag', 'categoryGroup', 'accountRef', 'balance', 'date', 'sh', 'debit', 'credit', 'amount',
+  'payeeIn', 'payee', 'purpose', 'text', 'category', 'account', 'tags', 'note'];
 
 // ---------- Datei lesen ----------
 export async function readFile(file) {
@@ -104,20 +119,22 @@ export function guessMapping(header) {
   const h = header.map((c) => norm(c));
   const used = new Set();
   const map = {};
-  for (const key of ['balance', 'date', 'sh', 'debit', 'credit', 'amount', 'payeeIn', 'payee', 'purpose', 'text', 'category', 'account', 'note']) {
+  for (const key of ORDER) {
     for (const re of PATTERNS[key]) {
       const idx = h.findIndex((c, i) => c && !used.has(i) && re.test(c) && !(key === 'amount' && AMOUNT_EXCLUDE.test(c)));
       if (idx >= 0) { map[key] = idx; used.add(idx); break; }
     }
   }
-  // Nur ein Empfänger-Feld, das eigentlich "Auftraggeber" heißt → als allgemeines Gegenseite-Feld nutzen
   if (map.payee == null && map.payeeIn != null) { map.payee = map.payeeIn; delete map.payeeIn; }
-  // Soll/Haben-Kennzeichen ohne Betrag macht keinen Sinn
   if (map.sh != null && map.amount == null) delete map.sh;
   return map;
 }
 
 export const headerSignature = (header) => hash(header.map((c) => norm(c)).join('|'));
+export const isFinanzguru = (header) => {
+  const h = header.map((c) => norm(c));
+  return h.includes('analyse-hauptkategorie') && h.includes('buchungs-id') && h.includes('referenzkonto');
+};
 
 // Kontostand aus Kopfzeilen (z. B. DKB „Kontostand vom …“, ING „Saldo“)
 function metaBalance(rows, headerIdx) {
@@ -142,6 +159,8 @@ export function metaIban(rows, headerIdx) {
 }
 
 // ---------- Zeilen in Buchungen umwandeln ----------
+const YES = /^(ja|yes|true|wahr|x|1)$/i;
+
 export function buildItems(rows, headerIdx, map, { invert = false } = {}) {
   const items = [];
   const get = (r, k) => (map[k] != null && map[k] !== '' ? r[map[k]] : '');
@@ -172,13 +191,19 @@ export function buildItems(rows, headerIdx, map, { invert = false } = {}) {
       if (bt && !purpose) purpose = bt[1].trim();
     }
     const pending = r.some((c) => /^(umsatz )?vorgemerkt$|^offen$|^pending$/i.test(str(c))) || /^offen$/i.test(str(get(r, 'date')));
+    // Split-Buchungen (Finanzguru): das „Original“ steht zusätzlich zu seinen Teilen in der Datei → überspringen
+    const splitOriginal = /^original$/i.test(str(get(r, 'splitType')));
     items.push({
       row: i, date, amount, payee, purpose: purpose || (map.purpose == null ? text : ''), text,
-      category: str(get(r, 'category')), account: str(get(r, 'account')),
+      category: str(get(r, 'category')), categoryGroup: str(get(r, 'categoryGroup')),
+      account: str(get(r, 'account')), accountRef: str(get(r, 'accountRef')).replace(/\s+/g, ''),
       balance: map.balance != null ? parseMoney(get(r, 'balance')) : null,
+      transfer: YES.test(str(get(r, 'transferFlag'))),
+      tags: str(get(r, 'tags')).split(/[,;]/).map((s) => s.trim()).filter(Boolean),
       note: str(get(r, 'note')),
-      pending,
-      valid: !!date && amount != null && Number.isFinite(amount) && !pending,
+      extId: str(get(r, 'extId')),
+      pending, splitOriginal,
+      valid: !!date && amount != null && Number.isFinite(amount) && !pending && !splitOriginal,
     });
   }
   return items;
@@ -187,61 +212,178 @@ export function buildItems(rows, headerIdx, map, { invert = false } = {}) {
 export const dupKey = (accountId, date, amount, payee, purpose) =>
   `${accountId}|${date}|${amount}|${norm(`${payee} ${purpose}`).replace(/[^a-z0-9äöüß]/g, '').slice(0, 60)}`;
 
-// Duplikate: gleiche Buchung schon vorhanden. Mehrfach identische Zeilen (z. B. 2× gleicher Kaffee)
-// werden per Vorkommens-Zähler unterschieden.
+// ---------- Konten zuordnen ----------
+export function guessAccountType(name) {
+  const n = norm(name);
+  if (/paypal/.test(n)) return 'paypal';
+  if (/kredit|barclays|easybank|visa|mastercard|amex|card/.test(n)) return 'kredit';
+  if (/depot|etf|wertpapier|broker/.test(n)) return 'depot';
+  if (/extra|pocket|spar|tagesgeld|kaution|festgeld|rücklage|ruecklage/.test(n)) return 'spar';
+  if (/bar|cash|geldbörse|portemonnaie/.test(n)) return 'bar';
+  return 'giro';
+}
+
+const isIban = (s) => /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/i.test(s || '');
+
+// Liefert zu jeder Zeile die Konto-ID: über IBAN/Kennung, sonst Name, sonst Zielkonto.
+// create=false (Vorschau): unbekannte Konten bekommen eine Platzhalter-ID „_new:…“.
+export function accountResolver(targetId, { create = false, created = [] } = {}) {
+  const accs = store.all('accounts');
+  const byRef = new Map();
+  for (const a of accs) { if (a.iban) byRef.set(a.iban.toUpperCase(), a.id); if (a.ref) byRef.set(norm(a.ref), a.id); }
+  const byName = new Map(accs.map((a) => [norm(a.name), a.id]));
+  return (it) => {
+    const ref = it.accountRef || '';
+    const refKey = isIban(ref) ? ref.toUpperCase() : norm(ref);
+    if (ref && byRef.has(refKey)) return byRef.get(refKey);
+    if (it.account) {
+      if (byName.has(norm(it.account))) return byName.get(norm(it.account));
+      if (!create) return '_new:' + (refKey || norm(it.account));
+      const a = store.put('accounts', {
+        name: it.account, type: guessAccountType(it.account), bank: '',
+        iban: isIban(ref) ? ref.toUpperCase() : '', ref: isIban(ref) ? '' : ref,
+        balanceAnchor: 0, anchorDate: '',
+      });
+      created.push(a.id);
+      byName.set(norm(a.name), a.id);
+      if (ref) byRef.set(refKey, a.id);
+      return a.id;
+    }
+    return targetId;
+  };
+}
+
+// Duplikate: 1) gleiche Buchungs-ID, 2) gleicher Inhalt, 3) gleiches Konto+Datum+Betrag
+// (erkennt auch Buchungen, die vorher aus einer anderen Quelle, z. B. Bank-CSV, kamen).
+// Mehrfach identische Zeilen werden per Vorkommens-Zähler unterschieden.
 export function markDuplicates(items, resolveAccount) {
-  const existing = new Map();
+  const exact = new Map(), loose = new Map(), ext = new Set();
   for (const t of store.all('transactions')) {
     const k = t.hash || dupKey(t.accountId, t.date, t.amount, t.payee, t.purpose);
-    existing.set(k, (existing.get(k) || 0) + 1);
+    exact.set(k, (exact.get(k) || 0) + 1);
+    const lk = `${t.accountId}|${t.date}|${t.amount}`;
+    loose.set(lk, (loose.get(lk) || 0) + 1);
+    if (t.extId) ext.add(t.extId.replace(/^[a-z]+:/, '')); // gespeichert als „quelle:id“
   }
-  const seen = new Map();
+  const seenE = new Map(), seenL = new Map();
   for (const it of items) {
     it.dup = false;
     if (!it.valid) continue;
     const acc = resolveAccount(it);
+    it.accountId = acc;
     it.hash = dupKey(acc, it.date, it.amount, it.payee, it.purpose);
-    const n = (seen.get(it.hash) || 0) + 1;
-    seen.set(it.hash, n);
-    it.dup = n <= (existing.get(it.hash) || 0);
+    if (it.extId && ext.has(it.extId)) { it.dup = true; continue; }
+    const n = (seenE.get(it.hash) || 0) + 1;
+    seenE.set(it.hash, n);
+    const lk = `${acc}|${it.date}|${it.amount}`;
+    const nl = (seenL.get(lk) || 0) + 1;
+    seenL.set(lk, nl);
+    it.dup = n <= (exact.get(it.hash) || 0) || nl <= (loose.get(lk) || 0);
   }
   return items;
 }
 
-export function guessCategory(it, compiled, catByName) {
-  if (it.category) {
-    const c = catByName.get(norm(it.category));
-    if (c) return { categoryId: c.id, taxCategory: null, source: 'file' };
-  }
+// ---------- Kategorien zuordnen ----------
+const catKey = (group, name) => `${norm(group)}›${norm(name)}`;
+
+export function categoryFinder() {
+  const cats = store.all('categories');
+  const byGN = new Map(cats.map((c) => [catKey(c.group, c.name), c]));
+  const byN = new Map();
+  for (const c of cats) { const k = norm(c.name); byN.set(k, byN.has(k) ? null : c); } // nur eindeutige Namen
+  return (it) => {
+    if (!it.category) return null;
+    if (it.categoryGroup) return byGN.get(catKey(it.categoryGroup, it.category)) || null;
+    return byN.get(norm(it.category)) || null;
+  };
+}
+
+function guessCatType(group, name, items) {
+  if (/^einnahmen|^income|^einkommen/i.test(group)) return 'income';
+  if (/^sparen$|umbuchung|transfer/i.test(group)) return 'transfer';
+  if (/einnahme|gehalt|lohn|kindergeld|erstattung|ertr(ä|ae)ge|zinsen|dividende/i.test(name)) return 'income';
+  const sum = items.reduce((s, i) => s + (i.amount || 0), 0);
+  return sum > 0 ? 'income' : 'expense';
+}
+
+export function guessCategory(it, compiled, findCat) {
+  const c = findCat(it);
+  if (c) return { categoryId: c.id, taxCategory: null, source: 'file' };
+  if (it.category) return { categoryId: null, taxCategory: null, source: 'new', newName: it.categoryGroup ? `${it.categoryGroup} › ${it.category}` : it.category };
   const r = matchRule({ payee: it.payee, purpose: it.purpose, bookingText: it.text, amount: it.amount }, compiled);
   return r ? { categoryId: r.categoryId, taxCategory: r.taxCategory || null, source: 'rule' } : { categoryId: null, taxCategory: null, source: null };
 }
 
+// ---------- Aus der Historie Regeln lernen ----------
+// Empfänger, die fast immer in derselben Kategorie landen, bekommen eine Regel –
+// so werden künftige Bank-CSV-Importe genauso kategorisiert wie bisher.
+export function learnRulesFromHistory({ minCount = 3, minShare = 0.8, max = 400 } = {}) {
+  const cm = store.byId('categories');
+  const groups = new Map();
+  for (const t of store.all('transactions')) {
+    if (!t.categoryId || t.transfer) continue;
+    const p = norm(t.payee).replace(/\|/g, ' ').slice(0, 40);
+    if (p.length < 3) continue;
+    const g = groups.get(p) || { total: 0, cats: new Map(), inSum: 0, outSum: 0 };
+    g.total++;
+    g.cats.set(t.categoryId, (g.cats.get(t.categoryId) || 0) + 1);
+    if (t.amount >= 0) g.inSum++; else g.outSum++;
+    groups.set(p, g);
+  }
+  const existing = new Set(store.all('rules').map((r) => `${r.field}|${norm(r.match)}`));
+  const out = [];
+  for (const [p, g] of [...groups.entries()].sort((a, b) => b[1].total - a[1].total)) {
+    if (g.total < minCount || out.length >= max) continue;
+    const [catId, n] = [...g.cats.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (n / g.total < minShare || !cm.get(catId) || cm.get(catId).type === 'transfer') continue;
+    if (existing.has(`payee|${p}`)) continue;
+    out.push({ match: p, field: 'payee', sign: g.inSum === 0 ? 'out' : g.outSum === 0 ? 'in' : 'any', categoryId: catId, taxCategory: null, prio: 5, learned: true });
+  }
+  return store.putMany('rules', out).map((r) => r.id);
+}
+
+// Standardkategorien ohne Buchungen/Budgets entfernen (z. B. nach Übernahme der Finanzguru-Kategorien)
+export function removeUnusedDefaults() {
+  const used = new Set(store.all('transactions').map((t) => t.categoryId));
+  store.all('budgets').forEach((b) => used.add(b.categoryId));
+  const del = store.all('categories').filter((c) => c.id.startsWith('cat-') && !used.has(c.id)).map((c) => c.id);
+  const delSet = new Set(del);
+  store.removeMany('rules', store.all('rules').filter((r) => delSet.has(r.categoryId)).map((r) => r.id));
+  store.removeMany('categories', del);
+  return del;
+}
+
 // ---------- Import ausführen ----------
-export function commitImport(items, { accountId, newAccount, fileName, autoCat = true, rows, headerIdx, map }) {
-  const accounts = store.all('accounts');
-  const accByName = new Map(accounts.map((a) => [norm(a.name), a]));
-  let targetId = accountId;
-  if (!targetId && newAccount) targetId = store.put('accounts', { type: 'giro', balanceAnchor: 0, anchorDate: '', ...newAccount }).id;
-
-  // Konten aus einer Konto-Spalte (z. B. eigene Excel-Liste)
-  const rowAccount = (it) => {
-    if (!it.account) return targetId;
-    let a = accByName.get(norm(it.account));
-    if (!a) { a = store.put('accounts', { name: it.account, type: 'giro', balanceAnchor: 0, anchorDate: '' }); accByName.set(norm(a.name), a); }
-    return a.id;
-  };
-  markDuplicates(items, rowAccount);
-
-  // Kategorien aus Datei: fehlende anlegen
-  const catByName = new Map(store.all('categories').map((c) => [norm(c.name), c]));
-  if (map.category != null) {
-    const missing = [...new Set(items.filter((i) => i.valid && i.category && !catByName.has(norm(i.category))).map((i) => i.category))];
-    for (const name of missing) {
-      const sample = items.find((i) => i.category === name);
-      const c = store.put('categories', { name, group: 'Importiert', type: sample.amount >= 0 ? 'income' : 'expense', order: 800 });
-      catByName.set(norm(name), c);
+export function commitImport(items, {
+  accountId, newAccount, fileName, autoCat = true, rows, headerIdx, map,
+  learnRules = false, cleanupDefaults = false, format = 'csv',
+}) {
+  const created = { accounts: [], categories: [], rules: [], removedDefaults: [] };
+  let targetId = accountId || null;
+  const ensureTarget = () => {
+    if (!targetId && newAccount) {
+      targetId = store.put('accounts', { type: 'giro', balanceAnchor: 0, anchorDate: '', ...newAccount }).id;
+      created.accounts.push(targetId);
     }
+    return targetId;
+  };
+  const resolveRow = accountResolver(null, { create: true, created: created.accounts });
+  const resolver = (it) => resolveRow(it) || ensureTarget();
+  markDuplicates(items, resolver);
+
+  // Kategorien aus der Datei: fehlende anlegen (mit Gruppe, Art geschätzt)
+  let findCat = categoryFinder();
+  if (map.category != null) {
+    const missing = new Map();
+    for (const it of items) {
+      if (!it.valid || !it.category || findCat(it)) continue;
+      const k = catKey(it.categoryGroup, it.category);
+      if (!missing.has(k)) missing.set(k, { group: it.categoryGroup || 'Importiert', name: it.category, items: [] });
+      missing.get(k).items.push(it);
+    }
+    const recs = [...missing.values()].map((m, i) => ({ name: m.name, group: m.group, type: guessCatType(m.group, m.name, m.items), order: 600 + i }));
+    created.categories = store.putMany('categories', recs).map((c) => c.id);
+    findCat = categoryFinder();
   }
 
   const compiled = autoCat ? compileRules() : [];
@@ -251,43 +393,73 @@ export function commitImport(items, { accountId, newAccount, fileName, autoCat =
   for (const it of items) {
     if (!it.valid) { invalid++; continue; }
     if (it.dup) { dup++; continue; }
-    const g = autoCat || it.category ? guessCategory(it, compiled, catByName) : { categoryId: null, taxCategory: null };
+    const g = guessCategory(it, autoCat ? compiled : [], findCat);
     recs.push({
-      accountId: rowAccount(it), date: it.date, amount: it.amount,
+      accountId: it.accountId, date: it.date, amount: it.amount,
       payee: it.payee, purpose: it.purpose, bookingText: it.text !== it.purpose ? it.text : '',
-      categoryId: g.categoryId, taxCategory: g.taxCategory, note: it.note, tags: [],
-      hash: it.hash, importBatch: batchId, source: 'import', catManual: g.source === 'file',
+      categoryId: g.categoryId, taxCategory: g.taxCategory, note: it.note, tags: it.tags || [],
+      transfer: it.transfer || undefined, extId: it.extId ? `${format}:${it.extId}` : undefined,
+      hash: it.hash, importBatch: batchId, source: format === 'finanzguru' ? 'finanzguru' : 'import', catManual: g.source === 'file',
     });
   }
   store.putMany('transactions', recs);
 
-  // Kontostand übernehmen, falls die Datei ihn liefert
-  if (targetId) {
-    const acc = store.get('accounts', targetId);
-    let anchor = null;
-    const withBal = items.filter((i) => i.valid && i.balance != null);
-    if (withBal.length) {
-      const desc = withBal[0].date >= withBal[withBal.length - 1].date;
-      const newest = withBal.reduce((best, i) => (i.date > best.date || (!desc && i.date === best.date) ? i : best), withBal[0]);
-      anchor = { balance: newest.balance, date: newest.date };
-    } else {
-      const m = metaBalance(rows, headerIdx);
-      if (m) anchor = { balance: m.balance, date: m.date || items.filter((i) => i.valid).reduce((mx, i) => (i.date > mx ? i.date : mx), '') || todayISO() };
-    }
-    if (acc && anchor && anchor.date && (!acc.anchorDate || anchor.date >= acc.anchorDate)) {
-      store.put('accounts', { ...acc, balanceAnchor: anchor.balance, anchorDate: anchor.date });
-    }
+  // Kontostände übernehmen: je Konto die neueste Zeile mit Saldo
+  const withBal = new Map();
+  for (const it of items) {
+    if (!it.valid || it.balance == null || !it.accountId) continue;
+    if (!withBal.has(it.accountId)) withBal.set(it.accountId, []);
+    withBal.get(it.accountId).push(it);
   }
+  const anchors = new Map();
+  for (const [acc, list] of withBal) {
+    const desc = list[0].date >= list[list.length - 1].date;
+    const newest = list.reduce((best, i) => (i.date > best.date || (!desc && i.date === best.date) ? i : best), list[0]);
+    anchors.set(acc, { balance: newest.balance, date: newest.date });
+  }
+  if (!anchors.size && targetId) {
+    const m = metaBalance(rows, headerIdx);
+    if (m) anchors.set(targetId, { balance: m.balance, date: m.date || items.filter((i) => i.valid).reduce((mx, i) => (i.date > mx ? i.date : mx), '') || todayISO() });
+  }
+  for (const [accId, a] of anchors) {
+    const acc = store.get('accounts', accId);
+    if (acc && a.date && (!acc.anchorDate || a.date >= acc.anchorDate)) store.put('accounts', { ...acc, balanceAnchor: a.balance, anchorDate: a.date });
+  }
+
+  if (learnRules) created.rules = learnRulesFromHistory();
+  if (cleanupDefaults) created.removedDefaults = removeUnusedDefaults();
 
   if (recs.length) {
-    store.put('imports', { id: batchId, fileName, date: todayISO(), accountId: targetId || null, count: recs.length, dup, invalid });
+    store.put('imports', {
+      id: batchId, fileName, date: todayISO(), accountId: targetId || null, count: recs.length, dup, invalid,
+      accounts: [...new Set(recs.map((r) => r.accountId))].length, format, created,
+    });
   }
-  return { imported: recs.length, dup, invalid, batchId };
+  return { imported: recs.length, dup, invalid, batchId, accounts: created.accounts.length, categories: created.categories.length, rules: created.rules.length };
 }
 
+// Import rückgängig: Buchungen löschen, dabei angelegte Konten/Kategorien/Regeln entfernen
+// (sofern nicht inzwischen anders genutzt) und entfernte Standardkategorien zurückholen.
 export function undoImport(batchId) {
+  const imp = store.get('imports', batchId);
   const ids = store.all('transactions').filter((t) => t.importBatch === batchId).map((t) => t.id);
   store.removeMany('transactions', ids);
+  const c = imp?.created;
+  if (c) {
+    const rest = store.all('transactions');
+    const usedAcc = new Set(rest.map((t) => t.accountId));
+    const usedCat = new Set(rest.map((t) => t.categoryId));
+    store.removeMany('accounts', (c.accounts || []).filter((id) => !usedAcc.has(id)));
+    store.removeMany('rules', c.rules || []);
+    const delCats = (c.categories || []).filter((id) => !usedCat.has(id));
+    store.removeMany('rules', store.all('rules').filter((r) => delCats.includes(r.categoryId)).map((r) => r.id));
+    store.removeMany('categories', delCats);
+    if (c.removedDefaults?.length) {
+      const back = new Set(c.removedDefaults);
+      store.putMany('categories', DEFAULT_CATEGORIES.filter((d) => back.has(d.id)).map((d) => ({ ...d })));
+      store.putMany('rules', DEFAULT_RULES.filter((r) => back.has(r.categoryId)).map((r) => ({ ...r })));
+    }
+  }
   store.remove('imports', batchId);
   return ids.length;
 }

@@ -1,5 +1,5 @@
 import { store } from '../store.js';
-import { esc, money, fmtDate, todayISO, toCSV, download, debounce } from '../util.js';
+import { esc, money, fmtDate, todayISO, toCSV, download, debounce, norm } from '../util.js';
 import { icon } from '../icons.js';
 import { bindActions, rerender, toast, taxOptions } from '../ui.js';
 import { openTaxItemForm, openTxForm } from '../forms.js';
@@ -11,6 +11,22 @@ let year = String(new Date().getFullYear() - 1);
 
 // Kategorien, deren Buchungen oft steuerlich absetzbar sind
 const HINT_CATS = { 'cat-versicherung': 'so_vorsorge', 'cat-gesundheit': 'ag_krank', 'cat-geschenke': 'so_spenden', 'cat-bildung': 'wk_fortbildung' };
+
+// Vorschlag aus Kategorie-Namen (auch importierte, z. B. Finanzguru) oder Tag „Steuer“.
+// null = kein Hinweis, '' = Tag „Steuer“ ohne erkennbare Art
+function hintFor(t, cm) {
+  if (HINT_CATS[t.categoryId]) return HINT_CATS[t.categoryId];
+  const n = norm(cm.get(t.categoryId)?.name);
+  if (/riester|rürup|ruerup|altersvorsorge|basisrente/.test(n)) return 'so_rente';
+  if (/versicherung/.test(n) && !/hausrat|rechtsschutz|brillen/.test(n)) return 'so_vorsorge';
+  if (/apotheke|ärzt|aerzt|arzt|zahn|krankheit/.test(n)) return 'ag_krank';
+  if (/spende/.test(n)) return 'so_spenden';
+  if (/fortbildung|weiterbildung/.test(n)) return 'wk_fortbildung';
+  if (/kinderbetreuung|kita|kindergarten|hort/.test(n)) return 'so_kinder';
+  if (/steuerberat/.test(n)) return 'wk_sonstige';
+  if ((t.tags || []).some((g) => norm(g) === 'steuer')) return '';
+  return null;
+}
 
 export function taxData(y) {
   const txs = store.all('transactions').filter((t) => t.taxCategory && t.date.startsWith(y));
@@ -50,8 +66,16 @@ export function render(root) {
   for (const e of d.byCat.values()) { if (!groups.has(e.cat.group)) groups.set(e.cat.group, []); groups.get(e.cat.group).push(e); }
   const checklist = d.cfg.checklist || {};
   const checked = TAX_CHECKLIST.filter(([k]) => checklist[k]).length;
+  const cmap = store.byId('categories');
+  const hints = new Map(); // Vorschläge nur hier merken, nicht an den gespeicherten Buchungen
   const suggestions = store.all('transactions')
-    .filter((t) => t.date.startsWith(year) && !t.taxCategory && HINT_CATS[t.categoryId] && t.amount < 0)
+    .filter((t) => {
+      if (!t.date.startsWith(year) || t.taxCategory || t.amount >= 0 || t.transfer) return false;
+      const h = hintFor(t, cmap);
+      if (h === null) return false;
+      hints.set(t.id, h);
+      return true;
+    })
     .sort((a, b) => a.date.localeCompare(b.date));
 
   root.innerHTML = `
@@ -120,7 +144,7 @@ export function render(root) {
           <tr><td class="nowrap muted">${fmtDate(t.date)}</td>
             <td class="grow">${esc(t.payee || t.purpose)}<div class="tx-sub">${esc(t.purpose)}</div></td>
             <td class="num">${money(-t.amount)}</td>
-            <td><select data-assign="${t.id}" class="inline-select">${taxOptions(null, { none: `Zuordnen … (Vorschlag: ${taxCat(HINT_CATS[t.categoryId])?.short})` })}</select></td>
+            <td><select data-assign="${t.id}" class="inline-select">${taxOptions(null, { none: hints.get(t.id) ? `Zuordnen … (Vorschlag: ${taxCat(hints.get(t.id))?.short})` : 'Zuordnen … (Tag „Steuer“)' })}</select></td>
           </tr>`).join('')}</tbody></table></div>
         <p class="small muted">Auswählen ordnet die Buchung zu. Tipp: Regeln (Einstellungen) können das künftig automatisch erledigen.</p>
       </section>` : ''}

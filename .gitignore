@@ -5,3 +5,6 @@
 finanzen-backup-*.json
 finanzdaten*.json
 .claude/
+
+# Private Importdateien (Finanzguru, Bankexporte)
+import-daten/
