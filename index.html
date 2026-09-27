@@ -2,27 +2,50 @@
 <html lang="de">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <meta name="referrer" content="no-referrer">
-  <title>Finanzen</title>
-  <meta name="description" content="Private Finanzverwaltung – Konten, Budgets, Urlaubskasse, Steuer, Berichte">
-  <meta name="theme-color" content="#2a78d6">
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="css/app.css">
-  <script>
-    try { var t = localStorage.getItem('fv.theme'); if (t && t !== 'auto') document.documentElement.dataset.theme = t; } catch (e) {}
-  </script>
-  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <script type="module" src="js/app.js"></script>
+  <title>Finanzen – entfernt</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 16px/1.5 system-ui, "Segoe UI", sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; background: Canvas; color: CanvasText; }
+    main { max-width: 440px; padding: 24px; }
+    h1 { font-size: 22px; margin: 0 0 8px; }
+    li { margin: 4px 0; }
+    .ok { color: #0ca30c; } .warn { color: #b3261e; }
+  </style>
 </head>
 <body>
-  <div id="app">
-    <div class="lock"><p class="muted">Lade Finanzen …</p></div>
-  </div>
-  <div id="toasts" aria-live="polite"></div>
-  <noscript>Diese App benötigt JavaScript.</noscript>
+<main>
+  <h1>Diese App wurde entfernt</h1>
+  <p>Die lokalen Daten dieser App werden auf diesem Gerät gelöscht:</p>
+  <ul id="log"><li>läuft …</li></ul>
+  <p>Du kannst dieses Fenster danach schließen. Falls die App installiert war, kannst du sie jetzt auch deinstallieren.</p>
+</main>
+<script>
+  // Löscht NUR die Daten dieser App (andere Apps auf derselben Adresse, z. B. Mail-to-Drive, bleiben unberührt)
+  (async () => {
+    const out = [];
+    const ok = (t) => out.push('<li class="ok">✓ ' + t + '</li>');
+    const bad = (t) => out.push('<li class="warn">✗ ' + t + '</li>');
+    try {
+      await new Promise((res, rej) => { const r = indexedDB.deleteDatabase('finanzverwaltung'); r.onsuccess = res; r.onerror = () => rej(r.error); r.onblocked = res; });
+      ok('Gespeicherte Finanzdaten gelöscht');
+    } catch (e) { bad('Finanzdaten: ' + e); }
+    try {
+      let n = 0;
+      for (const k of Object.keys(localStorage)) if (k.startsWith('fv.')) { localStorage.removeItem(k); n++; }
+      ok('Einstellungen und Anmeldung gelöscht (' + n + ')');
+    } catch (e) { bad('Einstellungen: ' + e); }
+    try {
+      if ('caches' in window) for (const k of await caches.keys()) if (k.startsWith('finanzen-')) await caches.delete(k);
+      ok('Offline-Speicher gelöscht');
+    } catch (e) { bad('Offline-Speicher: ' + e); }
+    try {
+      if ('serviceWorker' in navigator) for (const r of await navigator.serviceWorker.getRegistrations()) if (r.scope.includes('/finanzen/')) await r.unregister();
+      ok('Hintergrunddienst abgemeldet');
+    } catch (e) { bad('Hintergrunddienst: ' + e); }
+    document.getElementById('log').innerHTML = out.join('');
+  })();
+</script>
 </body>
 </html>
