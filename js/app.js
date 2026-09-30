@@ -4,6 +4,7 @@ import * as Q from './quelle.js';
 import { alsExcel, alsCsv, herunterladen } from './export.js';
 import { chatStart, chatDaten, chatVergessen } from './chat.js';
 import { kontostaende, STATUS_TEXT } from './salden.js';
+import { steuerDaten, steuerZeigen, postenOptionen, steuerPosten, steuerZuordnen } from './steuer.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -532,7 +533,8 @@ function tabBuchungen(conds) {
         ['Vertrag', r.v], ['Tags', r.t], ['Notiz', r.n], ['Steuerkategorie (Buhl)', r.st]].filter(([, v]) => v);
       h += `<tr class="detail"><td colspan="5"><dl>${dd.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
         ${r.g ? `<button class="btn sm" data-alle="${esc(r.g)}">Alle Buchungen von „${esc(r.g.length > 40 ? r.g.slice(0, 40) + '…' : r.g)}“</button>` : ''}
-        <button class="btn sm" data-nurkat="${esc(r.kat)}">Nur ${esc(r.kat)}</button></td></tr>`;
+        <button class="btn sm" data-nurkat="${esc(r.kat)}">Nur ${esc(r.kat)}</button>
+        <label class="st-zuordnen klein">Steuer: <select data-steuer-i="${r.i}">${postenOptionen(steuerPosten(r), true)}</select></label></td></tr>`;
     }
   }
   h += '</tbody></table></div>';
@@ -687,6 +689,12 @@ function tabelle(conds) {
     if (b.dataset.tab === 'buchungen') b.innerHTML = `Buchungen<span class="n">${NUM.format(F.length)}</span>`;
   });
   const el = $('#tab-inhalt');
+  if (S.tab === 'steuer') {
+    steuerZeigen(el, { einJahr, toast, neuZeichnen: () => tabelle(conds) });
+    $('.dl').hidden = true;
+    return;
+  }
+  $('.dl').hidden = false;
   el.innerHTML = S.tab === 'uebersicht' ? tabUebersicht() : S.tab === 'konten' ? tabKonten() : S.tab === 'fix' ? tabFixkosten(conds) : tabBuchungen(conds);
   el.querySelectorAll('th[data-sort]').forEach((th) => th.onclick = () => {
     const k = th.dataset.sort;
@@ -697,6 +705,10 @@ function tabelle(conds) {
   });
   el.querySelectorAll('[data-alle]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); setze({ q: `"${b.dataset.alle}"` }); });
   el.querySelectorAll('[data-nurkat]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); setze({ kat: b.dataset.nurkat, ukat: '' }); });
+  el.querySelectorAll('[data-steuer-i]').forEach((s) => {
+    s.onclick = (e) => e.stopPropagation();
+    s.onchange = () => { steuerZuordnen(D.rows[+s.dataset.steuerI], s.value); toast('Für die Steuer gespeichert – zu sehen im Reiter „Steuer“.'); };
+  });
   $('#mehr')?.addEventListener('click', () => { limit += 500; tabelle(conds); });
   el.querySelectorAll('tr[data-zeile]').forEach((tr) => tr.onclick = () => {
     const k = tr.dataset.zeile;
@@ -1256,7 +1268,7 @@ function hashLesen() {
   if (/^\d{4}-\d{2}-\d{2}$/.test(p.get('stichtag') || '')) S.stichtag = p.get('stichtag');
   if (['aus', 'ein'].includes(p.get('art'))) S.art = p.get('art');
   S.umb = p.get('umb') === '1';
-  if (['uebersicht', 'konten', 'fix'].includes(p.get('tab'))) S.tab = p.get('tab');
+  if (['uebersicht', 'konten', 'fix', 'steuer'].includes(p.get('tab'))) S.tab = p.get('tab');
 }
 
 function standZeigen() {
@@ -1281,6 +1293,7 @@ function anzeigen(v) {
   quelle = v;
   D = aufbereiten(j);
   chatDaten(D);
+  steuerDaten(D).then(() => { if (S.tab === 'steuer') tabelle(parse(S.q)); });
   hashLesen();
   selectsFuellen();
   $('#start').hidden = true;
@@ -1402,6 +1415,7 @@ function events() {
   document.querySelectorAll('#f-art button').forEach((b) => b.onclick = () => setze({ art: b.dataset.v }));
   $('#f-reset').onclick = () => setze({ ...S0, tab: S.tab, sort: S.sort, dir: S.dir });
   $('#f-zurueck').onclick = zurueck;
+  if (!document.querySelector('#tabs [data-tab="steuer"]')) $('#tabs').insertAdjacentHTML('beforeend', '<button role="tab" data-tab="steuer">Steuer</button>');
   document.querySelectorAll('#tabs button').forEach((b) => b.onclick = () => { S.tab = b.dataset.tab; hashSchreiben(); tabelle(parse(S.q)); });
   $('#dl-xlsx').onclick = () => exportieren('xlsx');
   $('#dl-csv').onclick = () => exportieren('csv');

@@ -13,8 +13,19 @@ function loadXlsx() {
 
 // spalten: [{ titel, typ: 'text' | 'datum' | 'euro' | 'zahl', breite }]; zeilen: Arrays (Datum als 'YYYY-MM-DD', Euro als Zahl)
 export async function alsExcel(dateiname, blatt, spalten, zeilen) {
+  return alsExcelMappe(dateiname, [{ blatt, spalten, zeilen }]);
+}
+
+// Mehrere Tabellenblätter in einer Datei: blaetter = [{ blatt, spalten, zeilen }]
+export async function alsExcelMappe(dateiname, blaetter) {
   await loadXlsx();
   const X = window.XLSX;
+  const wb = X.utils.book_new();
+  for (const { blatt, spalten, zeilen } of blaetter) X.utils.book_append_sheet(wb, blattBauen(X, spalten, zeilen), blatt.slice(0, 31));
+  X.writeFile(wb, dateiname + '.xlsx', { compression: true });
+}
+
+function blattBauen(X, spalten, zeilen) {
   const aoa = [spalten.map((s) => s.titel), ...zeilen.map((z) => z.map((v, i) => {
     if (v === '' || v == null) return null;
     if (spalten[i].typ === 'datum') { const [y, m, d] = v.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d, 12)); }
@@ -30,9 +41,7 @@ export async function alsExcel(dateiname, blatt, spalten, zeilen) {
   ws['!cols'] = spalten.map((s) => ({ wch: s.breite || 14 }));
   ws['!autofilter'] = { ref: ws['!ref'] };
   ws['!freeze'] = { xSplit: 0, ySplit: 1 };
-  const wb = X.utils.book_new();
-  X.utils.book_append_sheet(wb, ws, blatt.slice(0, 31));
-  X.writeFile(wb, dateiname + '.xlsx', { compression: true });
+  return ws;
 }
 
 export function alsCsv(dateiname, spalten, zeilen) {

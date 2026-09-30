@@ -34,6 +34,9 @@ async function tx(mode, fn) {
 }
 export const cacheLesen = () => tx('readonly', (s) => s.get('aktuell')).catch(() => null);
 export const cacheSchreiben = (v) => tx('readwrite', (s) => s.put(v, 'aktuell'));
+// weitere Einstellungen/Entscheidungen auf dem Gerät (z. B. Steuer-Zuordnungen)
+export const kvLesen = (k) => tx('readonly', (s) => s.get(k)).catch(() => null);
+export const kvSchreiben = (k, v) => tx('readwrite', (s) => s.put(v, k));
 export async function geraetLeeren() {
   await tx('readwrite', (s) => s.clear()).catch(() => {});
   abmelden();

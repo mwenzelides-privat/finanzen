@@ -288,6 +288,53 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; backgrou
 .toast { position: fixed; left: 50%; bottom: max(20px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 50; background: var(--text); color: var(--bg);
   padding: 10px 16px; border-radius: 10px; font-size: 14px; box-shadow: 0 10px 30px -10px rgba(0, 0, 0, .5); max-width: calc(100vw - 32px); }
 
+/* ============ Steuer ============ */
+.st-kopf { display: grid; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.st-jahre { display: flex; flex-wrap: wrap; gap: 4px; }
+.st-jahre button { border: 1px solid var(--border-strong); background: var(--surface); border-radius: 7px; padding: 4px 12px; font-size: 13.5px; color: var(--text-2); }
+.st-jahre button.an { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.st-aktionen { display: flex; flex-wrap: wrap; gap: 6px; }
+.st-filter { flex-wrap: wrap; width: fit-content; }
+.st-karten { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; padding: 14px 16px; }
+.st-karte { display: grid; gap: 2px; text-align: left; border: 1px solid var(--border); background: var(--surface); border-radius: 12px; padding: 10px 12px; }
+.st-karte:hover { border-color: var(--accent); }
+.st-karte .l { font-size: 12.5px; color: var(--muted); }
+.st-karte b { font-size: 19px; font-weight: 650; }
+.st-liste { padding: 0 12px 10px; }
+.st-abschnitt { border-top: 1px solid var(--border-strong); }
+.st-abschnitt-kopf { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: none; text-align: left; padding: 12px 6px; font-size: 15.5px; font-weight: 650; }
+.st-abschnitt-kopf .name { flex: 1; min-width: 0; }
+.st-abschnitt-kopf small { font-weight: 400; font-size: 12.5px; }
+.st-abschnitt-kopf .pfeil { width: 16px; height: 16px; color: var(--muted); transition: transform .15s; flex: none; }
+.st-abschnitt.offen .pfeil { transform: rotate(90deg); }
+.st-info { color: var(--text-2); background: var(--accent-soft); border-radius: 8px; padding: 8px 12px; margin: 0 6px 8px; }
+.st-posten { margin: 4px 0 10px 12px; }
+.st-posten-kopf { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 6px; border-bottom: 1px solid var(--border); }
+.st-posten-kopf .betrag, .st-abschnitt-kopf .betrag { margin-left: auto; font-weight: 650; white-space: nowrap; }
+.st-zeile { display: grid; grid-template-columns: 84px minmax(0, 1fr) auto; gap: 12px; padding: 8px 6px; border-bottom: 1px solid var(--border); align-items: start; }
+.st-zeile.aus { opacity: .5; }
+.st-datum { color: var(--text-2); font-size: 13px; padding-top: 2px; }
+.st-text .titel { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-text .unter { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-hinweis, .st-notiz { font-size: 12.5px; margin-top: 3px; }
+.st-pruef-t { color: var(--aus-text); }
+.st-rechts { display: grid; justify-items: end; gap: 4px; }
+.st-rechts .betrag { font-weight: 600; white-space: nowrap; }
+.st-badge { font-size: 11.5px; padding: 1px 8px; border-radius: 99px; white-space: nowrap; }
+.st-ok { background: rgba(26, 158, 110, .14); color: var(--ein-text); }
+.st-vor { background: var(--accent-soft); color: var(--accent); }
+.st-pruef { background: rgba(224, 96, 46, .14); color: var(--aus-text); }
+.st-aus { background: var(--surface-2); color: var(--muted); }
+.st-knoepfe { display: flex; gap: 2px; align-items: center; }
+.st-knoepfe select { max-width: 190px; height: 28px; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); font-size: 12.5px; }
+.st-zuordnen { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; }
+.st-zuordnen select { max-width: 260px; height: 28px; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); }
+@media (max-width: 640px) {
+  .st-zeile { grid-template-columns: minmax(0, 1fr) auto; }
+  .st-datum { grid-column: 1 / -1; padding: 0; }
+  .st-knoepfe select { max-width: 130px; }
+}
+
 /* ============ Chat ============ */
 .chat-knopf { position: fixed; right: 20px; bottom: max(20px, env(safe-area-inset-bottom)); z-index: 30; display: inline-flex; align-items: center; gap: 8px;
   padding: 12px 18px; border-radius: 99px; border: 0; background: var(--accent); color: #fff; font-weight: 600; box-shadow: 0 10px 28px -8px rgba(42, 120, 214, .6); }
