@@ -122,7 +122,7 @@ function monatsSpanne(conds) {
 function selectsFuellen() {
   const opt = (v, t) => `<option value="${esc(v)}">${esc(t)}</option>`;
   $('#f-jahr').innerHTML = opt('', 'Alle Jahre') + [...D.jahre].reverse().map((y) => opt(y, y)).join('');
-  $('#jahre').innerHTML = `<button data-j="">Alle Jahre</button>` + [...D.jahre].reverse().map((y) => `<button data-j="${y}">${y}</button>`).join('');
+  $('#jahre').innerHTML = `<button data-j="">Alle</button>` + [...D.jahre].reverse().map((y) => `<button data-j="${y}">${y}</button>`).join('');
   $('#jahre').querySelectorAll('button').forEach((b) => b.onclick = () => setze({ jahr: b.dataset.j && S.jahr === b.dataset.j ? '' : b.dataset.j }));
   $('#f-monat').innerHTML = opt('', 'Alle Monate') + MONAT.map((m, i) => opt(i + 1, m)).join('');
   $('#f-konto').innerHTML = opt('', 'Alle Konten') + D.konten.map((k) => opt(k.name, k.name)).join('');
