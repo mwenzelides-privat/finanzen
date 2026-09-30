@@ -1086,11 +1086,13 @@ function standZeigen() {
   const j = D.j;
   $('#stand').textContent = `${NUM.format(D.rows.length)} Buchungen · ${dde(D.von)} – ${dde(D.bis)}`;
   const mail = Q.kontoEmail?.();
-  const herkunft = { drive: `aus Google Drive${mail ? ` (${mail})` : ''}`, datei: `aus der Datei ${quelle.name}`, lokal: 'lokale Testdaten' }[quelle.quelle] || '';
+  const herkunft = { drive: `aus Google Drive${mail ? ` (${mail})` : ''}`, pc: `aus der verknüpften Datei ${quelle.name} auf diesem PC`, datei: `aus der Datei ${quelle.name}`, lokal: 'lokale Testdaten' }[quelle.quelle] || '';
   const erstellt = j.erstellt ? `${dde(j.erstellt.slice(0, 10))}, ${j.erstellt.slice(11, 16)} Uhr` : '';
   $('#fuss').textContent = `Daten ${herkunft}, erstellt am ${erstellt}. Neue Daten: in „10 Finanzen“ aktualisieren.py starten, dann hier ↻.`;
   $('#menu-quelle').textContent = `Aktuell: ${NUM.format(D.rows.length)} Buchungen ${herkunft}, erstellt am ${erstellt}.`;
-  $('#btn-neu').hidden = quelle.quelle !== 'drive';
+  $('#btn-neu').hidden = !['drive', 'pc'].includes(quelle.quelle);
+  $('#btn-neu').title = quelle.quelle === 'pc' ? 'Neueste Daten aus der verknüpften Datei laden' : 'Neueste Daten aus Google Drive laden';
+  if ($('#m-pc-tipp')) $('#m-pc-tipp').hidden = !Q.pcMoeglich() || quelle.quelle === 'pc';
 }
 
 function anzeigen(v) {
@@ -1111,6 +1113,20 @@ function toast(t) {
   const el = $('#toast');
   el.textContent = t; el.hidden = false;
   clearTimeout(toastT); toastT = setTimeout(() => (el.hidden = true), 3800);
+}
+
+// Verknüpfte Datei auf diesem PC: beim Öffnen still prüfen, bei ↻ notfalls um Erlaubnis bitten
+async function pcHolen(interaktiv) {
+  const btn = $('#btn-neu');
+  btn.classList.add('dreht');
+  try {
+    const neu = await Q.pcLaden(quelle, interaktiv);
+    btn.classList.remove('hinweis');
+    if (neu) { anzeigen(neu); toast('Neue Daten geladen.'); } else if (interaktiv) toast('Die Daten sind aktuell.');
+  } catch (e) {
+    if (e.erlaubnis) { btn.classList.add('hinweis'); btn.title = 'Zugriff auf die Datei erlauben und neueste Daten laden'; }
+    else if (interaktiv) toast(e.message);
+  } finally { btn.classList.remove('dreht'); }
 }
 
 async function driveHolen(interaktiv) {
@@ -1185,7 +1201,15 @@ function events() {
   document.querySelectorAll('[data-bild]').forEach((b) => b.onclick = () => bildSpeichern(b.dataset.bild));
 
   $('#btn-menu').onclick = () => $('#dlg-menu').showModal();
-  $('#btn-neu').onclick = () => driveHolen(true).catch((e) => toast(e.message));
+  $('#btn-neu').onclick = () => (quelle?.quelle === 'pc' ? pcHolen(true) : driveHolen(true).catch((e) => toast(e.message)));
+  const pcKnopf = async (dialog) => {
+    try { anzeigen(await Q.pcVerknuepfen()); if (dialog) $('#dlg-menu').close(); toast('Datei verknüpft – die App lädt sie ab jetzt automatisch.'); }
+    catch (e) { if (e.name !== 'AbortError') (dialog ? toast : startZeigen)(e.message); }
+  };
+  for (const [id, dialog] of [['#m-pc', true], ['#start-pc', false]]) {
+    const b = $(id);
+    if (b) { b.onclick = () => pcKnopf(dialog); b.hidden = !Q.pcMoeglich(); }
+  }
   $('#m-drive').onclick = async () => {
     try { await Q.anmelden(); const ok = await driveHolen(false); if (ok) { $('#dlg-menu').close(); } } catch (e) { toast(e.message); }
   };
@@ -1227,6 +1251,7 @@ async function start() {
   if (v) {
     try { anzeigen(v); } catch (e) { return startZeigen(e.message); }
     if (v.quelle === 'drive') driveHolen(false).catch(() => {});
+    if (v.quelle === 'pc') pcHolen(false);
   } else startZeigen();
   if ('serviceWorker' in navigator && !LOKAL) navigator.serviceWorker.register('sw.js').catch(() => {});
 }

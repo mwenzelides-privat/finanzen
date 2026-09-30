@@ -68,6 +68,43 @@ export function dateiWaehlen() {
   });
 }
 
+// ---------- Datei auf diesem PC verknüpfen (Chrome/Edge am Computer)
+// Die App merkt sich die Datei (z. B. G:\Meine Ablage\10 Finanzen\Auswertung\Finanzen-Daten.json aus Google Drive
+// for Desktop) und liest sie bei jedem Öffnen neu – ohne Google-Anmeldung. Der Browser fragt einmal nach Erlaubnis;
+// mit „Bei jedem Besuch zulassen“ geht es danach ganz automatisch.
+export const pcMoeglich = () => 'showOpenFilePicker' in window;
+const handleLesen = () => tx('readonly', (s) => s.get('handle')).catch(() => null);
+export const pcVerknuepft = async () => !!(await handleLesen());
+
+async function pcLesen(h, aktuell) {
+  const f = await h.getFile();
+  const geaendert = new Date(f.lastModified).toISOString();
+  if (aktuell?.quelle === 'pc' && aktuell.geaendert === geaendert) return null;
+  const text = await f.text();
+  pruefen(text);
+  const v = { text, quelle: 'pc', name: f.name, geaendert, geladen: new Date().toISOString() };
+  await cacheSchreiben(v);
+  return v;
+}
+
+export async function pcVerknuepfen() {
+  const [h] = await window.showOpenFilePicker({ multiple: false, id: 'finanzen-daten', types: [{ description: 'Finanzen-Daten', accept: { 'application/json': ['.json'] } }] });
+  const v = await pcLesen(h, null);
+  await tx('readwrite', (s) => s.put(h, 'handle'));
+  return v;
+}
+
+// Neueste Fassung aus der verknüpften Datei. interaktiv = aus einem Klick (darf nach Erlaubnis fragen).
+// Liefert die neue Fassung, null (unverändert) oder wirft { erlaubnis: true }, wenn der Browser erst fragen muss.
+export async function pcLaden(aktuell, interaktiv) {
+  const h = await handleLesen();
+  if (!h) throw new Error('Keine Datei verknüpft.');
+  let p = await h.queryPermission({ mode: 'read' });
+  if (p !== 'granted' && interaktiv) p = await h.requestPermission({ mode: 'read' });
+  if (p !== 'granted') throw Object.assign(new Error('Bitte den Zugriff auf die Datei erlauben (↻ oben rechts).'), { erlaubnis: true });
+  return pcLesen(h, aktuell);
+}
+
 // ---------- Google Drive
 const tokenObj = () => { try { return JSON.parse(ls.get(K.token) || 'null'); } catch { return null; } };
 export const hatToken = () => { const t = tokenObj(); return !!t && t.exp > Date.now(); };

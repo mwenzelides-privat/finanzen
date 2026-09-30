@@ -20,7 +20,8 @@ Jede Ansicht hat ihre eigene Adresse, z. B. `#jahr=2025&kat=Wohnen`, und lässt 
 ## Datenschutz
 
 - Der Code liegt öffentlich auf GitHub Pages und enthält **keine Daten**.
-- Die Daten liest die App aus deinem Google Drive (Berechtigung `drive.readonly`, sie sucht nur nach `Finanzen-Daten.json`) oder aus einer Datei, die du auswählst. Die Kopie liegt nur im Browser des Geräts. Löschen: ⋮ → „Abmelden und Daten löschen“.
+- **Am PC (empfohlen):** Menü ⋮ → „Datei auf diesem PC verknüpfen“ → `G:\Meine Ablage Finanzen\Auswertung\Finanzen-Daten.json`. Die App liest die Datei dann bei jedem Öffnen selbst, ohne Google-Anmeldung (Browser-Abfrage einmal mit „Bei jedem Besuch zulassen“ bestätigen).
+- Sonst liest die App die Daten aus deinem Google Drive (Berechtigung `drive.readonly`, sie sucht nur nach `Finanzen-Daten.json`) oder aus einer Datei, die du auswählst. Die Kopie liegt nur im Browser des Geräts. Löschen: ⋮ → „Abmelden und Daten löschen“.
 - **Chat:** Er nutzt deinen eigenen Anthropic-API-Schlüssel ([console.anthropic.com](https://console.anthropic.com/settings/keys)). Der Schlüssel wird nur auf dem Gerät gespeichert. An Anthropic gehen die Frage und die Zwischenergebnisse, die die KI über Werkzeuge abruft (Summen, Gruppen, einzelne Buchungen), nicht die ganze Datei. Die Antworten werden als reiner Text angezeigt, ohne Bilder und Links.
 
 ## Aufbau

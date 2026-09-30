@@ -68,6 +68,7 @@ main { max-width: 1640px; margin: 0 auto; padding: 16px 16px 40px; }
 .icon-btn.sm { width: 30px; height: 30px; }
 .icon-btn.sm svg { width: 17px; height: 17px; }
 .icon-btn.dreht svg { animation: dreh 1s linear infinite; }
+.icon-btn.hinweis { color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-soft); }
 @keyframes dreh { to { transform: rotate(360deg); } }
 
 /* ============ Knöpfe ============ */

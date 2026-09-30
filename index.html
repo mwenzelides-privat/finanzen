@@ -35,7 +35,9 @@
       <div class="card start-card">
         <h1>Deine Finanzen laden</h1>
         <p class="muted">Das Dashboard liest die Datei <b>Finanzen-Daten.json</b> aus deinem Ordner <b>10 Finanzen/Auswertung</b>. Es verändert nichts und speichert die Daten nur auf diesem Gerät.</p>
-        <button class="btn primary" id="start-drive">Mit Google Drive verbinden</button>
+        <button class="btn primary" id="start-pc" hidden>Datei auf diesem PC verknüpfen (empfohlen)</button>
+        <p class="muted klein" style="margin:0">Am PC: <b>G:\Meine Ablage\10 Finanzen\Auswertung\Finanzen-Daten.json</b> auswählen. Danach lädt die App die Daten bei jedem Öffnen selbst – ohne Google-Anmeldung.</p>
+        <button class="btn" id="start-drive">Mit Google Drive verbinden (Handy)</button>
         <button class="btn" id="start-datei">Datei vom Computer öffnen</button>
         <p class="fehler" id="start-fehler" hidden></p>
       </div>
@@ -125,8 +127,10 @@
   <dialog id="dlg-menu" class="dlg">
     <h2>Datenquelle</h2>
     <p id="menu-quelle" class="muted"></p>
+    <p id="m-pc-tipp" class="klein" hidden>Tipp für den PC: <b>Datei verknüpfen</b> und <b>G:\Meine Ablage\10 Finanzen\Auswertung\Finanzen-Daten.json</b> wählen. Dann entfällt die Google-Anmeldung, und neue Daten erscheinen beim Öffnen automatisch.</p>
     <div class="menu-knoepfe">
-      <button class="btn primary" id="m-drive">Aus Google Drive laden</button>
+      <button class="btn primary" id="m-pc" hidden>Datei auf diesem PC verknüpfen</button>
+      <button class="btn" id="m-drive">Aus Google Drive laden</button>
       <button class="btn" id="m-datei">Datei öffnen …</button>
     </div>
     <h2>Darstellung</h2>
