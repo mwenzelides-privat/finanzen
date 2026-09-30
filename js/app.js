@@ -259,19 +259,33 @@ function kennzahlen(conds) {
   const quote = ein > 0 && gesamt ? Math.round((erg / ein) * 100) : null;
   const zr = F.length ? `${dde(F[0].d)} – ${dde(F[F.length - 1].d)}` : 'keine Treffer';
   const avg = (c) => (mon > 24 ? eur0((c / mon) * 12) : eur0(c / mon));
-  const kpi = (l, v, c, s, d = '') => `<div class="kpi"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div>${d}</div>`;
+  const kpi = (l, v, c, s, d = '', k = '', tip = '', an = false) => `<button class="kpi${an ? ' an' : ''}" data-kpi="${k}" title="${tip}"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div>${d}</button>`;
   const diffErg = () => {
     if (!V) return '';
     const d = erg - vs.erg;
     return `<div class="d ${cls(d)}" title="${V.label}: ${eur0(vs.erg)}">${d >= 0 ? '▲ +' : '▼ '}${eur0(d)} · ${V.label}: ${eur0(vs.erg)}</div>`;
   };
   $('#kpis').innerHTML = [
-    kpi('Einnahmen', eur0(ein), 'pos', mon > 1 ? `Ø ${avg(ein)} pro ${mon > 24 ? 'Jahr' : 'Monat'}` : '&nbsp;', proJahr ? jahresZeile(proJahr, 'ein', true) : veraenderung(ein, vs?.ein, true)),
-    kpi('Ausgaben', eur0(aus), 'neg', mon > 1 ? `Ø ${avg(aus)} pro ${mon > 24 ? 'Jahr' : 'Monat'}` : '&nbsp;', proJahr ? jahresZeile(proJahr, 'aus', false) : veraenderung(aus, vs?.aus, false)),
-    gesamt ? kpi(erg >= 0 ? 'Überschuss' : 'Fehlbetrag', eur0(erg), cls(erg), quote === null ? 'Einnahmen minus Ausgaben' : quote >= 0 ? `${quote} % der Einnahmen übrig` : `${-quote} % mehr ausgegeben als eingenommen`, proJahr ? jahresZeile(proJahr, 'erg', true, true) : diffErg())
-      : kpi('Summe der Treffer', eur0(erg), cls(erg), 'Einnahmen minus Ausgaben', proJahr ? jahresZeile(proJahr, 'erg', true, true) : diffErg()),
-    kpi('Buchungen', NUM.format(F.length), '', zr, proJahr ? jahresZeile(proJahr, 'n') : V ? `<div class="d muted">${V.label}: ${NUM.format(vs.n)}</div>` : ''),
+    kpi('Einnahmen', eur0(ein), 'pos', mon > 1 ? `Ø ${avg(ein)} pro ${mon > 24 ? 'Jahr' : 'Monat'}` : '&nbsp;', proJahr ? jahresZeile(proJahr, 'ein', true) : veraenderung(ein, vs?.ein, true),
+      'ein', S.art === 'ein' ? 'Klick: wieder alle Buchungen zeigen' : 'Klick: nur Einnahmen zeigen', S.art === 'ein'),
+    kpi('Ausgaben', eur0(aus), 'neg', mon > 1 ? `Ø ${avg(aus)} pro ${mon > 24 ? 'Jahr' : 'Monat'}` : '&nbsp;', proJahr ? jahresZeile(proJahr, 'aus', false) : veraenderung(aus, vs?.aus, false),
+      'aus', S.art === 'aus' ? 'Klick: wieder alle Buchungen zeigen' : 'Klick: nur Ausgaben zeigen', S.art === 'aus'),
+    gesamt ? kpi(erg >= 0 ? 'Überschuss' : 'Fehlbetrag', eur0(erg), cls(erg), quote === null ? 'Einnahmen minus Ausgaben' : quote >= 0 ? `${quote} % der Einnahmen übrig` : `${-quote} % mehr ausgegeben als eingenommen`, proJahr ? jahresZeile(proJahr, 'erg', true, true) : diffErg(),
+      'erg', 'Klick: Einnahmen und Ausgaben nach Kategorien', S.tab === 'uebersicht' && S.art === 'alle')
+      : kpi('Summe der Treffer', eur0(erg), cls(erg), 'Einnahmen minus Ausgaben', proJahr ? jahresZeile(proJahr, 'erg', true, true) : diffErg(), 'erg', 'Klick: nach Kategorien aufteilen', S.tab === 'uebersicht'),
+    kpi('Buchungen', NUM.format(F.length), '', zr, proJahr ? jahresZeile(proJahr, 'n') : V ? `<div class="d muted">${V.label}: ${NUM.format(vs.n)}</div>` : '',
+      'n', 'Klick: Liste der Buchungen', S.tab === 'buchungen' && S.art === 'alle'),
   ].join('');
+  $('#kpis').querySelectorAll('[data-kpi]').forEach((b) => b.onclick = () => kpiKlick(b.dataset.kpi));
+}
+
+// Klick auf eine Kennzahl: Einnahmen/Ausgaben filtern (nochmal klicken = aus), Überschuss → Kategorien, Buchungen → Liste
+function kpiKlick(k) {
+  const tabelleTab = ['buchungen', 'uebersicht'].includes(S.tab) ? S.tab : 'buchungen';
+  if (k === 'ein' || k === 'aus') setze({ art: S.art === k ? 'alle' : k, tab: tabelleTab });
+  else if (k === 'erg') setze({ art: 'alle', tab: 'uebersicht' });
+  else setze({ art: 'alle', tab: 'buchungen' });
+  $('#tabs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // ======================================================================= Grafiken
@@ -1360,9 +1374,16 @@ function hashSchreiben() {
   const h = p.toString();
   history.replaceState(null, '', h ? '#' + h : location.pathname + location.search);
 }
+let ersterStart = true;
 function hashLesen() {
   const p = new URLSearchParams(location.hash.slice(1));
   S = { ...S0 };
+  // Grundeinstellung beim Öffnen ohne Auswahl in der Adresse: das aktuelle Jahr (ohne Daten dafür: das letzte Jahr mit Daten)
+  if (ersterStart && D && ![...p.keys()].length) {
+    const jetzt = new Date().getFullYear();
+    S.jahr = String(D.rows.some((r) => r.y === jetzt) ? jetzt : +D.bis.slice(0, 4));
+  }
+  if (D) ersterStart = false;
   for (const k of ['q', 'jahr', 'monat', 'konto', 'kat', 'ukat']) if (p.get(k)) S[k] = p.get(k);
   if (/^\d{4}-\d{2}-\d{2}$/.test(p.get('stichtag') || '')) S.stichtag = p.get('stichtag');
   if (['aus', 'ein'].includes(p.get('art'))) S.art = p.get('art');

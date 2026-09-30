@@ -265,7 +265,9 @@ const STATUS = {
 export function steuerZeigen(el, c) {
   ctx = c;
   const jahre = [...new Set(D.rows.map((r) => r.y))].sort((a, b) => b - a).slice(0, 8);
-  if (!jahr) jahr = ctx.einJahr() || Math.min(jahre[0], +D.bis.slice(0, 4) - (D.bis.slice(5, 7) < '12' ? 1 : 0));
+  // Steuerjahr: das gewählte Jahr, solange es abgeschlossen ist – sonst das letzte volle Jahr (das laufende per Knopf)
+  const vollesJahr = +D.bis.slice(0, 4) - (D.bis.slice(5, 7) < '12' ? 1 : 0), ej = ctx.einJahr();
+  if (!jahr) jahr = ej && ej <= vollesJahr ? ej : Math.min(jahre[0], vollesJahr);
   const alle = einordnen(jahr);
   const zahl = (s) => alle.filter((x) => x.status === s).length;
   const zahlG = (s) => arbeitsGruppen(alle.filter((x) => x.status === s)).length;   // Entscheidungen (Gruppen)
