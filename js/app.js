@@ -3,6 +3,7 @@ import { norm, parse, matcher, highlightWords } from './suche.js';
 import * as Q from './quelle.js';
 import { alsExcel, alsCsv, herunterladen } from './export.js';
 import { chatStart, chatDaten, chatVergessen } from './chat.js';
+import { kontostaende, STATUS_TEXT } from './salden.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -20,7 +21,7 @@ const LOKAL = ['localhost', '127.0.0.1'].includes(location.hostname);
 
 let D = null;          // aufbereitete Daten
 let quelle = null;     // gespeicherte Fassung (Text + Herkunft)
-const S0 = { q: '', jahr: '', monat: '', konto: '', kat: '', ukat: '', art: 'alle', umb: false, tab: 'buchungen', sort: 'datum', dir: -1 };
+const S0 = { q: '', jahr: '', monat: '', konto: '', kat: '', ukat: '', art: 'alle', umb: false, tab: 'buchungen', sort: 'datum', dir: -1, stichtag: '' };
 let S = { ...S0 };
 let F = [];            // gefilterte Buchungen (nach Datum aufsteigend)
 let limit = 150;
@@ -51,6 +52,7 @@ function aufbereiten(j) {
     kats: K.filter(Boolean).sort((a, b) => a.localeCompare(b, 'de')),
     ukatZu, emp: [...emp.values()].sort((a, b) => b.n - a.n),
     kontoIdx: new Map(konten.map((k, i) => [k.name, i])),
+    proKonto: konten.map((_, i) => rows.filter((r) => r.k === i)),
   };
 }
 
@@ -461,30 +463,60 @@ function tabUebersicht() {
   return h;
 }
 
+// Stichtag: selbst gewählt, sonst Ende des gewählten Jahres/Monats, sonst der letzte Datenstand
+function stichtag() {
+  if (S.stichtag) return S.stichtag;
+  let d = D.bis;
+  if (S.jahr) d = S.monat ? new Date(Date.UTC(+S.jahr, +S.monat, 0)).toISOString().slice(0, 10) : `${S.jahr}-12-31`;
+  return d > D.bis ? D.bis : d;
+}
+
+// Je Konto: Buchungen/Einnahmen/Ausgaben im Filter und Kontostand am Stichtag
 function kontenDaten() {
-  const m = D.konten.map((k) => ({ k, n: 0, ein: 0, aus: 0 }));
+  const tag = stichtag();
+  const stand = kontostaende(D, tag);
+  const m = D.konten.map((k, i) => ({ k, n: 0, ein: 0, aus: 0, st: stand[i] }));
   for (const r of F) { const x = m[r.k]; x.n++; if (r.art === 'Einnahme') x.ein += r.c; else if (r.art === 'Ausgabe') x.aus += r.c; }
-  return m.filter((x) => x.n || !(S.q || S.jahr || S.monat || S.kat || S.ukat || S.konto));
+  const konto = S.konto ? D.kontoIdx.get(S.konto) : -1;
+  // Alle Konten, die es am Stichtag gab; ein geschlossenes Konto ohne Geld und ohne Buchungen im Filter fällt weg
+  return m.filter((x, i) => (konto === -1 || i === konto) && !['nicht_eroeffnet', 'geschlossen'].includes(x.st.status));
 }
 
 function tabKonten() {
-  const m = kontenDaten();
-  if (!m.length) return '<div class="leer">Keine Buchungen gefunden.</div>';
-  const saldo = m.reduce((s, x) => s + (x.k.saldo != null ? Math.round(x.k.saldo * 100) : 0), 0);
-  let h = `<div class="tab-scroll"><table class="t fix"><thead><tr><th class="erste">Konto</th><th class="r sp-m" style="width:95px">Buchungen</th><th class="r sp-m" style="width:118px">Einnahmen</th><th class="r sp-m" style="width:118px">Ausgaben</th>
-    <th class="r" style="width:125px">Kontostand</th><th class="sp-m" style="width:220px">Daten</th></tr></thead><tbody>`;
+  const tag = stichtag();
+  const alle = kontenDaten();
+  const unbekannt = alle.filter((x) => x.st.status === 'unbekannt');
+  const m = alle.filter((x) => x.st.status !== 'unbekannt');
+  const vj = +D.bis.slice(0, 4) - 1;
+  const monatsende = (() => { const d = new Date(Date.UTC(+D.bis.slice(0, 4), +D.bis.slice(5, 7) - 1, 0)); return d.toISOString().slice(0, 10); })();
+  const schnell = [[D.bis, 'Aktuell'], [monatsende, 'Ende Vormonat'], [`${vj}-12-31`, `31.12.${vj}`], [`${vj - 1}-12-31`, `31.12.${vj - 1}`]];
+  let h = `<div class="fix-kopf stichtag-kopf"><div class="st-zeile"><label class="st-label">Kontostände am
+      <input type="date" id="stichtag" value="${tag}" min="${D.von}" max="${D.bis}"></label>
+      ${schnell.map(([d, t]) => `<button class="btn sm${d === tag ? ' an' : ''}" data-st="${d}">${t}</button>`).join('')}</div>
+    <div class="muted klein">Stand am Ende des Tages, vom Bank-Kontostand zurückgerechnet.${S.stichtag ? '' : S.jahr ? ' Automatisch: Ende des gewählten Zeitraums.' : ''}
+      Einnahmen und Ausgaben beziehen sich auf die gewählten Filter.</div></div>`;
+  const ohneDaten = unbekannt.length ? `<div class="muted klein st-hinweis">Für diesen Tag noch ohne Daten: ${unbekannt.map((x) => `${esc(x.k.name)} (ab ${dde(x.k.von)})`).join(', ')}.</div>` : '';
+  if (!m.length) return h + '<div class="leer">Am Stichtag gab es keine passenden Konten.</div>' + ohneDaten;
+  const bekannt = m.filter((x) => x.st.c != null);
+  const saldo = bekannt.reduce((s, x) => s + x.st.c, 0);
+  const ohne = m.length - bekannt.length;
+  h += `<div class="tab-scroll"><table class="t fix"><thead><tr><th class="erste">Konto</th><th class="r sp-m" style="width:95px">Buchungen</th><th class="r sp-m" style="width:118px">Einnahmen</th><th class="r sp-m" style="width:118px">Ausgaben</th>
+    <th class="r" style="width:150px">Stand ${dde(tag)}</th><th class="sp-m" style="width:230px">Daten</th></tr></thead><tbody>`;
   for (const x of m) {
-    const k = x.k;
+    const k = x.k, st = x.st;
     const daten = k.vollstaendig ? `<span class="ok" title="Alle Buchungen seit Kontoeröffnung vorhanden – bewiesen mit dem Kontostand der Bank">✓ lückenlos</span> seit ${dde(k.von)}`
       : `ab ${dde(k.von)}${k.saldo == null ? ` bis ${dde(k.bis)}` : ''}`;
+    const zusatz = { geschaetzt: 'geschätzt', ungefaehr: `± ${eur(Math.round((st.abw || 0) * 100))}` }[st.status];
+    const wert = st.status === 'unbekannt' ? `<span class="muted" title="${STATUS_TEXT.unbekannt}">unbekannt</span><br><small class="muted">Daten erst ab ${dde(k.von)}</small>`
+      : st.status === 'unsicher' ? `<span class="muted" title="${STATUS_TEXT.unsicher}">nicht berechenbar</span><br><small class="muted">Stand heute: ${eur(Math.round(k.saldo * 100))}</small>`
+        : `${zusatz ? '≈ ' : ''}${eur(st.c)}${zusatz ? `<br><small class="muted" title="${STATUS_TEXT[st.status]}">${zusatz}</small>` : ''}`;
     h += `<tr class="klick" data-konto="${esc(k.name)}"><td class="erste">${esc(k.name)}</td><td class="r sp-m">${NUM.format(x.n)}</td>
       <td class="r pos sp-m">${x.ein ? eur0(x.ein) : '–'}</td><td class="r neg sp-m">${x.aus ? eur0(x.aus) : '–'}</td>
-      <td class="r">${k.saldo != null ? `${eur(k.saldo * 100)}<br><small class="muted">${dde(k.saldoAm)}</small>` : '<span class="muted">–</span>'}</td>
-      <td class="klein sp-m">${daten}</td></tr>`;
+      <td class="r ${st.c < 0 ? 'neg' : ''}"><b>${wert}</b></td><td class="klein sp-m">${daten}</td></tr>`;
   }
   h += `</tbody><tfoot><tr><td class="erste">Summe</td><td class="r sp-m">${NUM.format(m.reduce((s, x) => s + x.n, 0))}</td>
     <td class="r pos sp-m">${eur0(m.reduce((s, x) => s + x.ein, 0))}</td><td class="r neg sp-m">${eur0(m.reduce((s, x) => s + x.aus, 0))}</td>
-    <td class="r">${eur(saldo)}</td><td class="klein muted sp-m">ohne Depot</td></tr></tfoot></table></div>`;
+    <td class="r">${eur(saldo)}</td><td class="klein muted sp-m">ohne Depot${ohne ? `, ohne ${m.filter((x) => x.st.c == null).map((x) => esc(x.k.name)).join(', ')}` : ''}</td></tr></tfoot></table></div>${ohneDaten}`;
   return h;
 }
 
@@ -515,6 +547,8 @@ function tabelle(conds) {
   });
   $('#fix-beendet')?.addEventListener('change', (e) => { fixBeendete = e.target.checked; tabelle(conds); });
   el.querySelectorAll('tr[data-fix]').forEach((tr) => tr.onclick = () => setze({ q: `"${tr.dataset.fix}"`, tab: 'buchungen' }));
+  $('#stichtag')?.addEventListener('change', (e) => { const v = e.target.value; if (/^\d{4}-\d{2}-\d{2}$/.test(v)) setze({ stichtag: v }); });
+  el.querySelectorAll('[data-st]').forEach((b) => b.onclick = () => setze({ stichtag: b.dataset.st === D.bis && !S.jahr ? '' : b.dataset.st }));
   el.querySelectorAll('tr[data-konto]').forEach((tr) => tr.onclick = () => setze({ konto: S.konto === tr.dataset.konto ? '' : tr.dataset.konto, tab: 'buchungen' }));
 }
 
@@ -649,10 +683,12 @@ function tabelleExport() {
     return { name: dateiname('Fixkosten'), blatt: 'Fixkosten', spalten, zeilen };
   }
   if (S.tab === 'konten') {
+    const tag = stichtag();
     const spalten = [{ titel: 'Konto', typ: 'text', breite: 28 }, { titel: 'Buchungen', typ: 'zahl', breite: 11 }, { titel: 'Einnahmen', typ: 'euro' }, { titel: 'Ausgaben', typ: 'euro' },
-      { titel: 'Kontostand', typ: 'euro' }, { titel: 'Kontostand am', typ: 'datum' }, { titel: 'Daten ab', typ: 'datum' }, { titel: 'Daten bis', typ: 'datum' }, { titel: 'Lückenlos seit Eröffnung', typ: 'text', breite: 22 }];
-    const zeilen = kontenDaten().map((x) => [x.k.name, x.n, x.ein / 100, x.aus / 100, x.k.saldo ?? '', x.k.saldoAm || '', x.k.von, x.k.bis, x.k.vollstaendig ? 'ja' : 'nein']);
-    return { name: dateiname('Konten'), blatt: 'Konten', spalten, zeilen };
+      { titel: `Kontostand ${dde(tag)}`, typ: 'euro', breite: 18 }, { titel: 'Genauigkeit', typ: 'text', breite: 40 }, { titel: 'Daten ab', typ: 'datum' }, { titel: 'Daten bis', typ: 'datum' },
+      { titel: 'Lückenlos seit Eröffnung', typ: 'text', breite: 22 }];
+    const zeilen = kontenDaten().map((x) => [x.k.name, x.n, x.ein / 100, x.aus / 100, x.st.c == null ? '' : x.st.c / 100, STATUS_TEXT[x.st.status], x.k.von, x.k.bis, x.k.vollstaendig ? 'ja' : 'nein']);
+    return { name: dateiname(`Kontostände ${dde(tag)}`), blatt: 'Konten', spalten, zeilen };
   }
   const spalten = [{ titel: 'Datum', typ: 'datum', breite: 11 }, { titel: 'Konto', typ: 'text', breite: 20 }, { titel: 'Empfänger/Auftraggeber', typ: 'text', breite: 30 },
     { titel: 'Verwendungszweck', typ: 'text', breite: 50 }, { titel: 'Kategorie', typ: 'text', breite: 16 }, { titel: 'Unterkategorie', typ: 'text', breite: 20 },
@@ -723,7 +759,7 @@ function vorschlagNehmen(i) {
 // „Zurück“: frühere Filterzustände; beim Tippen zählt ein ganzes Suchwort als ein Schritt
 const schritte = [];
 let tippt = false;
-const ZUSTAND = ['q', 'jahr', 'monat', 'konto', 'kat', 'ukat', 'art', 'umb', 'tab'];
+const ZUSTAND = ['q', 'jahr', 'monat', 'konto', 'kat', 'ukat', 'art', 'umb', 'tab', 'stichtag'];
 const zustand = (x) => JSON.stringify(ZUSTAND.map((k) => x[k]));
 
 function setze(p, { tippen = false } = {}) {
@@ -760,7 +796,7 @@ function aktualisieren() {
 
 function hashSchreiben() {
   const p = new URLSearchParams();
-  for (const k of ['q', 'jahr', 'monat', 'konto', 'kat', 'ukat']) if (S[k]) p.set(k, S[k]);
+  for (const k of ['q', 'jahr', 'monat', 'konto', 'kat', 'ukat', 'stichtag']) if (S[k]) p.set(k, S[k]);
   if (S.art !== 'alle') p.set('art', S.art);
   if (S.umb) p.set('umb', '1');
   if (S.tab !== 'buchungen') p.set('tab', S.tab);
@@ -771,6 +807,7 @@ function hashLesen() {
   const p = new URLSearchParams(location.hash.slice(1));
   S = { ...S0 };
   for (const k of ['q', 'jahr', 'monat', 'konto', 'kat', 'ukat']) if (p.get(k)) S[k] = p.get(k);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(p.get('stichtag') || '')) S.stichtag = p.get('stichtag');
   if (['aus', 'ein'].includes(p.get('art'))) S.art = p.get('art');
   S.umb = p.get('umb') === '1';
   if (['uebersicht', 'konten', 'fix'].includes(p.get('tab'))) S.tab = p.get('tab');

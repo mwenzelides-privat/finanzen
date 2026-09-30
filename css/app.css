@@ -189,6 +189,11 @@ table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
 mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1px; }
 .fix-kopf { display: grid; gap: 4px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
 .fix-kopf .chk { padding: 4px 0 0; }
+.st-zeile { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.st-label { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; margin-right: 6px; }
+.st-label input { height: 34px; padding: 0 8px; border-radius: 9px; border: 1px solid var(--accent); background: var(--surface); font-weight: 600; }
+.st-hinweis { padding: 10px 16px 14px; }
+.st-zeile .btn.an { background: var(--accent); border-color: var(--accent); color: #fff; }
 .t tr.beendet td { opacity: .55; }
 .t th.vj, .t td.vj { border-left: 1px solid var(--border-strong); }
 .mehr { display: flex; justify-content: center; gap: 12px; align-items: center; padding: 14px; color: var(--muted); font-size: 13px; }

@@ -3,6 +3,7 @@
 // und sieht nur deren Ergebnisse (Summen, Gruppen, einzelne Buchungen).
 // Zugang: eigener API-Schlüssel von Anthropic, nur auf diesem Gerät gespeichert.
 import { parse, matcher } from './suche.js';
+import { kontostaende, STATUS_TEXT } from './salden.js';
 
 const API = 'https://api.anthropic.com/v1/messages';
 const MODELLE = [
@@ -136,26 +137,13 @@ function buchungenAuswerten(a) {
 
 function kontostaendeAm({ datum }) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(datum || '')) return { fehler: 'datum als YYYY-MM-DD angeben' };
-  const out = [];
-  let summe = 0;
-  D.konten.forEach((k, i) => {
-    const rs = D.rows.filter((r) => r.k === i);
-    let c, sicher;
-    if (k.saldo != null) {
-      const s = Math.round(k.saldo * 100);
-      if (datum <= k.saldoAm) c = s - rs.filter((r) => r.d > datum && r.d <= k.saldoAm).reduce((x, r) => x + r.c, 0);
-      else c = s + rs.filter((r) => r.d > k.saldoAm && r.d <= datum).reduce((x, r) => x + r.c, 0);
-      sicher = datum < k.von ? (k.vollstaendig ? 'Konto noch nicht eröffnet' : `vor der ersten Buchung (${k.von}); Wert = Stand vor der ersten Buchung`)
-        : 'exakt: vom heutigen Bank-Kontostand zurückgerechnet';
-    } else {
-      c = rs.filter((r) => r.d <= datum).reduce((x, r) => x + r.c, 0);
-      sicher = `geschätzt: kein Bank-Kontostand bekannt, ab 0 € aufsummiert (Daten ${k.von} bis ${k.bis})`;
-    }
-    if (datum < k.von && k.vollstaendig) return;
-    summe += c;
-    out.push({ konto: k.name, kontostand_euro: e2(c), sicherheit: sicher });
-  });
-  return { datum, konten: out, summe_euro: e2(summe), hinweis: 'Depot ist nicht enthalten.' };
+  const liste = kontostaende(D, datum).filter((x) => !['nicht_eroeffnet', 'geschlossen'].includes(x.status));
+  const out = liste.map((x) => ({
+    konto: x.k.name, kontostand_euro: x.c == null ? null : e2(x.c),
+    sicherheit: STATUS_TEXT[x.status] + (x.status === 'unbekannt' ? ` (Daten ab ${x.k.von})` : x.status === 'ungefaehr' ? ` (bis zu ${EUR.format(x.abw)} Abweichung)` : ''),
+  }));
+  const summe = liste.reduce((s, x) => s + (x.c ?? 0), 0);
+  return { datum, konten: out, summe_euro: e2(summe), hinweis: 'Stand am Ende des Tages. Depot ist nicht enthalten. Konten ohne Wert (unbekannt, nicht berechenbar) sind nicht in der Summe.' };
 }
 
 function fixkostenListe({ auch_beendete } = {}) {
