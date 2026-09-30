@@ -87,6 +87,12 @@ async function pcLesen(h, aktuell) {
   return v;
 }
 
+// Zustand der Leseerlaubnis: 'granted' | 'prompt' | 'denied' | null (keine Datei verknüpft)
+export async function pcErlaubnis() {
+  const h = await handleLesen();
+  return h ? h.queryPermission({ mode: 'read' }) : null;
+}
+
 export async function pcVerknuepfen() {
   const [h] = await window.showOpenFilePicker({ multiple: false, id: 'finanzen-daten', types: [{ description: 'Finanzen-Daten', accept: { 'application/json': ['.json'] } }] });
   const v = await pcLesen(h, null);

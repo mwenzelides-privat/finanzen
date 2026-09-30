@@ -1138,6 +1138,10 @@ function standZeigen() {
   $('#btn-neu').hidden = !['drive', 'pc'].includes(quelle.quelle);
   $('#btn-neu').title = quelle.quelle === 'pc' ? 'Neueste Daten aus der verknüpften Datei laden' : 'Neueste Daten aus Google Drive laden';
   if ($('#m-pc-tipp')) $('#m-pc-tipp').hidden = !Q.pcMoeglich() || quelle.quelle === 'pc';
+  if (quelle.quelle === 'pc') Q.pcErlaubnis?.().then((z) => {
+    const t = { granted: 'Zugriff dauerhaft erlaubt – die App lädt neue Daten beim Öffnen automatisch.', prompt: 'Der Browser fragt beim Öffnen nach Erlaubnis („Bei jedem Besuch zulassen“ wählen).', denied: 'Zugriff wurde verweigert – Datei neu verknüpfen.' }[z];
+    if (t) $('#menu-quelle').textContent += ' ' + t;
+  }).catch(() => {});
 }
 
 function anzeigen(v) {
@@ -1161,15 +1165,30 @@ function toast(t) {
 }
 
 // Verknüpfte Datei auf diesem PC: beim Öffnen still prüfen, bei ↻ notfalls um Erlaubnis bitten
+// Hinweisbalken oben: Der Browser möchte beim neuen Öffnen einmal bestätigt haben, dass die App die Datei lesen darf
+function erlaubnisBalken(an) {
+  let b = $('#erlaubnis');
+  if (!an) { b?.remove(); return; }
+  if (b) return;
+  b = document.createElement('div');
+  b.id = 'erlaubnis'; b.className = 'balken';
+  b.innerHTML = `<div><b>Neueste Daten aus deiner verknüpften Datei laden?</b>
+    <div class="klein">Ein Klick genügt. Der Browser fragt dann nach Erlaubnis – wähle <b>„Bei jedem Besuch zulassen“</b>, dann lädt die App künftig beim Öffnen automatisch und dieser Hinweis kommt nicht wieder.</div></div>
+    <button class="btn primary">Daten laden</button>`;
+  b.querySelector('button').onclick = () => pcHolen(true);
+  $('#dash').prepend(b);
+}
+
 async function pcHolen(interaktiv) {
   const btn = $('#btn-neu');
   btn.classList.add('dreht');
   try {
     const neu = await Q.pcLaden(quelle, interaktiv);
     btn.classList.remove('hinweis');
+    erlaubnisBalken(false);
     if (neu) { anzeigen(neu); toast('Neue Daten geladen.'); } else if (interaktiv) toast('Die Daten sind aktuell.');
   } catch (e) {
-    if (e.erlaubnis) { btn.classList.add('hinweis'); btn.title = 'Zugriff auf die Datei erlauben und neueste Daten laden'; }
+    if (e.erlaubnis) { btn.classList.add('hinweis'); btn.title = 'Zugriff auf die Datei erlauben und neueste Daten laden'; erlaubnisBalken(true); }
     else if (interaktiv) toast(e.message);
   } finally { btn.classList.remove('dreht'); }
 }
@@ -1196,6 +1215,17 @@ function startZeigen(fehler) {
   $('#btn-neu').hidden = true;
   const f = $('#start-fehler');
   f.hidden = !fehler; f.textContent = fehler || '';
+  // Hilfe für den Fall, dass der Browser beim Schließen alle Websitedaten löscht (dann erscheint diese Seite jedes Mal)
+  if (!$('#start-hilfe')) {
+    const d = document.createElement('details');
+    d.id = 'start-hilfe'; d.className = 'start-hilfe';
+    d.innerHTML = `<summary>Siehst du diese Seite bei jedem Öffnen?</summary>
+      <p>Dann löscht dein Browser beim Schließen die gespeicherten Websitedaten (auf Firmenrechnern oft so eingestellt, auch im InPrivate- bzw. Inkognito-Fenster). Die App vergisst dann Verknüpfung, Daten und Anmeldung. Abhilfe: die App als Ausnahme eintragen.</p>
+      <p><b>Edge:</b> in die Adresszeile <code>edge://settings/content/cookies</code> eingeben → bei „Zulassen“ auf „Hinzufügen“ → <code>mwenzelides-privat.github.io</code>. Steht die Seite unter „Cookies beim Schließen löschen“, dort entfernen.</p>
+      <p><b>Chrome:</b> <code>chrome://settings/content/siteData</code> → bei „Dürfen immer Daten auf deinem Gerät speichern“ (sinngemäß) auf „Hinzufügen“ → <code>mwenzelides-privat.github.io</code>.</p>
+      <p class="muted">Lässt die IT-Vorgabe keine Ausnahme zu, bleibt nur das erneute Verknüpfen oder die App auf dem Handy.</p>`;
+    $('.start-card').append(d);
+  }
 }
 
 function themeSetzen(t) {

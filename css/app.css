@@ -87,6 +87,13 @@ main { max-width: 1640px; margin: 0 auto; padding: 16px 16px 40px; }
 .start-card { max-width: 440px; padding: 28px; display: grid; gap: 12px; }
 .start-card p { margin: 0 0 6px; }
 .fehler { color: var(--aus-text); margin: 0; }
+.start-hilfe { font-size: 13.5px; color: var(--text-2); border-top: 1px solid var(--border); padding-top: 10px; }
+.start-hilfe summary { cursor: pointer; color: var(--accent); }
+.start-hilfe p { margin: 8px 0 0; }
+.balken { display: flex; align-items: center; gap: 14px; justify-content: space-between; margin-bottom: 12px; padding: 12px 16px; border-radius: var(--radius);
+  background: var(--accent-soft); border: 1px solid var(--accent); }
+.balken .klein { color: var(--text-2); margin-top: 2px; }
+@media (max-width: 640px) { .balken { flex-direction: column; align-items: stretch; } }
 
 /* ============ Suche ============ */
 .suche { position: relative; }
