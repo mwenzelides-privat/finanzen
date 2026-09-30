@@ -55,7 +55,7 @@ h2 { font-size: 15px; font-weight: 600; margin: 0; }
 .muted { color: var(--muted); }
 [hidden] { display: none !important; }
 svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-main { max-width: 1240px; margin: 0 auto; padding: 16px 16px 40px; }
+main { max-width: 1640px; margin: 0 auto; padding: 16px 16px 40px; }
 
 /* ============ Kopfzeile ============ */
 .top { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 10px; padding: 10px 16px; padding-top: max(10px, env(safe-area-inset-top));
@@ -150,7 +150,16 @@ main { max-width: 1240px; margin: 0 auto; padding: 16px 16px 40px; }
 .dl { display: flex; gap: 6px; }
 
 /* ============ Tabellen ============ */
-.tab-scroll { overflow-x: auto; }
+.tab-scroll { overflow: hidden; }
+table.t.fix { table-layout: fixed; }
+.t.fix th, .t.fix td { overflow: hidden; text-overflow: ellipsis; }
+.t.fix .wer { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t.fix .erste { white-space: nowrap; }
+.t.pivot .erste { white-space: normal; word-break: break-word; }
+.t.pivot td, .t.pivot th { padding-left: 4px; padding-right: 6px; white-space: nowrap; }
+.t.pivot .erste { padding-left: 10px; }
+.t .fett { font-weight: 650; }
+.nur-m { display: none; }
 table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
 .t th { text-align: left; font-weight: 600; font-size: 12.5px; color: var(--muted); padding: 9px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; background: var(--surface); position: sticky; top: 0; }
 .t th.sort { cursor: pointer; user-select: none; }
@@ -228,8 +237,8 @@ body.chat-offen .chat-knopf { display: none; }
 .msg .md p { margin: 0 0 8px; }
 .msg .md h1, .msg .md h2, .msg .md h3 { font-size: 15px; margin: 12px 0 6px; }
 .msg .md ul, .msg .md ol { margin: 0 0 8px; padding-left: 20px; }
-.msg .md table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 6px 0 10px; display: block; overflow-x: auto; }
-.msg .md th, .msg .md td { border-bottom: 1px solid var(--border); padding: 5px 8px; text-align: left; white-space: nowrap; }
+.msg .md table { border-collapse: collapse; width: 100%; font-size: 12.5px; margin: 6px 0 10px; }
+.msg .md th, .msg .md td { border-bottom: 1px solid var(--border); padding: 4px 6px; text-align: left; word-break: break-word; }
 .msg .md th { color: var(--muted); font-weight: 600; }
 .msg .md code { font-size: 12.5px; }
 .werkzeug { font-size: 12px; color: var(--muted); margin: 2px 0 6px; }
@@ -266,9 +275,12 @@ body.chat-offen .chat-knopf { display: none; }
   .filter select { flex: 1 1 calc(50% - 8px); max-width: none; }
   .kpi .v { font-size: 20px; }
   .chart { height: 240px; }
-  .t .konto-sp, .t .kat-sp { display: none; }
+  .t .konto-sp, .t .kat-sp, .t .sp-m { display: none; }
+  .nur-m { display: inline; }
   .t .datum { width: auto; font-size: 13px; }
-  .tabs button { padding: 7px 8px; font-size: 14px; }
+  .tabs { flex: 1 1 100%; flex-wrap: wrap; }
+  .tabs button { padding: 6px 8px; font-size: 14px; }
+  .tabs .n { display: none; }
   .chat-knopf span { display: none; }
   .chat-knopf { padding: 14px; }
 }

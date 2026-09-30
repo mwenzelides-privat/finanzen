@@ -365,9 +365,9 @@ function tabBuchungen(conds) {
   const mk = (s) => (re ? esc(s).replace(re, '<mark>$1</mark>') : esc(s));
   const pf = (k) => (S.sort === k ? `<span class="pfeil">${S.dir < 0 ? '↓' : '↑'}</span>` : '');
   const kn = (r) => D.konten[r.k].name;
-  let h = `<div class="tab-scroll"><table class="t"><thead><tr>
-    <th class="sort" data-sort="datum">Datum ${pf('datum')}</th><th class="sort" data-sort="wer">Empfänger / Zweck ${pf('wer')}</th>
-    <th class="kat-sp">Kategorie</th><th class="konto-sp">Konto</th><th class="sort r" data-sort="betrag">Betrag ${pf('betrag')}</th></tr></thead><tbody>`;
+  let h = `<div class="tab-scroll"><table class="t fix"><thead><tr>
+    <th class="sort" data-sort="datum" style="width:96px">Datum ${pf('datum')}</th><th class="sort" data-sort="wer">Empfänger / Zweck ${pf('wer')}</th>
+    <th class="kat-sp" style="width:190px">Kategorie</th><th class="konto-sp" style="width:180px">Konto</th><th class="sort r" data-sort="betrag" style="width:118px">Betrag ${pf('betrag')}</th></tr></thead><tbody>`;
   for (const r of rows.slice(0, limit)) {
     const auf = offen.has(r.i);
     h += `<tr class="klick${auf ? ' offen' : ''}" data-i="${r.i}"><td class="datum">${dde(r.d)}</td>
@@ -388,12 +388,21 @@ function tabBuchungen(conds) {
   return h;
 }
 
-function pivotDaten() {
+// maxSpalten: passen nicht alle Jahre (Monate) auf den Bildschirm, werden die ältesten zu einer Spalte zusammengefasst
+function pivotDaten(maxSpalten = Infinity) {
   const jahr = proMonat(), unter = !!S.kat;
   let cols;
   if (jahr) cols = MON.map((_, i) => i + 1);
   else { cols = []; const a = F.length ? F[0].y : D.jahre[0], b = F.length ? F[F.length - 1].y : a; for (let y = a; y <= b; y++) cols.push(y); }
+  const anzahl = cols.length;
   const pos = new Map(cols.map((c, i) => [c, i]));
+  if (cols.length > maxSpalten) {
+    const k = cols.length - Math.max(1, maxSpalten - 1);
+    const zus = cols.slice(0, k);
+    zus.forEach((c) => pos.set(c, 0));
+    cols.slice(k).forEach((c, i) => pos.set(c, i + 1));
+    cols = [jahr ? `${MON[zus[0] - 1]}–${MON[zus[zus.length - 1] - 1]}` : `bis ${zus[zus.length - 1]}`, ...cols.slice(k)];
+  }
   const m = new Map();
   for (const r of F) {
     const k = unter ? r.ukat || '(ohne Unterkategorie)' : r.kat;
@@ -405,7 +414,7 @@ function pivotDaten() {
   const order = (k) => (k === 'Einnahmen' ? 0 : k === 'Sparen' ? 2 : k === 'Umbuchung' ? 3 : 1);
   const rows = [...m.values()].sort((a, b) => order(a.key) - order(b.key) || a.sum - b.sum);
   const sums = cols.map((_, i) => rows.reduce((s, r) => s + r.v[i], 0));
-  const label = (c) => (jahr ? MON[c - 1] : String(c));
+  const label = (c) => (typeof c === 'string' ? c : jahr ? MON[c - 1] : String(c));
   // Vorjahr (gleicher Zeitraum) je Zeile, nur in der Monatsansicht eines Jahres
   const vj = jahr && V ? new Map() : null;
   if (vj) {
@@ -413,24 +422,42 @@ function pivotDaten() {
     for (const k of vj.keys()) if (!m.has(k)) rows.push({ key: k, v: cols.map(() => 0), sum: 0 });
     rows.sort((a, b) => order(a.key) - order(b.key) || a.sum - b.sum);
   }
-  return { jahr, unter, cols, label, rows, sums, vj, vjTotal: vj ? [...vj.values()].reduce((a, b) => a + b, 0) : 0, total: rows.reduce((s, r) => s + r.sum, 0) };
+  return { jahr, unter, cols, label, rows, sums, vj, anzahl, vjTotal: vj ? [...vj.values()].reduce((a, b) => a + b, 0) : 0, total: rows.reduce((s, r) => s + r.sum, 0) };
 }
 
+// Passt immer in die Breite: erst normale Beträge, sonst in Tsd. €, sonst ältere Spalten zusammengefasst.
+// Auf dem Handy nur die Summe als Zusatzspalte (Ø und Vorjahr stehen im Excel-Download).
 function tabUebersicht() {
-  const p = pivotDaten();
+  const breite = $('#tab-inhalt').clientWidth || 1200;
+  const schmal = breite < 700;
+  const erste = schmal ? 104 : 170;
+  let p = pivotDaten();
   if (!p.rows.length) return '<div class="leer">Keine Buchungen gefunden.</div>';
-  const n = p.cols.length;
-  const z = (c) => (c ? `<td class="r ${cls(c)}">${eur0(c)}</td>` : '<td class="r muted">–</td>');
-  let h = `<div class="tab-scroll"><table class="t klein"><thead><tr><th class="erste">${p.unter ? 'Unterkategorie' : 'Kategorie'}</th>
-    ${p.cols.map((c) => `<th class="r sort" data-spalte="${c}" title="${p.jahr ? 'Monat' : 'Jahr'} filtern">${p.label(c)}</th>`).join('')}
-    <th class="r">Summe</th><th class="r" title="Durchschnitt je ${p.jahr ? 'Monat' : 'Jahr'}">Ø ${p.jahr ? 'Monat' : 'Jahr'}</th>
-    ${p.vj ? `<th class="r vj" title="Gleicher Zeitraum ein Jahr früher">${esc(V.label)}</th><th class="r" title="Veränderung gegenüber ${esc(V.label)}">Veränderung</th>` : ''}</tr></thead><tbody>`;
-  const vjZellen = (jetzt, vorher) => (p.vj ? `<td class="r vj">${vorher ? eur0(vorher) : '–'}</td><td class="r ${cls(jetzt - vorher)}">${jetzt - vorher ? (jetzt - vorher > 0 ? '+' : '') + eur0(jetzt - vorher) : '–'}</td>` : '');
+  const extra = schmal ? 1 : 2 + (p.vj ? 2 : 0);
+  const platz = (w) => Math.floor((breite - erste - 16 - extra * w * 1.3) / w);
+  // Stufen: „-15.760 €“ → „-15.760“ (in €) → „-15,8“ (in Tsd. €) → ältere Spalten zusammenfassen
+  let stufe = 0;
+  if (p.cols.length > platz(86)) stufe = 1;
+  if (stufe && p.cols.length > platz(62)) stufe = 2;
+  if (stufe === 2 && p.cols.length > platz(50)) p = pivotDaten(Math.max(1, platz(50)));
+  const ew = `style="width:${Math.round([86, 62, 50][stufe] * 1.3)}px"`;  // Summe, Ø, Vorjahr etwas breiter
+  const kompakt = stufe > 0;
+  const n = p.anzahl;
+  const GANZ = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 0 });
+  const f = stufe === 2 ? (c) => (c / 100000).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : stufe === 1 ? (c) => GANZ.format(Math.round(c / 100)) : eur0;
+  const z = (c, extraCls = '') => (c ? `<td class="r ${cls(c)} ${extraCls}" title="${eur(c)}">${f(c)}</td>` : `<td class="r muted ${extraCls}">–</td>`);
+  const vjZellen = (jetzt, vorher) => (p.vj && !schmal ? `${z(vorher, 'vj')}<td class="r ${cls(jetzt - vorher)}" title="${eur(jetzt - vorher)}">${jetzt - vorher ? (jetzt - vorher > 0 ? '+' : '') + f(jetzt - vorher) : '–'}</td>` : '');
+  const avg = (c) => (schmal ? '' : z(c / n));
+  let h = `<div class="tab-scroll"><table class="t klein fix pivot"><thead><tr>
+    <th class="erste" style="width:${erste}px">${p.unter ? 'Unterkategorie' : 'Kategorie'}${kompakt ? `<small class="muted"> in ${stufe === 2 ? 'Tsd. ' : ''}€</small>` : ''}</th>
+    ${p.cols.map((c) => `<th class="r${typeof c === 'number' ? ' sort' : ''}"${typeof c === 'number' ? ` data-spalte="${c}" title="${p.jahr ? 'Monat' : 'Jahr'} filtern"` : ' title="zusammengefasst"'}>${p.label(c)}</th>`).join('')}
+    <th class="r" ${ew}>Summe</th>${schmal ? '' : `<th class="r" ${ew} title="Durchschnitt je ${p.jahr ? 'Monat' : 'Jahr'}">Ø ${p.jahr ? 'Mon.' : 'Jahr'}</th>`}
+    ${p.vj && !schmal ? `<th class="r vj" ${ew} title="Gleicher Zeitraum ein Jahr früher">${esc(V.label)}</th><th class="r" ${ew} title="Veränderung gegenüber ${esc(V.label)}">± Vorj.</th>` : ''}</tr></thead><tbody>`;
   for (const r of p.rows) {
-    h += `<tr class="klick" data-zeile="${esc(r.key)}"><td class="erste">${esc(r.key)}</td>${r.v.map(z).join('')}
-      <td class="r ${cls(r.sum)}"><b>${eur0(r.sum)}</b></td><td class="r ${cls(r.sum)}">${eur0(r.sum / n)}</td>${vjZellen(r.sum, p.vj?.get(r.key) || 0)}</tr>`;
+    h += `<tr class="klick" data-zeile="${esc(r.key)}"><td class="erste" title="${esc(r.key)}">${esc(r.key)}</td>${r.v.map((c) => z(c)).join('')}
+      ${z(r.sum, 'fett')}${avg(r.sum)}${vjZellen(r.sum, p.vj?.get(r.key) || 0)}</tr>`;
   }
-  h += `</tbody><tfoot><tr><td class="erste">Ergebnis</td>${p.sums.map(z).join('')}<td class="r ${cls(p.total)}">${eur0(p.total)}</td><td class="r ${cls(p.total)}">${eur0(p.total / n)}</td>${vjZellen(p.total, p.vjTotal)}</tr></tfoot></table></div>`;
+  h += `</tbody><tfoot><tr><td class="erste">Ergebnis</td>${p.sums.map((c) => z(c)).join('')}${z(p.total)}${avg(p.total)}${vjZellen(p.total, p.vjTotal)}</tr></tfoot></table></div>`;
   return h;
 }
 
@@ -444,20 +471,20 @@ function tabKonten() {
   const m = kontenDaten();
   if (!m.length) return '<div class="leer">Keine Buchungen gefunden.</div>';
   const saldo = m.reduce((s, x) => s + (x.k.saldo != null ? Math.round(x.k.saldo * 100) : 0), 0);
-  let h = `<div class="tab-scroll"><table class="t"><thead><tr><th class="erste">Konto</th><th class="r">Buchungen</th><th class="r">Einnahmen</th><th class="r">Ausgaben</th>
-    <th class="r">Kontostand</th><th>Daten</th></tr></thead><tbody>`;
+  let h = `<div class="tab-scroll"><table class="t fix"><thead><tr><th class="erste">Konto</th><th class="r sp-m" style="width:95px">Buchungen</th><th class="r sp-m" style="width:118px">Einnahmen</th><th class="r sp-m" style="width:118px">Ausgaben</th>
+    <th class="r" style="width:125px">Kontostand</th><th class="sp-m" style="width:220px">Daten</th></tr></thead><tbody>`;
   for (const x of m) {
     const k = x.k;
     const daten = k.vollstaendig ? `<span class="ok" title="Alle Buchungen seit Kontoeröffnung vorhanden – bewiesen mit dem Kontostand der Bank">✓ lückenlos</span> seit ${dde(k.von)}`
       : `ab ${dde(k.von)}${k.saldo == null ? ` bis ${dde(k.bis)}` : ''}`;
-    h += `<tr class="klick" data-konto="${esc(k.name)}"><td class="erste">${esc(k.name)}</td><td class="r">${NUM.format(x.n)}</td>
-      <td class="r pos">${x.ein ? eur0(x.ein) : '–'}</td><td class="r neg">${x.aus ? eur0(x.aus) : '–'}</td>
+    h += `<tr class="klick" data-konto="${esc(k.name)}"><td class="erste">${esc(k.name)}</td><td class="r sp-m">${NUM.format(x.n)}</td>
+      <td class="r pos sp-m">${x.ein ? eur0(x.ein) : '–'}</td><td class="r neg sp-m">${x.aus ? eur0(x.aus) : '–'}</td>
       <td class="r">${k.saldo != null ? `${eur(k.saldo * 100)}<br><small class="muted">${dde(k.saldoAm)}</small>` : '<span class="muted">–</span>'}</td>
-      <td class="klein">${daten}</td></tr>`;
+      <td class="klein sp-m">${daten}</td></tr>`;
   }
-  h += `</tbody><tfoot><tr><td class="erste">Summe</td><td class="r">${NUM.format(m.reduce((s, x) => s + x.n, 0))}</td>
-    <td class="r pos">${eur0(m.reduce((s, x) => s + x.ein, 0))}</td><td class="r neg">${eur0(m.reduce((s, x) => s + x.aus, 0))}</td>
-    <td class="r">${eur(saldo)}</td><td class="klein muted">ohne Depot</td></tr></tfoot></table></div>`;
+  h += `</tbody><tfoot><tr><td class="erste">Summe</td><td class="r sp-m">${NUM.format(m.reduce((s, x) => s + x.n, 0))}</td>
+    <td class="r pos sp-m">${eur0(m.reduce((s, x) => s + x.ein, 0))}</td><td class="r neg sp-m">${eur0(m.reduce((s, x) => s + x.aus, 0))}</td>
+    <td class="r">${eur(saldo)}</td><td class="klein muted sp-m">ohne Depot</td></tr></tfoot></table></div>`;
   return h;
 }
 
@@ -577,16 +604,16 @@ function tabFixkosten(conds) {
   const hl = highlightWords(conds);
   const re = hl.length ? new RegExp('(' + hl.map(escRe).join('|') + ')', 'gi') : null;
   const mk = (s) => (re ? esc(s).replace(re, '<mark>$1</mark>') : esc(s));
-  h += `<div class="tab-scroll"><table class="t"><thead><tr><th>Empfänger</th><th>Rhythmus</th><th class="r">Betrag</th><th class="r">pro Monat</th>
-    <th class="r">pro Jahr</th><th class="kat-sp">seit</th><th>zuletzt</th><th class="r kat-sp" title="Letzter Betrag gegenüber dem ersten">Veränderung</th></tr></thead><tbody>`;
+  h += `<div class="tab-scroll"><table class="t fix"><thead><tr><th>Empfänger</th><th class="sp-m" style="width:118px">Rhythmus</th><th class="r" style="width:108px">Betrag</th><th class="r" style="width:100px">pro Monat</th>
+    <th class="r sp-m" style="width:100px">pro Jahr</th><th class="sp-m" style="width:78px">seit</th><th class="sp-m" style="width:100px">zuletzt</th><th class="r sp-m" style="width:104px" title="Letzter Betrag gegenüber dem ersten">Veränderung</th></tr></thead><tbody>`;
   for (const f of liste) {
     const vd = f.erster ? Math.round(((f.betrag - f.erster) / f.erster) * 100) : 0;
     h += `<tr class="klick${f.aktiv ? '' : ' beendet'}" data-fix="${esc(f.name)}" title="Alle Zahlungen anzeigen">
-      <td><div class="wer">${mk(f.name)}</div><div class="zweck">${esc(f.kat)}${f.ukat ? ' · ' + esc(f.ukat) : ''} · ${esc(D.konten[f.k].name)}${f.v ? ' · ' + esc(f.v) : ''}</div></td>
-      <td class="klein">${f.rh.name}${f.aktiv ? '' : '<br><small class="muted">beendet</small>'}</td>
-      <td class="r">${eur(-f.betrag)}</td><td class="r neg"><b>${eur0(-f.proMonat)}</b></td><td class="r">${eur0(-f.proJahr)}</td>
-      <td class="klein kat-sp">${dde(f.seit).slice(3)}</td><td class="klein">${dde(f.zuletzt)}</td>
-      <td class="r klein kat-sp ${vd > 0 ? 'neg' : vd < 0 ? 'pos' : 'muted'}">${vd ? (vd > 0 ? '+' : '') + vd + ' %' : '–'}</td></tr>`;
+      <td><div class="wer">${mk(f.name)}</div><div class="zweck"><span class="nur-m">${f.rh.name} · </span>${esc(f.kat)}${f.ukat ? ' · ' + esc(f.ukat) : ''} · ${esc(D.konten[f.k].name)}${f.v ? ' · ' + esc(f.v) : ''}</div></td>
+      <td class="klein sp-m">${f.rh.name}${f.aktiv ? '' : '<br><small class="muted">beendet</small>'}</td>
+      <td class="r">${eur(-f.betrag)}</td><td class="r neg"><b>${eur0(-f.proMonat)}</b></td><td class="r sp-m">${eur0(-f.proJahr)}</td>
+      <td class="klein sp-m">${dde(f.seit).slice(3)}</td><td class="klein sp-m">${dde(f.zuletzt)}</td>
+      <td class="r klein sp-m ${vd > 0 ? 'neg' : vd < 0 ? 'pos' : 'muted'}">${vd ? (vd > 0 ? '+' : '') + vd + ' %' : '–'}</td></tr>`;
   }
   return h + '</tbody></table></div>';
 }
@@ -604,7 +631,7 @@ function tabelleExport() {
     const spalten = [{ titel: p.unter ? 'Unterkategorie' : 'Kategorie', typ: 'text', breite: 28 }, ...p.cols.map((c) => ({ titel: p.label(c), typ: 'euro', breite: 12 })),
       { titel: 'Summe', typ: 'euro', breite: 14 }, { titel: `Ø ${p.jahr ? 'Monat' : 'Jahr'}`, typ: 'euro', breite: 12 },
       ...(p.vj ? [{ titel: V.label, typ: 'euro', breite: 16 }, { titel: 'Veränderung', typ: 'euro', breite: 13 }] : [])];
-    const n = p.cols.length;
+    const n = p.anzahl;
     const vjw = (jetzt, vorher) => (p.vj ? [vorher / 100, (jetzt - vorher) / 100] : []);
     const zeilen = [...p.rows.map((r) => [r.key, ...r.v.map((c) => c / 100), r.sum / 100, Math.round(r.sum / n) / 100, ...vjw(r.sum, p.vj?.get(r.key) || 0)]),
       ['Ergebnis', ...p.sums.map((c) => c / 100), p.total / 100, Math.round(p.total / n) / 100, ...vjw(p.total, p.vjTotal)]];
@@ -873,6 +900,11 @@ function events() {
   };
   $('#start-datei').onclick = async () => { try { anzeigen(await Q.dateiWaehlen()); } catch (e) { startZeigen(e.message); } };
   window.addEventListener('hashchange', () => { if (D) { hashLesen(); aktualisieren(); } });
+  let breiteT, breiteAlt = 0;
+  new ResizeObserver(() => {
+    clearTimeout(breiteT);
+    breiteT = setTimeout(() => { const w = $('#tab-inhalt').clientWidth; if (D && S.tab === 'uebersicht' && Math.abs(w - breiteAlt) > 20) { breiteAlt = w; tabelle(parse(S.q)); } }, 150);
+  }).observe($('#tab-inhalt'));
   matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => themeSetzen());
 }
 
