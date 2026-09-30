@@ -1,0 +1,150 @@
+// Woher kommen die Daten? Aus „Finanzen-Daten.json“ in deinem Google Drive (nur lesend) oder aus einer Datei.
+// Die zuletzt geladenen Daten bleiben auf diesem Gerät gespeichert, damit das Dashboard sofort (auch offline) öffnet.
+import { CONFIG } from '../config.js';
+
+const SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+const GIS = 'https://accounts.google.com/gsi/client';
+const API = 'https://www.googleapis.com/drive/v3/files';
+const K = { token: 'fd.token', verbunden: 'fd.verbunden' };
+const DB = 'finanzen-dashboard', STORE = 'daten';
+
+const ls = {
+  get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+  del: (k) => { try { localStorage.removeItem(k); } catch {} },
+};
+
+// ---------- Speicher auf dem Gerät (IndexedDB)
+function db() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(DB, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(STORE);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function tx(mode, fn) {
+  const d = await db();
+  return new Promise((res, rej) => {
+    const t = d.transaction(STORE, mode);
+    const r = fn(t.objectStore(STORE));
+    t.oncomplete = () => res(r?.result);
+    t.onerror = () => rej(t.error);
+  });
+}
+export const cacheLesen = () => tx('readonly', (s) => s.get('aktuell')).catch(() => null);
+export const cacheSchreiben = (v) => tx('readwrite', (s) => s.put(v, 'aktuell'));
+export async function geraetLeeren() {
+  await tx('readwrite', (s) => s.clear()).catch(() => {});
+  abmelden();
+}
+
+// ---------- Prüfen, ob die Datei zum Dashboard passt
+export function pruefen(text) {
+  let j;
+  try { j = JSON.parse(text); } catch { throw new Error('Die Datei ist keine gültige Daten-Datei (JSON).'); }
+  if (j?.version !== 1 || !Array.isArray(j.buchungen) || !Array.isArray(j.konten)) {
+    throw new Error('Das ist nicht die Datei „Finanzen-Daten.json“ aus deinem Finanzen-Ordner.');
+  }
+  return j;
+}
+
+// ---------- Datei vom Gerät
+export function dateiWaehlen() {
+  return new Promise((res, rej) => {
+    const inp = Object.assign(document.createElement('input'), { type: 'file', accept: '.json,application/json' });
+    inp.onchange = async () => {
+      const f = inp.files?.[0];
+      if (!f) return rej(new Error('Keine Datei gewählt.'));
+      try {
+        const text = await f.text();
+        pruefen(text);
+        const v = { text, quelle: 'datei', name: f.name, geaendert: new Date(f.lastModified).toISOString(), geladen: new Date().toISOString() };
+        await cacheSchreiben(v);
+        res(v);
+      } catch (e) { rej(e); }
+    };
+    inp.click();
+  });
+}
+
+// ---------- Google Drive
+const tokenObj = () => { try { return JSON.parse(ls.get(K.token) || 'null'); } catch { return null; } };
+export const hatToken = () => { const t = tokenObj(); return !!t && t.exp > Date.now(); };
+export const warVerbunden = () => ls.get(K.verbunden) === '1';
+
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    if (document.querySelector(`script[src="${src}"]`) && window.google?.accounts?.oauth2) return res();
+    const s = Object.assign(document.createElement('script'), { src, async: true });
+    s.onload = res;
+    s.onerror = () => rej(new Error('Google-Anmeldung konnte nicht geladen werden (keine Internetverbindung?).'));
+    document.head.append(s);
+  });
+}
+
+// Muss aus einem Klick heraus aufgerufen werden (öffnet ggf. das Google-Anmeldefenster)
+export async function anmelden() {
+  await loadScript(GIS);
+  return new Promise((resolve, reject) => {
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: CONFIG.googleClientId,
+      scope: SCOPE,
+      callback: (r) => {
+        if (r.error) return reject(new Error(r.error_description || r.error));
+        if (!google.accounts.oauth2.hasGrantedAllScopes(r, SCOPE)) return reject(new Error('Lesezugriff auf Google Drive wurde nicht erlaubt.'));
+        ls.set(K.token, JSON.stringify({ t: r.access_token, exp: Date.now() + (Number(r.expires_in || 3600) - 120) * 1000 }));
+        ls.set(K.verbunden, '1');
+        resolve();
+      },
+      error_callback: (e) => reject(new Error(
+        e?.type === 'popup_closed' ? 'Anmeldefenster geschlossen.'
+          : e?.type === 'popup_failed_to_open' ? 'Pop-up wurde blockiert – bitte Pop-ups für diese Seite erlauben.'
+            : (e?.message || 'Anmeldung fehlgeschlagen.'))),
+    });
+    client.requestAccessToken({ prompt: warVerbunden() ? '' : 'consent' });
+  });
+}
+
+export function abmelden() {
+  const t = tokenObj()?.t;
+  if (t && window.google?.accounts?.oauth2) google.accounts.oauth2.revoke(t, () => {});
+  ls.del(K.token); ls.del(K.verbunden);
+}
+
+async function api(url) {
+  const t = tokenObj();
+  if (!t || t.exp <= Date.now()) throw Object.assign(new Error('Anmeldung abgelaufen'), { auth: true });
+  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + t.t } });
+  if (r.status === 401) { ls.del(K.token); throw Object.assign(new Error('Anmeldung abgelaufen'), { auth: true }); }
+  if (!r.ok) throw new Error(`Google Drive meldet Fehler ${r.status}`);
+  return r;
+}
+
+async function dateiSuchen() {
+  const q = encodeURIComponent(`name='${CONFIG.dataFileName}' and trashed=false`);
+  const r = await api(`${API}?q=${q}&spaces=drive&orderBy=modifiedTime desc&pageSize=5&fields=files(id,name,modifiedTime,size)`);
+  const f = (await r.json()).files?.[0];
+  if (!f) throw new Error(`„${CONFIG.dataFileName}“ wurde in deinem Google Drive nicht gefunden. Liegt sie im Ordner „10 Finanzen/Auswertung“?`);
+  return f;
+}
+
+// Lädt die Datei, wenn sie neuer ist als die gespeicherte Fassung. Liefert die neue Fassung oder null.
+export async function driveLaden(aktuell) {
+  const f = await dateiSuchen();
+  if (aktuell?.quelle === 'drive' && aktuell.id === f.id && aktuell.geaendert === f.modifiedTime) return null;
+  const text = await (await api(`${API}/${f.id}?alt=media`)).text();
+  pruefen(text);
+  const v = { text, quelle: 'drive', id: f.id, name: f.name, geaendert: f.modifiedTime, geladen: new Date().toISOString() };
+  await cacheSchreiben(v);
+  return v;
+}
+
+// Nur auf dem eigenen Rechner zum Testen: Daten aus dem Ordner daten/ (nie im Repository)
+export async function lokalLaden() {
+  const r = await fetch('daten/' + CONFIG.dataFileName, { cache: 'no-store' });
+  if (!r.ok) throw new Error('keine lokalen Testdaten');
+  const text = await r.text();
+  pruefen(text);
+  return { text, quelle: 'lokal', name: CONFIG.dataFileName, geaendert: r.headers.get('last-modified') || '', geladen: new Date().toISOString() };
+}

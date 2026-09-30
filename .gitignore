@@ -8,3 +8,8 @@ finanzdaten*.json
 
 # Private Importdateien (Finanzguru, Bankexporte)
 import-daten/
+
+# Dashboard-Daten (liegen nur im Google Drive bzw. lokal zum Testen)
+daten/
+Finanzen-Daten*.json
+*Daten*.json

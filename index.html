@@ -2,50 +2,169 @@
 <html lang="de">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex, nofollow">
-  <title>Finanzen – entfernt</title>
-  <style>
-    :root { color-scheme: light dark; }
-    body { font: 16px/1.5 system-ui, "Segoe UI", sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; background: Canvas; color: CanvasText; }
-    main { max-width: 440px; padding: 24px; }
-    h1 { font-size: 22px; margin: 0 0 8px; }
-    li { margin: 4px 0; }
-    .ok { color: #0ca30c; } .warn { color: #b3261e; }
-  </style>
+  <meta name="referrer" content="no-referrer">
+  <title>Finanzen</title>
+  <meta name="description" content="Private Finanzen – Dashboard mit Suche, Grafiken und Tabellen-Export">
+  <meta name="theme-color" content="#2a78d6">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/app.css">
+  <script>
+    try { var t = localStorage.getItem('fd.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script type="module" src="js/app.js"></script>
 </head>
 <body>
-<main>
-  <h1>Diese App wurde entfernt</h1>
-  <p>Die lokalen Daten dieser App werden auf diesem Gerät gelöscht:</p>
-  <ul id="log"><li>läuft …</li></ul>
-  <p>Du kannst dieses Fenster danach schließen. Falls die App installiert war, kannst du sie jetzt auch deinstallieren.</p>
-</main>
-<script>
-  // Löscht NUR die Daten dieser App (andere Apps auf derselben Adresse, z. B. Mail-to-Drive, bleiben unberührt)
-  (async () => {
-    const out = [];
-    const ok = (t) => out.push('<li class="ok">✓ ' + t + '</li>');
-    const bad = (t) => out.push('<li class="warn">✗ ' + t + '</li>');
-    try {
-      await new Promise((res, rej) => { const r = indexedDB.deleteDatabase('finanzverwaltung'); r.onsuccess = res; r.onerror = () => rej(r.error); r.onblocked = res; });
-      ok('Gespeicherte Finanzdaten gelöscht');
-    } catch (e) { bad('Finanzdaten: ' + e); }
-    try {
-      let n = 0;
-      for (const k of Object.keys(localStorage)) if (k.startsWith('fv.')) { localStorage.removeItem(k); n++; }
-      ok('Einstellungen und Anmeldung gelöscht (' + n + ')');
-    } catch (e) { bad('Einstellungen: ' + e); }
-    try {
-      if ('caches' in window) for (const k of await caches.keys()) if (k.startsWith('finanzen-')) await caches.delete(k);
-      ok('Offline-Speicher gelöscht');
-    } catch (e) { bad('Offline-Speicher: ' + e); }
-    try {
-      if ('serviceWorker' in navigator) for (const r of await navigator.serviceWorker.getRegistrations()) if (r.scope.includes('/finanzen/')) await r.unregister();
-      ok('Hintergrunddienst abgemeldet');
-    } catch (e) { bad('Hintergrunddienst: ' + e); }
-    document.getElementById('log').innerHTML = out.join('');
-  })();
-</script>
+  <header class="top">
+    <div class="brand"><img src="icons/icon.svg" alt="" width="26" height="26"><span>Finanzen</span></div>
+    <div class="stand" id="stand"></div>
+    <button class="icon-btn" id="btn-neu" title="Neueste Daten aus Google Drive laden" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
+    </button>
+    <button class="icon-btn" id="btn-menu" title="Datenquelle und Darstellung">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
+    </button>
+  </header>
+
+  <main>
+    <section id="start" class="start" hidden>
+      <div class="card start-card">
+        <h1>Deine Finanzen laden</h1>
+        <p class="muted">Das Dashboard liest die Datei <b>Finanzen-Daten.json</b> aus deinem Ordner <b>10 Finanzen/Auswertung</b>. Es verändert nichts und speichert die Daten nur auf diesem Gerät.</p>
+        <button class="btn primary" id="start-drive">Mit Google Drive verbinden</button>
+        <button class="btn" id="start-datei">Datei vom Computer öffnen</button>
+        <p class="fehler" id="start-fehler" hidden></p>
+      </div>
+    </section>
+
+    <section id="dash" hidden>
+      <div class="suche">
+        <svg class="lupe" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" type="search" autocomplete="off" spellcheck="false" enterkeyhint="search"
+               placeholder="Suchen: Rewe, Miete 2024, >500, 03.2025 …" aria-label="Buchungen durchsuchen" aria-controls="vorschlaege">
+        <button class="hilfe" id="q-hilfe" title="So funktioniert die Suche">?</button>
+        <ul id="vorschlaege" class="vorschlaege" role="listbox" hidden></ul>
+      </div>
+
+      <div class="filter">
+        <select id="f-jahr" aria-label="Jahr"></select>
+        <select id="f-monat" aria-label="Monat"></select>
+        <select id="f-konto" aria-label="Konto"></select>
+        <select id="f-kat" aria-label="Kategorie"></select>
+        <div class="seg" id="f-art" role="group" aria-label="Art">
+          <button data-v="alle">Alle</button><button data-v="aus">Ausgaben</button><button data-v="ein">Einnahmen</button>
+        </div>
+        <label class="chk" title="Überträge zwischen deinen eigenen Konten mit anzeigen"><input type="checkbox" id="f-umb"> Umbuchungen</label>
+        <button class="btn sm" id="f-zurueck" title="Letzten Filterschritt rückgängig machen (Alt + ←)" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true" width="15" height="15"><path d="M15 18l-6-6 6-6"/></svg>Zurück</button>
+        <button class="link" id="f-reset" hidden>Alles zurücksetzen</button>
+      </div>
+      <div class="chips" id="chips"></div>
+
+      <div class="kpis" id="kpis"></div>
+
+      <div class="grid2">
+        <div class="card">
+          <div class="card-h"><h2 id="t-verlauf">Verlauf</h2><span class="hint" id="h-verlauf"></span>
+            <button class="icon-btn sm" data-bild="c-verlauf" title="Grafik als Bild speichern"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg></button></div>
+          <div class="chart"><canvas id="c-verlauf"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-h"><h2 id="t-kat">Ausgaben nach Kategorie</h2><span class="hint" id="h-kat"></span>
+            <button class="icon-btn sm" data-bild="c-kat" title="Grafik als Bild speichern"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg></button></div>
+          <div class="chart" id="chart-kat"><canvas id="c-kat"></canvas></div>
+        </div>
+      </div>
+
+      <div class="card tabelle-card">
+        <div class="card-h">
+          <div class="tabs" role="tablist" id="tabs">
+            <button role="tab" data-tab="buchungen">Buchungen</button>
+            <button role="tab" data-tab="uebersicht">Kategorien</button>
+            <button role="tab" data-tab="fix">Fixkosten</button>
+            <button role="tab" data-tab="konten">Konten</button>
+          </div>
+          <div class="dl">
+            <button class="btn sm" id="dl-xlsx" title="Diese Tabelle als Excel-Datei herunterladen">Excel</button>
+            <button class="btn sm" id="dl-csv" title="Diese Tabelle als CSV herunterladen">CSV</button>
+          </div>
+        </div>
+        <div id="tab-inhalt"></div>
+      </div>
+      <p class="fuss muted" id="fuss"></p>
+    </section>
+  </main>
+
+  <dialog id="dlg-hilfe" class="dlg">
+    <h2>So funktioniert die Suche</h2>
+    <p class="muted">Tippe alles in ein Feld, gefiltert wird sofort. Grafiken, Summen und Tabellen zeigen dann nur die Treffer. Groß-/Kleinschreibung und Umlaute spielen keine Rolle.</p>
+    <table class="hilfe-tab">
+      <tr><td><code>rewe</code></td><td>Empfänger, Verwendungszweck, Kategorie, Konto, Notiz</td></tr>
+      <tr><td><code>rewe edeka</code></td><td>beide Wörter kommen vor</td></tr>
+      <tr><td><code>rewe|edeka|lidl</code></td><td>eines davon</td></tr>
+      <tr><td><code>"dm drogerie"</code></td><td>genau diese Wortfolge</td></tr>
+      <tr><td><code>-storno</code></td><td>ohne dieses Wort</td></tr>
+      <tr><td><code>49,99</code></td><td>genau dieser Betrag</td></tr>
+      <tr><td><code>&gt;500</code> <code>&lt;20</code> <code>100-250</code></td><td>Betragsbereich (egal ob Ein- oder Ausgabe)</td></tr>
+      <tr><td><code>2024</code> <code>2019-2021</code></td><td>Jahr oder Jahre</td></tr>
+      <tr><td><code>03.2025</code> <code>12.03.2025</code></td><td>Monat oder Tag</td></tr>
+    </table>
+    <p class="muted">Zum Ausprobieren anklicken:</p>
+    <div class="beispiele" id="beispiele">
+      <button>amazon 2025</button><button>versicherung &gt;100</button><button>rewe|edeka|lidl|aldi</button><button>strom|gas|stadtwerke</button><button>netflix|spotify|disney</button>
+    </div>
+    <form method="dialog"><button class="btn primary">Verstanden</button></form>
+  </dialog>
+
+  <dialog id="dlg-menu" class="dlg">
+    <h2>Datenquelle</h2>
+    <p id="menu-quelle" class="muted"></p>
+    <div class="menu-knoepfe">
+      <button class="btn primary" id="m-drive">Aus Google Drive laden</button>
+      <button class="btn" id="m-datei">Datei öffnen …</button>
+    </div>
+    <h2>Darstellung</h2>
+    <div class="seg" id="m-theme"><button data-v="auto">Automatisch</button><button data-v="light">Hell</button><button data-v="dark">Dunkel</button></div>
+    <h2>Dieses Gerät</h2>
+    <p class="muted">Abmelden und die hier gespeicherte Kopie deiner Daten sowie den Chat-Schlüssel löschen. Die Datei in Google Drive bleibt erhalten.</p>
+    <button class="btn danger" id="m-leeren">Abmelden und Daten löschen</button>
+    <form method="dialog"><button class="btn">Schließen</button></form>
+  </dialog>
+
+  <button id="chat-knopf" class="chat-knopf" title="Fragen an deine Finanzen stellen">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/></svg><span>Fragen</span>
+  </button>
+  <aside id="chat" class="chat" hidden aria-label="Fragen an deine Finanzen">
+    <div class="chat-kopf">
+      <b>Fragen an deine Finanzen</b>
+      <button class="icon-btn sm" id="chat-neu" title="Neues Gespräch"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+      <button class="icon-btn sm" id="chat-einst" title="Chat-Einstellungen (API-Schlüssel, Modell)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
+      <button class="icon-btn sm" id="chat-zu" title="Schließen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+    <div id="chat-setup" class="chat-setup" hidden>
+      <h2>Chat einrichten</h2>
+      <p>Für die Antworten nutzt die App <b>Claude</b> von Anthropic. Dafür brauchst du einen eigenen <b>API-Schlüssel</b>:
+        auf <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a> anmelden → „API Keys“ → „Create Key“, dann hier einfügen.
+        Abgerechnet wird dort nach Nutzung, eine Frage kostet meist wenige Cent.</p>
+      <p class="muted">Datenschutz: Der Schlüssel bleibt auf diesem Gerät. An Anthropic gehen deine Frage und nur die Zwischenergebnisse, die die KI für die Antwort abruft (z. B. Summen oder einzelne Buchungen), nicht die ganze Datei.</p>
+      <label class="feld">API-Schlüssel<input id="chat-key" type="password" autocomplete="off" spellcheck="false"></label>
+      <label class="feld">Modell<select id="chat-modell"></select></label>
+      <div class="menu-knoepfe"><button class="btn primary" id="chat-speichern">Speichern</button><button class="btn danger" id="chat-key-loeschen">Schlüssel löschen</button></div>
+    </div>
+    <div id="chat-haupt" class="chat-haupt">
+      <div id="chat-liste" class="chat-liste" aria-live="polite"></div>
+      <form id="chat-form" class="chat-form">
+        <textarea id="chat-eingabe" rows="1" placeholder="z. B. Welche Versicherungen zahle ich und was kosten sie?" aria-label="Frage"></textarea>
+        <button class="btn primary" id="chat-senden" title="Senden (Enter)"><svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+      </form>
+    </div>
+  </aside>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <noscript>Diese App benötigt JavaScript.</noscript>
 </body>
 </html>
