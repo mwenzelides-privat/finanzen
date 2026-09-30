@@ -109,10 +109,10 @@ function pruefung(r, p) {
   const t = norm(`${r.g} ${r.z}`);
   if (p === 'wk-uebernachtung' && (RESTAURANT.test(t) || r.kat === 'Essen & Trinken')) return { art: 'pruefen',
     text: 'Das ist ein Restaurantbesuch, keine Übernachtung. Essen ist steuerlich fast nie absetzbar – auch auf Dienstreisen gibt es dafür nur Verpflegungspauschalen, keine Belege.',
-    rat: 'Privates Essen → ausschließen. Nur eine Hotelrechnung auf beruflicher Reise gehört hierher.', aktionen: [AUS, { t: 'Ist eine Hotelrechnung (Dienstreise) – behalten', p: 'wk-uebernachtung' }] };
+    rat: 'Privates Essen → ausschließen. Nur eine Hotelrechnung auf beruflicher Reise gehört hierher.', klar: 'Restaurant', aktionen: [AUS, { t: 'Ist eine Hotelrechnung (Dienstreise) – behalten', p: 'wk-uebernachtung' }] };
   if ((p === 'ha-handwerker' || p === 'ha-dienstleistung') && MARKT.test(norm(r.g))) return { art: 'pruefen',
     text: 'Einkauf im Bau- oder Gartenmarkt = Material. Nach § 35a zählen nur die Arbeitskosten eines Handwerkers laut Rechnung, nicht selbst gekauftes Material.',
-    rat: 'Ausschließen.', aktionen: [AUS] };
+    rat: 'Ausschließen.', klar: 'Baumarkt', aktionen: [AUS] };
   if (p === 'ha-nebenkosten') return { art: 'pruefen',
     text: 'Abschläge für Strom, Gas, Wasser, Heizung oder Müll sind selbst nicht absetzbar. Absetzbar sind nur Arbeitsanteile (Hausmeister, Treppenhausreinigung, Gartenpflege, Schornsteinfeger) aus der jährlichen Neben- oder Hausgeldabrechnung.',
     rat: 'Monatliche Abschläge → ausschließen. Die Jahresabrechnung (mit § 35a-Ausweis) direkt der Steuerberaterin geben.', aktionen: [AUS, { t: 'Ist eine Jahresabrechnung – behalten', p: 'ha-nebenkosten' }] };
@@ -126,7 +126,7 @@ function pruefung(r, p) {
     text: 'Schulgeld ist nur für Privatschulen absetzbar (30 %, höchstens 5.000 €). Bei einer staatlichen Schule sind es meist Klassenfahrt, Kopiergeld oder Material – das ist nicht absetzbar.',
     rat: 'Staatliche Schule → ausschließen. Privatschule → behalten.', aktionen: [AUS, { t: 'Privatschule – als Schulgeld behalten', p: 'sa-schulgeld' }] };
   if (p === 'ki-betreuung' && /urlaub|reise|ferien(?!betreuung)/.test(t)) return { art: 'pruefen',
-    text: 'Urlaubs- oder Reisekosten sind keine Kinderbetreuung und nicht absetzbar.', rat: 'Ausschließen.', aktionen: [AUS] };
+    text: 'Urlaubs- oder Reisekosten sind keine Kinderbetreuung und nicht absetzbar.', rat: 'Ausschließen.', klar: 'Urlaub', aktionen: [AUS] };
   if (p === 'vs-weitere' && /hausrat|glasvers|reise|rechtsschutz/.test(norm(`${r.ukat} ${r.z}`))) return { art: 'pruefen',
     text: 'Hausrat-, Glas-, Reise- und private Rechtsschutzversicherungen sind nicht absetzbar. Ausnahme: Berufsrechtsschutz (anteilig als Werbungskosten).',
     rat: 'Privat → ausschließen. Berufsrechtsschutz → dort übernehmen.', aktionen: [AUS, { t: 'Ist Berufsrechtsschutz – übernehmen', p: 'wk-rechtsschutz' }] };
@@ -141,8 +141,8 @@ function pruefung(r, p) {
 // ---------------------------------------------------------------- Zustand
 let D = null, ctx = null;
 let jahr = 0, filter = 'zu', offen = new Set(['wk', 'vorsorge', 'sonder', 'agb', 'haushalt', 'kinder']);
-const detailOffen = new Set();
-let entscheidungen = {};          // Schlüssel → { p (Posten-ID) | x (ausgeschlossen), ok (bestätigt), n (Notiz) }
+const detailOffen = new Set(), gruppeOffen = new Set();
+let entscheidungen = {};          // Schlüssel → { p (Posten-ID) | x (ausgeschlossen), ok (bestätigt), n (Notiz) }; „regel:…“ → { p | x } für einen Empfänger
 let geladen = false;
 const KV = 'steuer-entscheidungen';
 
@@ -176,6 +176,13 @@ function automatisch(r) {
   return p ? { p, quelle, grund } : null;
 }
 
+// Regeln: eine Entscheidung für alle Zahlungen an denselben Empfänger mit derselben automatischen Einordnung – in allen Jahren.
+// Eigene Entscheidungen zu einzelnen Buchungen gehen immer vor.
+const empfName = (r) => r.g || r.z || '–';
+const grpName = (r) => norm(empfName(r)).replace(/\d{4,}/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+const regelKey = (r, p) => `regel:${grpName(r)}|${p}${pruefung(r, p)?.art === 'pruefen' ? '|pruefen' : ''}`;
+const eigen = (e) => !!(e && (e.x || e.ok || e.p));
+
 // Alle Buchungen eines Jahres mit Posten, Status und Hinweis
 function einordnen(j) {
   const out = [];
@@ -184,26 +191,74 @@ function einordnen(j) {
     const e = entscheidungen[r.skey];
     const a = automatisch(r);
     if (!a && !e?.p) continue;
-    if (e?.x) { out.push({ r, p: e.p || a?.p, status: 'ausgeschlossen', hinweis: '', notiz: e.n || '', grund: 'von dir ausgeschlossen' }); continue; }
-    const p = e?.p || a.p;
+    const rg = !eigen(e) && a ? entscheidungen[regelKey(r, a.p)] : null;
+    const regelText = `Regel: alle Zahlungen an „${empfName(r)}“`;
+    if (e?.x || rg?.x) { out.push({ r, p: e?.p || a?.p, status: 'ausgeschlossen', hinweis: '', notiz: e?.n || '', regel: !!rg, grund: rg ? `${regelText} ausschließen` : 'von dir ausgeschlossen' }); continue; }
+    const p = e?.p || rg?.p || a.p;
     const pr = pruefung(r, p);
-    let status = e?.ok || e?.p ? 'bestaetigt' : a.quelle === 'buhl' ? 'uebernommen' : 'vorschlag';
+    let status = eigen(e) || rg ? 'bestaetigt' : a.quelle === 'buhl' ? 'uebernommen' : 'vorschlag';
     if (status !== 'bestaetigt' && pr?.art === 'pruefen') status = 'pruefen';
+    // Einnahmen braucht niemand zu bestätigen – sie stehen nur zur Kontrolle da
+    if ((status === 'uebernommen' || status === 'vorschlag') && POSTEN_ID.get(p).abschnitt === 'einnahmen') status = 'kontrolle';
     let hinweis = pr?.text || '', rat = pr?.rat || '', aktionen = status === 'bestaetigt' ? [] : pr?.aktionen || [];
     if (status === 'vorschlag' && !hinweis) {
       hinweis = `In WISO/Buhl nicht markiert – vorgeschlagen wegen: ${a.grund}. ${POSTEN_ID.get(p).info}`;
       rat = 'Passt das, übernehmen. Sonst anderen Posten wählen oder ausschließen.';
       aktionen = [{ t: `✓ Als „${POSTEN_ID.get(p).name}“ übernehmen`, p }, { t: '✕ Nicht steuerlich relevant', p: 'x' }];
     }
-    out.push({ r, p, status, hinweis, rat, aktionen, notiz: e?.n || '', quelle: a?.quelle || 'manuell',
-      grund: e?.p && e.p !== a?.p ? `von dir zugeordnet${a ? ` (automatisch wäre: ${POSTEN_ID.get(a.p).name})` : ''}` : a?.grund || 'von dir zugeordnet' });
+    out.push({ r, p, status, hinweis, rat, aktionen, notiz: e?.n || '', quelle: a?.quelle || 'manuell', klar: status === 'pruefen' ? pr?.klar : '', regel: !!rg,
+      grund: rg ? `${regelText} → ${POSTEN_ID.get(p).name}` : e?.p && e.p !== a?.p ? `von dir zugeordnet${a ? ` (automatisch wäre: ${POSTEN_ID.get(a.p).name})` : ''}` : a?.grund || 'von dir zugeordnet' });
   }
   return out;
 }
 
+// Gleicher Posten + gleicher Empfänger + gleicher Status = eine Gruppe (eine Entscheidung)
+const gKey = (x) => `${x.p}|${grpName(x.r)}|${x.status}`;
+function gruppieren(xs) {
+  const m = new Map();
+  for (const x of xs) { const k = gKey(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); }
+  return [...m.values()].sort((a, b) => Math.abs(b.reduce((t, x) => t + x.r.c, 0)) - Math.abs(a.reduce((t, x) => t + x.r.c, 0)));
+}
+// in der Reihenfolge der Anzeige: Posten für Posten, große Beträge zuerst
+const arbeitsGruppen = (xs) => POSTEN.flatMap((p) => gruppieren(xs.filter((x) => x.p === p.id)));
+const ZU = ['pruefen', 'vorschlag', 'uebernommen'];
+
+// Entscheidung für mehrere Buchungen auf einmal. Buchungen mit automatischer Einordnung bekommen eine Regel für den
+// Empfänger (gilt auch in anderen Jahren), alle übrigen eine Einzelentscheidung. wert: Posten-ID | 'x' | 'ok' (Posten behalten)
+function gruppeEntscheiden(keys, wert, mitNotiz, still) {
+  const xs = einordnen(jahr).filter((x) => keys.includes(x.r.skey));
+  if (!xs.length) return [];
+  let notiz = '';
+  if (mitNotiz) { const t = prompt(`Notiz für ${xs.length > 1 ? `alle ${xs.length} Zahlungen` : 'diese Buchung'} (erscheint im PDF und in Excel):`, xs[0].notiz || ''); if (t) notiz = t.trim(); }
+  const vorher = [], regeln = new Set();
+  for (const x of xs) {
+    const r = x.r, a = automatisch(r), e = entscheidungen[r.skey];
+    const ziel = wert === 'ok' ? x.p : wert;
+    if (a && !eigen(e) && xs.length > 1) {
+      const rk = regelKey(r, a.p);
+      if (!regeln.has(rk)) { regeln.add(rk); vorher.push(vorherVon(rk)); entscheidungen[rk] = ziel === 'x' ? { x: 1 } : { p: ziel }; }
+      if (notiz) { vorher.push(vorherVon(r.skey)); entscheidungen[r.skey] = { ...(e || {}), n: notiz }; }
+    } else {
+      vorher.push(vorherVon(r.skey));
+      const n = { ...(e || {}) };
+      if (ziel === 'x') n.x = 1; else { n.p = ziel; n.ok = 1; delete n.x; }
+      if (notiz) n.n = notiz;
+      entscheidungen[r.skey] = n;
+    }
+  }
+  speichern();
+  if (!still) {
+    const ziel = wert === 'ok' ? xs[0].p : wert;
+    const was = ziel === 'x' ? 'ausgeschlossen' : `bestätigt${wert !== 'ok' ? ` als „${POSTEN_ID.get(ziel).name}“` : ''}`;
+    ctx.neuZeichnen();
+    rueckgaengig(`${xs.length > 1 ? `${xs.length} Zahlungen an ` : ''}„${kurzName(xs[0].r)}“ ${was}${regeln.size ? ' – gilt auch in anderen Jahren' : ''}`, vorher);
+  }
+  return vorher;
+}
+
 const STATUS = {
   uebernommen: ['aus WISO/Buhl – noch bestätigen', 'st-buhl'], bestaetigt: ['✓ bestätigt', 'st-ok'], vorschlag: ['Vorschlag', 'st-vor'],
-  pruefen: ['prüfen', 'st-pruef'], ausgeschlossen: ['ausgeschlossen', 'st-aus'],
+  pruefen: ['prüfen', 'st-pruef'], ausgeschlossen: ['ausgeschlossen', 'st-aus'], kontrolle: ['zur Kontrolle', 'st-aus'],
 };
 
 // ---------------------------------------------------------------- Anzeige
@@ -213,23 +268,26 @@ export function steuerZeigen(el, c) {
   if (!jahr) jahr = ctx.einJahr() || Math.min(jahre[0], +D.bis.slice(0, 4) - (D.bis.slice(5, 7) < '12' ? 1 : 0));
   const alle = einordnen(jahr);
   const zahl = (s) => alle.filter((x) => x.status === s).length;
-  const ZU = ['pruefen', 'vorschlag', 'uebernommen'];
+  const zahlG = (s) => arbeitsGruppen(alle.filter((x) => x.status === s)).length;   // Entscheidungen (Gruppen)
   const sichtbar = alle.filter((x) => (filter === 'alle' ? x.status !== 'ausgeschlossen' : filter === 'zu' ? ZU.includes(x.status) : x.status === filter));
   const wirksam = alle.filter((x) => x.status !== 'ausgeschlossen');
   const summe = (liste) => liste.reduce((s, x) => s + x.r.c, 0);
+  const zu = alle.filter((x) => ZU.includes(x.status)), zuGruppen = arbeitsGruppen(zu).length;
+  const klar = alle.filter((x) => x.klar);
 
   const knopf = (v, t) => `<button data-sfilter="${v}" class="${filter === v ? 'an' : ''}">${t}</button>`;
   let h = `<div class="st-kopf">
     <div class="st-jahre">${jahre.map((y) => `<button data-sjahr="${y}" class="${y === jahr ? 'an' : ''}">${y}</button>`).join('')}</div>
     <div class="st-aktionen">
-      ${zahl('pruefen') + zahl('vorschlag') ? `<button class="btn sm primary" id="st-pruefen">Offene Punkte prüfen (${zahl('pruefen') + zahl('vorschlag')})</button>` : ''}
-      <button class="btn sm${zahl('pruefen') + zahl('vorschlag') ? '' : ' primary'}" id="st-pdf">PDF für die Steuerberaterin</button>
+      ${zu.length ? `<button class="btn sm primary" id="st-pruefen" title="Eine Entscheidung nach der anderen, mit Tastatur: Enter = bestätigen, X = nicht relevant">Durchgehen: ${zuGruppen} Entscheidungen</button>` : ''}
+      ${klar.length ? `<button class="btn sm" id="st-klar" title="Schließt aus, was eindeutig nicht absetzbar ist: Restaurants und Imbisse unter „Übernachtungen“, Einkäufe im Bau- oder Gartenmarkt unter „Handwerker“, Urlaub unter „Kinderbetreuung“. Mit Rückgängig.">Eindeutige Fälle ausschließen (${klar.length})</button>` : ''}
+      <button class="btn sm${zu.length ? '' : ' primary'}" id="st-pdf">PDF für die Steuerberaterin</button>
       <button class="btn sm" id="st-xlsx">Excel</button>
       <button class="btn sm" id="st-sichern" title="Deine Zuordnungen als Datei sichern">Zuordnungen sichern</button>
       <button class="btn sm" id="st-laden" title="Gesicherte Zuordnungen laden">laden</button>
     </div>
-    <div class="seg st-filter">${knopf('zu', `Zu bearbeiten (${zahl('pruefen') + zahl('vorschlag') + zahl('uebernommen')})`)}${knopf('pruefen', `davon prüfen (${zahl('pruefen')})`)}${knopf('vorschlag', `Vorschläge (${zahl('vorschlag')})`)}${knopf('uebernommen', `aus WISO/Buhl (${zahl('uebernommen')})`)}${knopf('bestaetigt', `✓ Bestätigt (${zahl('bestaetigt')})`)}${knopf('ausgeschlossen', `Ausgeschlossen (${zahl('ausgeschlossen')})`)}${knopf('alle', `Alle (${wirksam.length})`)}</div>
-    <div class="muted klein">„Zu bearbeiten“ zeigt nur, was noch eine Entscheidung braucht. Bestätigte (✓) und ausgeschlossene (✕) Buchungen verschwinden hier und stehen unter „Bestätigt“ bzw. „Ausgeschlossen“. PDF und Excel enthalten alle nicht ausgeschlossenen. Orientierung, keine Steuerberatung.</div>
+    <div class="seg st-filter">${knopf('zu', `Zu bearbeiten (${zuGruppen})`)}${knopf('pruefen', `davon prüfen (${zahlG('pruefen')})`)}${knopf('vorschlag', `Vorschläge (${zahlG('vorschlag')})`)}${knopf('uebernommen', `aus WISO/Buhl (${zahlG('uebernommen')})`)}${knopf('bestaetigt', `✓ Bestätigt (${zahlG('bestaetigt')})`)}${knopf('ausgeschlossen', `Ausgeschlossen (${zahlG('ausgeschlossen')})`)}${knopf('alle', `Alle (${arbeitsGruppen(wirksam).length})`)}</div>
+    <div class="muted klein">„Zu bearbeiten“ zeigt nur, was noch eine Entscheidung braucht. Mehrere Zahlungen an denselben Empfänger sind zusammengefasst (z. B. „12×“): Eine Entscheidung gilt für alle – und künftig auch in den anderen Jahren. Bestätigte (✓) und ausgeschlossene (✕) verschwinden hier. Einnahmen stehen nur zur Kontrolle unter „Alle“. PDF und Excel enthalten alle nicht ausgeschlossenen. Orientierung, keine Steuerberatung.</div>
   </div>`;
 
   // Übersichtskarten je Abschnitt
@@ -240,7 +298,7 @@ export function steuerZeigen(el, c) {
     const s = summe(xs), betrag = a.id === 'einnahmen' ? s : -s;
     let bewertung = '';
     if (a.id === 'wk') { const d = betrag - pausch(jahr); bewertung = d > 0 ? `<span class="pos">${eur(d)} über dem Pauschbetrag</span>` : `<span class="muted">unter dem Pauschbetrag (${eur(pausch(jahr))}), wirkt sich vermutlich nicht aus</span>`; }
-    const offenN = xs.filter((x) => ['pruefen', 'vorschlag'].includes(x.status)).length;
+    const offenN = arbeitsGruppen(xs.filter((x) => ZU.includes(x.status))).length;
     h += `<button class="st-karte" data-sabschnitt="${a.id}"><span class="l">${esc(a.name)}</span><b>${eur(betrag)}</b>
       <span class="muted klein">${xs.length} Buchungen${offenN ? ` · <span class="st-pruef-t">${offenN} offen</span>` : ''}</span>${bewertung ? `<span class="klein">${bewertung}</span>` : ''}</button>`;
   }
@@ -268,20 +326,14 @@ export function steuerZeigen(el, c) {
         if (!ps.length) continue;
         const psum = summe(ps.filter((x) => x.status !== 'ausgeschlossen'));
         const offenP = ps.filter((x) => ['vorschlag', 'uebernommen'].includes(x.status)).length;
-        h += `<div class="st-posten"><div class="st-posten-kopf"><b>${esc(p.name)}</b><span class="muted klein">${ps.length} Buchungen</span>
+        const gr = gruppieren(ps);
+        h += `<div class="st-posten"><div class="st-posten-kopf"><b>${esc(p.name)}</b><span class="muted klein">${ps.length} Buchungen${gr.length < ps.length ? ` · ${gr.length} Empfänger` : ''}</span>
           ${offenP ? `<button class="link klein" data-salle="${p.id}">alle ${offenP} bestätigen</button>` : ''}<span class="betrag">${eur(a.id === 'einnahmen' ? psum : -psum)}</span></div>`;
-        for (const x of ps) {
-          const [st, stc] = STATUS[x.status];
-          h += `<div class="st-zeile${x.status === 'ausgeschlossen' ? ' aus' : ''}" data-skey="${esc(x.r.skey)}">
-            <div class="st-datum">${dde(x.r.d)}</div>
-            <div class="st-text" data-sdetail title="Klicken für alle Details"><div class="titel">${detailOffen.has(x.r.skey) ? '▾' : '▸'} ${esc(x.r.g || x.r.z || '–')}</div><div class="unter">${esc(x.r.g ? x.r.z : '')}${x.r.st ? ` · Buhl: ${esc(x.r.st)}` : ''} · ${esc(D.konten[x.r.k].name)}</div>
-              ${hinweisHtml(x)}
-              ${x.notiz ? `<div class="st-notiz">Notiz: ${esc(x.notiz)}</div>` : ''}</div>
-            <div class="st-rechts"><div class="betrag ${x.r.c > 0 ? 'pos' : ''}">${eur(x.r.c)}</div><span class="st-badge ${stc}">${st}</span>
-              <div class="st-knoepfe"><select data-sposten title="Posten ändern">${postenOptionen(x.status === 'ausgeschlossen' ? 'x' : x.p)}</select>
-                <button class="icon-btn sm" data-sok title="Bestätigen">✓</button><button class="icon-btn sm" data-sx title="Nicht steuerlich relevant">✕</button>
-                <button class="icon-btn sm" data-snotiz title="Notiz">✎</button></div></div>
-            ${detailOffen.has(x.r.skey) ? `<div class="st-detail">${detailHtml(x)}</div>` : ''}</div>`;
+        for (const g of gr) {
+          if (g.length === 1) { h += zeileHtml(g[0]); continue; }
+          const auf = gruppeOffen.has(gKey(g[0]));
+          h += gruppeHtml(g, auf);
+          if (auf) h += `<div class="st-gruppe-einzeln">${g.map(zeileHtml).join('')}</div>`;
         }
         h += '</div>';
       }
@@ -291,6 +343,38 @@ export function steuerZeigen(el, c) {
   h += '</div>';
   el.innerHTML = h;
   binden(el);
+}
+
+function zeileHtml(x) {
+  const [st, stc] = STATUS[x.status];
+  return `<div class="st-zeile${x.status === 'ausgeschlossen' ? ' aus' : ''}" data-skey="${esc(x.r.skey)}">
+    <div class="st-datum">${dde(x.r.d)}</div>
+    <div class="st-text" data-sdetail title="Klicken für alle Details"><div class="titel">${detailOffen.has(x.r.skey) ? '▾' : '▸'} ${esc(x.r.g || x.r.z || '–')}</div><div class="unter">${esc(x.r.g ? x.r.z : '')}${x.r.st ? ` · Buhl: ${esc(x.r.st)}` : ''} · ${esc(D.konten[x.r.k].name)}</div>
+      ${hinweisHtml(x)}
+      ${x.notiz ? `<div class="st-notiz">Notiz: ${esc(x.notiz)}</div>` : ''}</div>
+    <div class="st-rechts"><div class="betrag ${x.r.c > 0 ? 'pos' : ''}">${eur(x.r.c)}</div><span class="st-badge ${stc}">${st}</span>
+      <div class="st-knoepfe"><select data-sposten title="Posten ändern">${postenOptionen(x.status === 'ausgeschlossen' ? 'x' : x.p)}</select>
+        <button class="icon-btn sm" data-sok title="Bestätigen">✓</button><button class="icon-btn sm" data-sx title="Nicht steuerlich relevant">✕</button>
+        <button class="icon-btn sm" data-snotiz title="Notiz">✎</button></div></div>
+    ${detailOffen.has(x.r.skey) ? `<div class="st-detail">${detailHtml(x)}</div>` : ''}</div>`;
+}
+
+const jeBetrag = (g) => { const b = [...new Set(g.map((y) => y.r.c))]; return b.length === 1 ? `je ${eur(b[0])}` : `${b.length} verschiedene Beträge`; };
+
+// Eine Zeile für mehrere Zahlungen an denselben Empfänger
+function gruppeHtml(g, auf) {
+  const x = g[0], s = g.reduce((t, y) => t + y.r.c, 0);
+  const [st, stc] = STATUS[x.status];
+  return `<div class="st-zeile st-gruppe${x.status === 'ausgeschlossen' ? ' aus' : ''}" data-sgruppe="${esc(gKey(x))}">
+    <div class="st-datum"><span class="st-anzahl">${g.length}×</span></div>
+    <div class="st-text" data-sgauf title="Klicken, um die einzelnen Zahlungen zu sehen"><div class="titel">${auf ? '▾' : '▸'} ${esc(empfName(x.r))}</div>
+      <div class="unter">${g.length} Zahlungen · ${dde(g[0].r.d)} – ${dde(g.at(-1).r.d)} · ${jeBetrag(g)}${x.r.st ? ` · Buhl: ${esc(x.r.st)}` : ''}</div>
+      ${hinweisHtml(x, g.length)}
+      ${x.regel ? `<div class="st-notiz muted">Per Regel für „${esc(empfName(x.r))}“ – gilt in allen Jahren.</div>` : ''}</div>
+    <div class="st-rechts"><div class="betrag ${s > 0 ? 'pos' : ''}">${eur(s)}</div><span class="st-badge ${stc}">${st}</span>
+      <div class="st-knoepfe"><select data-gposten title="Posten für alle ${g.length} ändern">${postenOptionen(x.status === 'ausgeschlossen' ? 'x' : x.p)}</select>
+        <button class="icon-btn sm" data-gok title="Alle ${g.length} bestätigen">✓</button><button class="icon-btn sm" data-gx title="Alle ${g.length}: nicht steuerlich relevant">✕</button>
+        <button class="icon-btn sm" data-gnotiz title="Notiz für alle">✎</button></div></div></div>`;
 }
 
 // Auswahlliste der Posten (auch für die Buchungsdetails im Dashboard)
@@ -306,7 +390,11 @@ export function postenOptionen(aktuell, mitLeer = false) {
 export function steuerPosten(r) {
   const e = entscheidungen[r.skey];
   if (e?.x) return 'x';
-  return e?.p || automatisch(r)?.p || '';
+  if (e?.p) return e.p;
+  const a = automatisch(r);
+  if (!a) return '';
+  const rg = entscheidungen[regelKey(r, a.p)];
+  return rg?.x ? 'x' : rg?.p || a.p;
 }
 
 export function steuerZuordnen(r, wert) {
@@ -333,7 +421,32 @@ function binden(el) {
     aktionAusfuehren(r, b.dataset.saktion, !!b.dataset.snotizfrage); neu();
     rueckgaengig(`${b.dataset.saktion === 'x' ? 'Ausgeschlossen' : 'Bestätigt'}: ${kurzName(r)}`, [v]);
   });
-  el.querySelectorAll('[data-sdetail]').forEach((t) => t.onclick = () => { const k = zeile(t).dataset.skey; detailOffen.has(k) ? detailOffen.delete(k) : detailOffen.add(k); neu(); });
+  el.querySelectorAll('[data-sdetail]').forEach((t) => t.onclick = (ev) => { if (ev.target.closest('button, select, a')) return; const k = zeile(t).dataset.skey; detailOffen.has(k) ? detailOffen.delete(k) : detailOffen.add(k); neu(); });
+  // Gruppen: aufklappen und für alle entscheiden
+  const gruppeVon = (b) => { const k = b.closest('[data-sgruppe]').dataset.sgruppe; return einordnen(jahr).filter((x) => gKey(x) === k).map((x) => x.r.skey); };
+  el.querySelectorAll('[data-sgauf]').forEach((t) => t.onclick = (ev) => {
+    if (ev.target.closest('button, select, a')) return;
+    const k = t.closest('[data-sgruppe]').dataset.sgruppe; gruppeOffen.has(k) ? gruppeOffen.delete(k) : gruppeOffen.add(k); neu();
+  });
+  el.querySelectorAll('[data-gaktion]').forEach((b) => b.onclick = () => gruppeEntscheiden(gruppeVon(b), b.dataset.gaktion, !!b.dataset.snotizfrage));
+  el.querySelectorAll('[data-gok]').forEach((b) => b.onclick = () => gruppeEntscheiden(gruppeVon(b), 'ok'));
+  el.querySelectorAll('[data-gx]').forEach((b) => b.onclick = () => gruppeEntscheiden(gruppeVon(b), b.closest('.aus') ? 'ok' : 'x'));
+  el.querySelectorAll('[data-gposten]').forEach((s) => s.onchange = () => gruppeEntscheiden(gruppeVon(s), s.value));
+  el.querySelectorAll('[data-gnotiz]').forEach((b) => b.onclick = () => {
+    const keys = gruppeVon(b);
+    const t = prompt(`Notiz für alle ${keys.length} Zahlungen (erscheint im PDF und in Excel):`, entscheidungen[keys[0]]?.n || '');
+    if (t === null) return;
+    for (const k of keys) { const e = { ...(entscheidungen[k] || {}) }; if (t.trim()) e.n = t.trim(); else delete e.n; entscheidungen[k] = e; }
+    speichern(); neu();
+  });
+  el.querySelector('#st-klar')?.addEventListener('click', () => {
+    const xs = einordnen(jahr).filter((x) => x.klar);
+    const arten = [...new Set(xs.map((x) => x.klar))].join(', ');
+    const vorher = [];
+    for (const g of gruppieren(xs)) vorher.push(...gruppeEntscheiden(g.map((x) => x.r.skey), 'x', false, true));
+    neu();
+    rueckgaengig(`${xs.length} eindeutige Fälle ausgeschlossen (${arten})`, vorher);
+  });
   el.querySelectorAll('[data-sdashboard]').forEach((b) => b.onclick = () => ctx.setze({ q: `"${b.dataset.sdashboard}"`, tab: 'buchungen', jahr: '', monat: '' }));
   el.querySelector('#st-pruefen')?.addEventListener('click', () => pruefModus(0));
   const buchung = (z) => D.rows.find((r) => r.skey === z.dataset.skey);
@@ -349,9 +462,10 @@ function binden(el) {
   });
   el.querySelectorAll('[data-sx]').forEach((b) => b.onclick = () => {
     const r = buchung(zeile(b)); const e = entscheidungen[r.skey] || {}; const v = vorherVon(r.skey);
-    if (e.x) { delete e.x; entscheidungen[r.skey] = e; } else entscheidungen[r.skey] = { ...e, x: 1 };
+    const war = zeile(b).classList.contains('aus');
+    if (war) { entscheidungen[r.skey] = { ...e, p: e.p || steuerPostenAuto(r), ok: 1 }; delete entscheidungen[r.skey].x; } else entscheidungen[r.skey] = { ...e, x: 1 };
     speichern(); neu();
-    rueckgaengig(`${v[1]?.x ? 'Wieder aufgenommen' : 'Ausgeschlossen'}: ${kurzName(r)}`, [v]);
+    rueckgaengig(`${war ? 'Wieder aufgenommen' : 'Ausgeschlossen'}: ${kurzName(r)}`, [v]);
   });
   el.querySelectorAll('[data-snotiz]').forEach((b) => b.onclick = () => {
     const r = buchung(zeile(b)); const e = entscheidungen[r.skey] || {};
@@ -383,14 +497,16 @@ function binden(el) {
   };
 }
 
-// Einschätzung + Empfehlung + Knöpfe (Liste und Prüffenster)
-function hinweisHtml(x) {
+const steuerPostenAuto = (r) => automatisch(r)?.p;
+
+// Einschätzung + Empfehlung + Knöpfe (Liste und Prüffenster); n > 1: gilt für eine ganze Gruppe
+function hinweisHtml(x, n = 1) {
   if (!x.hinweis) return '';
   const pr = x.status === 'pruefen' || x.status === 'vorschlag';
   return `<div class="st-rat${x.status === 'pruefen' ? ' pruef' : ''}">
     <div><b>${pr ? 'Einschätzung' : 'Hinweis'}:</b> ${esc(x.hinweis)}</div>
     ${x.rat ? `<div><b>Empfehlung:</b> ${esc(x.rat)}</div>` : ''}
-    ${x.aktionen?.length ? `<div class="st-rat-knoepfe">${x.aktionen.map((a) => `<button class="btn sm${a.p === 'x' ? ' danger' : ''}" data-saktion="${a.p}"${a.notiz ? ' data-snotizfrage="1"' : ''}>${esc(a.t)}</button>`).join('')}</div>` : ''}
+    ${x.aktionen?.length ? `<div class="st-rat-knoepfe">${x.aktionen.map((a) => `<button class="btn sm${a.p === 'x' ? ' danger' : ''}" data-${n > 1 ? 'g' : 's'}aktion="${a.p}"${a.notiz ? ' data-snotizfrage="1"' : ''}>${esc(a.t)}${n > 1 ? ` (alle ${n})` : ''}</button>`).join('')}</div>` : ''}
   </div>`;
 }
 
@@ -425,7 +541,7 @@ const kurzName = (r) => (r.g || r.z || '').slice(0, 40);
 // ---------------------------------------------------------------- Details einer Buchung
 const empfKey = (g) => norm(g).replace(/\d{4,}/g, '').replace(/\s+/g, ' ').trim();
 
-function detailHtml(x, gross = false) {
+function detailHtml(x, gross = false, n = 1) {
   const r = x.r, p = POSTEN_ID.get(x.p);
   const felder = [
     ['Datum', dde(r.d)], ['Betrag', eur(r.c)], ['Konto', D.konten[r.k].name], ['Empfänger / Auftraggeber', r.g || '–'],
@@ -434,7 +550,7 @@ function detailHtml(x, gross = false) {
     ['Was zählt hier', p?.info || '–'], ['Warum so eingeordnet', x.grund || '–'], ...(r.v ? [['Vertrag', r.v]] : []), ...(r.t ? [['Tags', r.t]] : []), ...(r.n ? [['Notiz (Finanzguru)', r.n]] : []),
   ];
   let h = `<dl class="st-felder">${felder.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`;
-  if (gross) h = hinweisHtml(x) + h;
+  if (gross) h = hinweisHtml(x, n) + h;
   // weitere Zahlungen an denselben Empfänger (alle Jahre)
   const key = empfKey(r.g);
   if (key) {
@@ -453,7 +569,7 @@ function detailHtml(x, gross = false) {
 // ---------------------------------------------------------------- Prüfmodus: offene Buchungen nacheinander
 let pruefListe = [], pruefI = 0;
 function pruefModus(start) {
-  pruefListe = einordnen(jahr).filter((x) => ['pruefen', 'vorschlag'].includes(x.status)).map((x) => x.r.skey);
+  pruefListe = arbeitsGruppen(einordnen(jahr).filter((x) => ZU.includes(x.status))).map((g) => g.map((x) => x.r.skey));
   pruefI = Math.min(start, pruefListe.length - 1);
   let dlg = document.querySelector('#st-pruef');
   if (!dlg) {
@@ -481,22 +597,27 @@ function pruefSchliessen() {
 
 function pruefZeigen() {
   const dlg = document.querySelector('#st-pruef');
-  const offene = einordnen(jahr);
-  const x = offene.find((y) => y.r.skey === pruefListe[pruefI]);
-  const nochOffen = pruefListe.filter((k) => ['pruefen', 'vorschlag'].includes(offene.find((y) => y.r.skey === k)?.status)).length;
+  const offene = einordnen(jahr), nachKey = new Map(offene.map((y) => [y.r.skey, y]));
+  const keys = pruefListe[pruefI] || [];
+  const xs = keys.map((k) => nachKey.get(k)).filter(Boolean), x = xs[0];
+  const nochOffen = pruefListe.filter((ks) => ks.some((k) => ZU.includes(nachKey.get(k)?.status))).length;
   if (!x) {
     dlg.innerHTML = `<div class="st-dlg-haupt"><h2>Fertig</h2><p>Alle offenen Punkte für ${jahr} sind durchgesehen.</p><button class="btn primary" data-p="fertig">Schließen</button></div>`;
     dlg.querySelector('[data-p="fertig"]').onclick = pruefSchliessen;
     return;
   }
   const [st, stc] = STATUS[x.status];
-  dlg.innerHTML = `<div class="st-dlg-kopf"><b>Prüfung ${pruefI + 1} von ${pruefListe.length}</b><span class="muted klein">${nochOffen} noch offen · Steuerjahr ${jahr}</span>
+  const n = xs.length, gs = xs.reduce((t, y) => t + y.r.c, 0);
+  const liste = n > 1 ? `<div class="st-verlauf"><div class="klein"><b>Die ${n} Zahlungen dieser Gruppe</b> – die Entscheidung gilt für alle und künftig auch in anderen Jahren:</div>
+      <table class="st-vtab">${xs.map((y) => `<tr><td>${dde(y.r.d)}</td><td class="r">${eur(y.r.c)}</td><td class="z" colspan="2">${esc(y.r.z)}</td></tr>`).join('')}</table></div>` : '';
+  dlg.innerHTML = `<div class="st-dlg-kopf"><b>Entscheidung ${pruefI + 1} von ${pruefListe.length}</b><span class="muted klein">${nochOffen} noch offen · Steuerjahr ${jahr}</span>
       <button class="icon-btn sm" data-p="zu" title="Schließen (Esc)">✕</button></div>
     <div class="st-dlg-haupt">
-      <div class="st-dlg-betrag"><span class="betrag ${x.r.c > 0 ? 'pos' : ''}">${eur(x.r.c)}</span><span class="st-badge ${stc}">${st}</span></div>
+      <div class="st-dlg-betrag"><span class="betrag ${gs > 0 ? 'pos' : ''}">${eur(gs)}</span>${n > 1 ? `<span class="st-anzahl">${n} Zahlungen · ${jeBetrag(xs)}</span>` : ''}<span class="st-badge ${stc}">${st}</span></div>
       <div class="st-dlg-titel">${esc(x.r.g || '–')}</div>
       <div class="st-dlg-zweck">${esc(x.r.z || '')}</div>
-      ${detailHtml(x, true)}
+      ${liste}
+      ${detailHtml(x, true, n)}
       ${x.notiz ? `<div class="st-notiz">Deine Notiz: ${esc(x.notiz)}</div>` : ''}
     </div>
     <div class="st-dlg-fuss">
@@ -505,8 +626,8 @@ function pruefZeigen() {
       <div class="st-dlg-knoepfe">
         <button class="btn" data-p="zurueck" title="← Pfeiltaste">← Zurück</button>
         <button class="btn" data-p="notiz">Notiz</button>
-        <button class="btn danger" data-p="x" title="Taste X">✕ Nicht relevant</button>
-        <button class="btn primary" data-p="ok" title="Enter">✓ Bestätigen</button>
+        <button class="btn danger" data-p="x" title="Taste X">✕ Nicht relevant${n > 1 ? ` (alle ${n})` : ''}</button>
+        <button class="btn primary" data-p="ok" title="Enter">✓ Bestätigen${n > 1 ? ` (alle ${n})` : ''}</button>
         <button class="btn" data-p="weiter" title="→ Pfeiltaste">Überspringen →</button>
       </div>
       <div class="muted klein">Tasten: Enter = bestätigen · X = nicht relevant · → überspringen · ← zurück · Esc = schließen</div>
@@ -515,22 +636,15 @@ function pruefZeigen() {
   const weiter = () => { if (pruefI < pruefListe.length - 1) pruefI++; else pruefListe = []; pruefZeigen(); };
   dlg.querySelector('[data-p="zu"]').onclick = pruefSchliessen;
   dlg.querySelector('[data-p="posten"]').onchange = (e) => { dlg.querySelector('[data-p="info"]').textContent = e.target.value === 'x' ? 'Wird nicht in die Steuerunterlagen übernommen.' : POSTEN_ID.get(e.target.value)?.info || ''; };
-  dlg.querySelectorAll('[data-saktion]').forEach((b) => b.onclick = () => { aktionAusfuehren(r, b.dataset.saktion, !!b.dataset.snotizfrage); weiter(); });
+  dlg.querySelectorAll('[data-saktion], [data-gaktion]').forEach((b) => b.onclick = () => { gruppeEntscheiden(keys, b.dataset.saktion || b.dataset.gaktion, !!b.dataset.snotizfrage, true); weiter(); });
   dlg.querySelector('[data-p="weiter"]').onclick = weiter;
   dlg.querySelector('[data-p="zurueck"]').onclick = () => { if (pruefI > 0) pruefI--; pruefZeigen(); };
-  dlg.querySelector('[data-p="ok"]').onclick = () => {
-    const wert = dlg.querySelector('[data-p="posten"]').value;
-    if (wert === 'x') entscheidungen[r.skey] = { ...(entscheidungen[r.skey] || {}), x: 1 };
-    else { const e = entscheidungen[r.skey] || {}; entscheidungen[r.skey] = { ...e, p: wert, ok: 1 }; delete entscheidungen[r.skey].x; }
-    speichern(); weiter();
-  };
-  dlg.querySelector('[data-p="x"]').onclick = () => { entscheidungen[r.skey] = { ...(entscheidungen[r.skey] || {}), x: 1 }; speichern(); weiter(); };
+  dlg.querySelector('[data-p="ok"]').onclick = () => { gruppeEntscheiden(keys, dlg.querySelector('[data-p="posten"]').value, false, true); weiter(); };
+  dlg.querySelector('[data-p="x"]').onclick = () => { gruppeEntscheiden(keys, 'x', false, true); weiter(); };
   dlg.querySelector('[data-p="notiz"]').onclick = () => {
-    const e = entscheidungen[r.skey] || {};
-    const t = prompt('Notiz zu dieser Buchung (erscheint im PDF und in Excel):', e.n || '');
+    const t = prompt(`Notiz ${n > 1 ? `für alle ${n} Zahlungen` : 'zu dieser Buchung'} (erscheint im PDF und in Excel):`, entscheidungen[r.skey]?.n || '');
     if (t === null) return;
-    entscheidungen[r.skey] = { ...e, ...(t.trim() ? { n: t.trim() } : {}) };
-    if (!t.trim()) delete entscheidungen[r.skey].n;
+    for (const k of keys) { const e = { ...(entscheidungen[k] || {}) }; if (t.trim()) e.n = t.trim(); else delete e.n; entscheidungen[k] = e; }
     speichern(); pruefZeigen();
   };
   dlg.querySelectorAll('[data-sdashboard]').forEach((b) => b.onclick = () => { if (dlg.open) dlg.close(); ctx.setze({ q: `"${b.dataset.sdashboard}"`, tab: 'buchungen', jahr: '', monat: '' }); });
