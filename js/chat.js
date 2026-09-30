@@ -44,9 +44,11 @@ const TOOLS = [
         konten: { type: 'array', items: { type: 'string' }, description: 'Kontonamen genau wie in der Kontenliste (optional, sonst alle)' },
         kategorien: { type: 'array', items: { type: 'string' }, description: 'Hauptkategorien genau wie in der Liste (optional)' },
         unterkategorien: { type: 'array', items: { type: 'string' }, description: 'Unterkategorien genau wie in der Liste (optional)' },
+        steuerkategorien: { type: 'array', items: { type: 'string' }, description: 'Steuerkategorien genau wie in der Liste (vom Nutzer in WISO/Buhl vergeben), optional' },
+        nur_steuerrelevant: { type: 'boolean', description: 'true = nur Buchungen, denen der Nutzer eine Steuerkategorie gegeben hat' },
         suche: { type: 'string', description: 'Suchtext wie im Dashboard: Wörter (alle müssen vorkommen), a|b (eines davon), "genaue Folge", -ohne, Beträge 49,99 >500 100-250. Durchsucht Empfänger, Verwendungszweck, Kategorie, Konto, Vertrag, Tags, Notiz.' },
         art: { type: 'string', enum: ['ohne Umbuchungen', 'alle', 'Einnahme', 'Ausgabe', 'Sparen', 'Umbuchung'], description: 'Standard: ohne Umbuchungen' },
-        gruppieren_nach: { type: 'string', enum: ['keine', 'jahr', 'monat', 'kategorie', 'unterkategorie', 'konto', 'empfaenger'], description: 'Standard: keine (dann einzelne Buchungen)' },
+        gruppieren_nach: { type: 'string', enum: ['keine', 'jahr', 'monat', 'kategorie', 'unterkategorie', 'konto', 'empfaenger', 'steuerkategorie'], description: 'Standard: keine (dann einzelne Buchungen)' },
         sortierung: { type: 'string', enum: ['datum', 'datum_absteigend', 'betrag_groesste_zuerst'], description: 'Für einzelne Buchungen. Standard: datum' },
         max_zeilen: { type: 'integer', description: 'Höchstzahl einzelner Buchungen oder Gruppen, Standard 40, höchstens 200' },
       },
@@ -99,9 +101,10 @@ function buchungenAuswerten(a) {
   const unbekannt = (a.konten || []).filter((n) => !D.kontoIdx.has(n));
   const kats = a.kategorien?.length ? new Set(a.kategorien) : null;
   const ukats = a.unterkategorien?.length ? new Set(a.unterkategorien) : null;
+  const stks = a.steuerkategorien?.length ? new Set(a.steuerkategorien) : null;
   const art = a.art || 'ohne Umbuchungen';
   const rows = D.rows.filter((r) => (!a.von || r.d >= a.von) && (!a.bis || r.d <= a.bis)
-    && (!konten || konten.has(r.k)) && (!kats || kats.has(r.kat)) && (!ukats || ukats.has(r.ukat))
+    && (!konten || konten.has(r.k)) && (!kats || kats.has(r.kat)) && (!ukats || ukats.has(r.ukat)) && (!stks || stks.has(r.st)) && (!a.nur_steuerrelevant || r.st)
     && (art === 'alle' || (art === 'ohne Umbuchungen' ? r.art !== 'Umbuchung' : r.art === art)) && test(r));
   let ein = 0, aus = 0, sum = 0;
   for (const r of rows) { sum += r.c; if (r.art === 'Einnahme') ein += r.c; else if (r.art === 'Ausgabe') aus += r.c; }
@@ -115,7 +118,7 @@ function buchungenAuswerten(a) {
   const g = a.gruppieren_nach || 'keine';
   if (g !== 'keine') {
     const key = { jahr: (r) => String(r.y), monat: (r) => r.d.slice(0, 7), kategorie: (r) => r.kat, unterkategorie: (r) => `${r.kat} / ${r.ukat || '–'}`,
-      konto: (r) => D.konten[r.k].name, empfaenger: (r) => r.g || '(ohne Empfänger)' }[g];
+      konto: (r) => D.konten[r.k].name, empfaenger: (r) => r.g || '(ohne Empfänger)', steuerkategorie: (r) => r.st || '(ohne Steuerkategorie)' }[g];
     const m = new Map();
     for (const r of rows) { const k = key(r); const x = m.get(k) || m.set(k, { anzahl: 0, c: 0 }).get(k); x.anzahl++; x.c += r.c; }
     let gr = [...m].map(([k, x]) => ({ gruppe: k, anzahl: x.anzahl, summe_euro: e2(x.c) }));
@@ -128,7 +131,7 @@ function buchungenAuswerten(a) {
     if (a.sortierung === 'betrag_groesste_zuerst') rs = [...rows].sort((x, y) => Math.abs(y.c) - Math.abs(x.c));
     out.buchungen = rs.slice(0, max).map((r) => ({
       datum: r.d, konto: D.konten[r.k].name, empfaenger: r.g, zweck: r.z.length > 140 ? r.z.slice(0, 140) + '…' : r.z,
-      kategorie: r.kat, unterkategorie: r.ukat, art: r.art, betrag_euro: e2(r.c), ...(r.v ? { vertrag: r.v } : {}), ...(r.n ? { notiz: r.n } : {}),
+      kategorie: r.kat, unterkategorie: r.ukat, art: r.art, betrag_euro: e2(r.c), ...(r.v ? { vertrag: r.v } : {}), ...(r.n ? { notiz: r.n } : {}), ...(r.st ? { steuerkategorie: r.st } : {}),
     }));
     if (rows.length > max) out.hinweis = `Nur ${max} von ${rows.length} Buchungen gezeigt. Für mehr: gruppieren oder enger filtern.`;
   }
@@ -172,13 +175,16 @@ ${konten}
 Kategorien (Hauptkategorie: Unterkategorien):
 ${[...kat].map(([k, u]) => `- ${k}: ${u.join(', ')}`).join('\n')}
 
+Steuerkategorien (in WISO/Buhl vergeben, teils automatisch durch Buhl, Feld „steuerkategorie“, vorhanden für Buchungen seit 2016 bis zum Stand des Buhl-Exports):
+${(D.j.steuerkategorien || []).filter(Boolean).join(', ')}
+
 Begriffe: Beträge < 0 sind Ausgaben, > 0 Einnahmen. Art „Umbuchung“ = Übertrag zwischen eigenen Konten (für Einnahmen/Ausgaben weglassen), „Sparen“ = Übertrag auf ein eigenes Sparkonto außerhalb der Liste.
 
 Regeln:
 - Rechne nie selbst aus dem Gedächtnis: hole jede Zahl mit den Werkzeugen. Ergebnisse sind in Euro.
 - Antworte auf Deutsch, kurz und klar. Beträge im deutschen Format (1.234,56 €), Datum als TT.MM.JJJJ. Nutze Markdown-Tabellen für Aufstellungen.
 - Wenn eine Grafik hilft (Verlauf, Vergleich), rufe diagramm_zeigen auf. Biete mit dashboard_knopf an, die Buchungen im Dashboard zu öffnen, wenn das nützlich ist.
-- Steuerliche Fragen: suche breit (z. B. Kategorien Versicherungen, Steuern, Kinder, Gesundheit, Wohnen mit Handwerker/Nebenkosten; Suchbegriffe wie spende|kirchensteuer|handwerker|reparatur|schornstein|kita|kindergarten|tagesmutter|arzt|apotheke|brille|fortbildung|fachbuch|gewerkschaft|steuerberat|riester|ruerup|unterhalt|haftpflicht|berufsunfaehig) und ordne die Treffer den üblichen Posten der Einkommensteuererklärung zu (Vorsorgeaufwendungen, Sonderausgaben, außergewöhnliche Belastungen, haushaltsnahe Dienstleistungen/Handwerker § 35a, Kinderbetreuung, Werbungskosten). Weise kurz darauf hin, dass das eine Vorsortierung ist und keine Steuerberatung.
+- Steuerliche Fragen: Nimm zuerst die eigenen Steuerkategorien des Nutzers (buchungen_auswerten mit Zeitraum, nur_steuerrelevant=true, gruppieren_nach=steuerkategorie; danach die einzelnen Buchungen der wichtigen Gruppen). Das ist die Einteilung aus seiner Steuersoftware und hat Vorrang – sie kann aber automatisch vergeben sein: prüfe auf Plausibilität (z. B. Restaurantbesuche als „Übernachtungskosten“ nur bei Dienstreisen) und weise auf Zweifelsfälle hin. Prüfe danach ergänzend, ob typische Posten ohne Steuerkategorie fehlen, und nenne sie getrennt als „möglicherweise auch relevant“. Suche dafür breit (z. B. Kategorien Versicherungen, Steuern, Kinder, Gesundheit, Wohnen mit Handwerker/Nebenkosten; Suchbegriffe wie spende|kirchensteuer|handwerker|reparatur|schornstein|kita|kindergarten|tagesmutter|arzt|apotheke|brille|fortbildung|fachbuch|gewerkschaft|steuerberat|riester|ruerup|unterhalt|haftpflicht|berufsunfaehig) und ordne die Treffer den üblichen Posten der Einkommensteuererklärung zu (Vorsorgeaufwendungen, Sonderausgaben, außergewöhnliche Belastungen, haushaltsnahe Dienstleistungen/Handwerker § 35a, Kinderbetreuung, Werbungskosten). Weise kurz darauf hin, dass das eine Vorsortierung ist und keine Steuerberatung.
 - Kontostände: nenne die Sicherheit des Werts, wenn er nicht exakt ist.
 - Wenn etwas in den Daten fehlt, sag es offen.`;
 }

@@ -30,11 +30,12 @@ const charts = {};
 
 // ======================================================================= Daten aufbereiten
 function aufbereiten(j) {
-  const K = j.kategorien, U = j.unterkategorien, A = j.arten, konten = j.konten;
+  const K = j.kategorien, U = j.unterkategorien, A = j.arten, konten = j.konten, ST = j.steuerkategorien || [];
   const rows = j.buchungen.map((b, i) => {
-    const [d, k, c, g, z, kat, ukat, art, v, t, n] = b;
+    const [d, k, c, g, z, kat, ukat, art, v, t, n, st] = b;
     const r = { i, d, y: +d.slice(0, 4), m: +d.slice(5, 7), k, c, g, z, kat: K[kat], ukat: U[ukat], art: A[art], v, t, n };
-    r.s = norm(`${g} ${z} ${r.kat} ${r.ukat} ${konten[k].name} ${v} ${t} ${n}`);
+    r.st = ST[st] || '';
+    r.s = norm(`${g} ${z} ${r.kat} ${r.ukat} ${konten[k].name} ${v} ${t} ${n} ${r.st}`);
     return r;
   });
   const emp = new Map(), ukatZu = new Map();
@@ -61,6 +62,9 @@ function aufbereiten(j) {
 const jahreWahl = () => (S.jahr ? String(S.jahr).split(',').map(Number).filter(Boolean).sort((a, b) => a - b) : []);
 const einJahr = () => { const j = jahreWahl(); return j.length === 1 ? j[0] : 0; };
 const vergleichsModus = () => jahreWahl().length > 1;
+// Gewählte Monate: S.monat ist „3“ oder „1,2,3“
+const monateWahl = () => (S.monat ? String(S.monat).split(',').map(Number).filter((m) => m >= 1 && m <= 12).sort((a, b) => a - b) : []);
+const einMonat = () => { const m = monateWahl(); return m.length === 1 ? m[0] : 0; };
 const JAHRES_FARBEN = ['--accent', '--aus', '--ein', '#9085e9', '#eda100', '#e87ba4', '#4a3aa7', '--muted'];
 // Farbe je Jahr im Vergleich: das neueste Jahr in Blau, davor Orange, Grün, …
 function jahresFarbe(idx, anzahl) { const f = JAHRES_FARBEN[(anzahl - 1 - idx) % JAHRES_FARBEN.length]; return f.startsWith('--') ? css(f) : f; }
@@ -68,10 +72,10 @@ function jahresFarbe(idx, anzahl) { const f = JAHRES_FARBEN[(anzahl - 1 - idx) %
 // Prüffunktion für alle Filter; mitJahr = false lässt Jahr und Zeitangaben der Suche weg (für den Vorjahresvergleich)
 function pruefer(conds, mitJahr = true) {
   const test = matcher(mitJahr ? conds : conds.filter((c) => c.kind !== 'zeit'));
-  const jahre = mitJahr ? jahreWahl() : [], monat = +S.monat || 0;
+  const jahre = mitJahr ? jahreWahl() : [], monate = monateWahl();
   const konto = S.konto ? D.kontoIdx.get(S.konto) ?? -2 : -1;
   return (r) => (S.umb || r.art !== 'Umbuchung')
-    && (!jahre.length || jahre.includes(r.y)) && (!monat || r.m === monat) && (konto === -1 || r.k === konto)
+    && (!jahre.length || jahre.includes(r.y)) && (!monate.length || monate.includes(r.m)) && (konto === -1 || r.k === konto)
     && (!S.kat || r.kat === S.kat) && (!S.ukat || r.ukat === S.ukat)
     && (S.art === 'alle' || (S.art === 'aus' ? r.art === 'Ausgabe' : r.art === 'Einnahme'))
     && test(r);
@@ -92,7 +96,7 @@ function vergleich(conds) {
   if (vergleichsModus() || (!einJahr() && !spans.length)) return null;
   let a = '0000-00-00', b = '9999-99-99';
   const ej = einJahr();
-  if (ej) { const mm = S.monat ? String(S.monat).padStart(2, '0') : ''; a = `${ej}-${mm || '01'}-01`; b = `${ej}-${mm || '12'}-31`; }
+  if (ej) { const mm = einMonat() ? String(einMonat()).padStart(2, '0') : ''; a = `${ej}-${mm || '01'}-01`; b = `${ej}-${mm || '12'}-31`; }
   for (const c of spans) { if (c.span[0] + '-01' > a) a = c.span[0] + '-01'; if (c.span[1] + '-31' < b) b = c.span[1] + '-31'; }
   const bVoll = b;
   if (b > D.bis) b = D.bis;
@@ -116,12 +120,13 @@ function vergleich(conds) {
 const proMonat = () => (einJahr() || (vergleichsModus() ? 0 : F.length && F[0].y === F[F.length - 1].y ? F[0].y : 0));
 
 function monatsSpanne(conds) {
-  if (einJahr() && S.monat) return 1;
+  const mw = monateWahl();
+  if (einJahr() && mw.length) return mw.length;
   const k = S.konto ? D.konten[D.kontoIdx.get(S.konto)] : null;
   let lo = (k?.von || D.von).slice(0, 7), hi = (k?.bis || D.bis).slice(0, 7);
   const jw = jahreWahl();
   if (jw.length > 1) {
-    if (S.monat) return jw.length;
+    if (mw.length) return jw.length * mw.length;
     let n = 0;
     for (const y of jw) {
       const a = `${y}-01` < lo ? lo : `${y}-01`, b = `${y}-12` > hi ? hi : `${y}-12`;
@@ -129,7 +134,7 @@ function monatsSpanne(conds) {
     }
     return Math.max(1, n);
   }
-  if (S.monat) return new Set(D.rows.filter((r) => r.m === +S.monat && r.d.slice(0, 7) >= lo && r.d.slice(0, 7) <= hi).map((r) => r.y)).size || 1;
+  if (mw.length) return new Set(D.rows.filter((r) => mw.includes(r.m) && r.d.slice(0, 7) >= lo && r.d.slice(0, 7) <= hi).map((r) => r.d.slice(0, 7))).size || 1;
   let a = lo, b = hi;
   if (einJahr()) { a = `${einJahr()}-01`; b = `${einJahr()}-12`; }
   for (const c of conds) if (c.span) { if (c.span[0] > a) a = c.span[0]; if (c.span[1] < b) b = c.span[1]; }
@@ -156,6 +161,21 @@ function selectsFuellen() {
     setze({ jahr: w.sort((x, y) => x - y).join(',') });
   });
   $('#f-monat').innerHTML = opt('', 'Alle Monate') + MONAT.map((m, i) => opt(i + 1, m)).join('');
+  // Monatsleiste unter den Jahren: Klick = Monat an/aus, Umschalt + Klick = Zeitraum (z. B. Jan–Mär)
+  let mBox = $('#monate');
+  if (!mBox) { mBox = Object.assign(document.createElement('div'), { id: 'monate', className: 'jahre monate' }); mBox.setAttribute('role', 'group'); $('#jahre').after(mBox); }
+  mBox.innerHTML = `<button data-m="">Alle</button>` + MON.map((m, i) => `<button data-m="${i + 1}">${m}</button>`).join('');
+  mBox.title = 'Klick: Monat an/aus – mehrere möglich. Umschalt + Klick: ganzer Zeitraum.';
+  let letzterM = 0;
+  mBox.querySelectorAll('button').forEach((b) => b.onclick = (e) => {
+    const m = +b.dataset.m;
+    if (!m) { letzterM = 0; return setze({ monat: '' }); }
+    let w = monateWahl();
+    if (e.shiftKey && letzterM) { const a = Math.min(m, letzterM), z = Math.max(m, letzterM); w = []; for (let x = a; x <= z; x++) w.push(x); }
+    else w = w.includes(m) ? w.filter((x) => x !== m) : [...w, m];
+    letzterM = m;
+    setze({ monat: w.sort((x, y) => x - y).join(',') });
+  });
   $('#f-konto').innerHTML = opt('', 'Alle Konten') + D.konten.map((k) => opt(k.name, k.name)).join('');
   $('#f-kat').innerHTML = opt('', 'Alle Kategorien') + D.kats.map((k) => opt(k, k)).join('');
 }
@@ -165,7 +185,12 @@ function filterZeigen(conds) {
   const fj = $('#f-jahr');
   fj.querySelector('option[value="__m"]')?.remove();
   if (jw.length > 1) fj.append(Object.assign(document.createElement('option'), { value: '__m', textContent: `${jw.length} Jahre: ${jw.join(', ')}` }));
-  for (const [id, v] of [['#f-jahr', jw.length > 1 ? '__m' : S.jahr], ['#f-monat', S.monat], ['#f-konto', S.konto], ['#f-kat', S.kat]]) {
+  const mw = monateWahl();
+  const fm = $('#f-monat');
+  fm.querySelector('option[value="__m"]')?.remove();
+  if (mw.length > 1) fm.append(Object.assign(document.createElement('option'), { value: '__m', textContent: mw.map((m) => MON[m - 1]).join(', ') }));
+  $('#monate')?.querySelectorAll('button').forEach((b) => { const an = b.dataset.m ? mw.includes(+b.dataset.m) : !mw.length; b.classList.toggle('an', an); b.setAttribute('aria-pressed', String(an)); });
+  for (const [id, v] of [['#f-jahr', jw.length > 1 ? '__m' : S.jahr], ['#f-monat', mw.length > 1 ? '__m' : S.monat], ['#f-konto', S.konto], ['#f-kat', S.kat]]) {
     const el = $(id); el.value = v; el.classList.toggle('aktiv', !!v);
   }
   document.querySelectorAll('#f-art button').forEach((b) => b.classList.toggle('an', b.dataset.v === S.art));
@@ -504,7 +529,7 @@ function tabBuchungen(conds) {
       <td class="r betrag ${cls(r.c)}">${eur(r.c)}</td></tr>`;
     if (auf) {
       const dd = [['Verwendungszweck', r.z], ['Kategorie', `${r.kat}${r.ukat ? ' · ' + r.ukat : ''}`], ['Konto', kn(r)], ['Art', r.art],
-        ['Vertrag', r.v], ['Tags', r.t], ['Notiz', r.n]].filter(([, v]) => v);
+        ['Vertrag', r.v], ['Tags', r.t], ['Notiz', r.n], ['Steuerkategorie (Buhl)', r.st]].filter(([, v]) => v);
       h += `<tr class="detail"><td colspan="5"><dl>${dd.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
         ${r.g ? `<button class="btn sm" data-alle="${esc(r.g)}">Alle Buchungen von „${esc(r.g.length > 40 ? r.g.slice(0, 40) + '…' : r.g)}“</button>` : ''}
         <button class="btn sm" data-nurkat="${esc(r.kat)}">Nur ${esc(r.kat)}</button></td></tr>`;
@@ -602,7 +627,8 @@ function stichtag() {
   if (S.stichtag) return S.stichtag;
   let d = D.bis;
   const jw = jahreWahl();
-  if (jw.length) { const y = jw[jw.length - 1]; d = S.monat ? new Date(Date.UTC(y, +S.monat, 0)).toISOString().slice(0, 10) : `${y}-12-31`; }
+  const mw = monateWahl();
+  if (jw.length) { const y = jw[jw.length - 1]; d = mw.length ? new Date(Date.UTC(y, mw[mw.length - 1], 0)).toISOString().slice(0, 10) : `${y}-12-31`; }
   return d > D.bis ? D.bis : d;
 }
 
@@ -939,7 +965,8 @@ function tabFixkosten(conds) {
     </div>
     ${fixGrafik ? `<div class="fix-ueberblick">
       <div class="fix-ring"><canvas id="c-fix"></canvas><div class="fix-ring-mitte"><b>${eur0(pm)}</b><span>pro Monat</span></div></div>
-      <div class="fix-legende">${imKreis.map((g) => `<button class="fix-leg" data-fixgruppe="${esc(g.art)}"><span class="punkt" style="background:${g.farbe}"></span><span class="name">${esc(g.art)}</span><span class="betrag">${eur0(g.summe)}</span><span class="anteil">${pct(g.summe)}</span></button>`).join('')}</div>
+      <div class="fix-legende"><div class="fix-leg-kopf"><span>Art der Fixkosten</span><span>pro Monat</span><span>Anteil</span></div>${imKreis.map((g) => `<button class="fix-leg" data-fixgruppe="${esc(g.art)}"><span class="punkt" style="background:${g.farbe}"></span><span class="name">${esc(g.art)}</span><span class="betrag">${eur0(g.summe)}</span><span class="anteil">${pct(g.summe)}</span></button>`).join('')}
+        <div class="fix-leg-fuss">Anteil = Anteil an deinen laufenden Fixkosten von ${eur0(pm)} pro Monat (= 100 %).</div></div>
     </div>` : ''}
     <div class="fix-leiste"><div class="seg fix-seg">${seg('laufend', `Laufend (${aktiv.length})`)}${nFrueher ? seg('frueher', `+ frühere seit 2020 (${nFrueher})`) : ''}${nFrueher + nAelter ? seg('alle', `alle (${alle.length})`) : ''}</div>
       ${arten.length ? `<button class="link" id="fix-alle-auf">${arten.every((g) => fixOffen.has(g.art)) ? 'Alle zuklappen' : 'Alle aufklappen'}</button>` : ''}</div>
@@ -950,7 +977,7 @@ function tabFixkosten(conds) {
   const re = hl.length ? new RegExp('(' + hl.map(escRe).join('|') + ')', 'gi') : null;
   const mk = (s) => (re ? esc(s).replace(re, '<mark>$1</mark>') : esc(s));
   const offen = (a) => fixOffen.has(a) || conds.some((c) => c.kind === 'text');   // bei einer Suche alles offen
-  h += '<div class="fix-liste">';
+  h += `<div class="fix-liste"><div class="fix-liste-kopf"><span>Beträge pro Monat</span><span>% = Anteil an den laufenden Fixkosten (${eur0(pm)} = 100 %)</span></div>`;
   for (const g of arten) {
     const auf = offen(g.art);
     const frueher = g.fs.length - g.laufend;
@@ -1018,7 +1045,7 @@ function fixGruppeUmschalten(art, nurAuf = false) {
 
 // ======================================================================= Herunterladen
 function dateiname(teil) {
-  const f = [S.jahr, S.monat && MON[+S.monat - 1], S.konto, S.kat, S.ukat, S.q && S.q.replace(/["|<>]/g, ' ')].filter(Boolean).join(' ');
+  const f = [S.jahr, monateWahl().map((m) => MON[m - 1]).join(' '), S.konto, S.kat, S.ukat, S.q && S.q.replace(/["|<>]/g, ' ')].filter(Boolean).join(' ');
   const heute = new Date().toISOString().slice(0, 10);
   return `Finanzen ${teil}${f ? ' – ' + f : ''} (${heute})`.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
 }
@@ -1063,8 +1090,8 @@ function tabelleExport() {
   }
   const spalten = [{ titel: 'Datum', typ: 'datum', breite: 11 }, { titel: 'Konto', typ: 'text', breite: 20 }, { titel: 'Empfänger/Auftraggeber', typ: 'text', breite: 30 },
     { titel: 'Verwendungszweck', typ: 'text', breite: 50 }, { titel: 'Kategorie', typ: 'text', breite: 16 }, { titel: 'Unterkategorie', typ: 'text', breite: 20 },
-    { titel: 'Art', typ: 'text', breite: 10 }, { titel: 'Betrag', typ: 'euro', breite: 13 }, { titel: 'Vertrag', typ: 'text' }, { titel: 'Tags', typ: 'text' }, { titel: 'Notiz', typ: 'text', breite: 24 }];
-  const zeilen = sortiert().map((r) => [r.d, D.konten[r.k].name, r.g, r.z, r.kat, r.ukat, r.art, r.c / 100, r.v, r.t, r.n]);
+    { titel: 'Art', typ: 'text', breite: 10 }, { titel: 'Betrag', typ: 'euro', breite: 13 }, { titel: 'Vertrag', typ: 'text' }, { titel: 'Tags', typ: 'text' }, { titel: 'Notiz', typ: 'text', breite: 24 }, { titel: 'Steuerkategorie (Buhl)', typ: 'text', breite: 26 }];
+  const zeilen = sortiert().map((r) => [r.d, D.konten[r.k].name, r.g, r.z, r.kat, r.ukat, r.art, r.c / 100, r.v, r.t, r.n, r.st]);
   return { name: dateiname('Buchungen'), blatt: 'Buchungen', spalten, zeilen };
 }
 
@@ -1286,9 +1313,9 @@ function startZeigen(fehler) {
 }
 
 function themeSetzen(t) {
-  if (t) { try { t === 'auto' ? localStorage.removeItem('fd.theme') : localStorage.setItem('fd.theme', t); } catch {} }
-  let cur = 'auto';
-  try { cur = localStorage.getItem('fd.theme') || 'auto'; } catch {}
+  if (t) { try { localStorage.setItem('fd.theme', t); } catch {} }
+  let cur = 'dark';   // Standard: dunkel
+  try { cur = localStorage.getItem('fd.theme') || 'dark'; } catch {}
   if (cur === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = cur;
   document.querySelectorAll('#m-theme button').forEach((b) => b.classList.toggle('an', b.dataset.v === cur));
   if (D) { verlauf(); kategorien(); }
@@ -1320,7 +1347,7 @@ function events() {
   $('#q-hilfe').onclick = () => $('#dlg-hilfe').showModal();
   $('#beispiele').querySelectorAll('button').forEach((b) => b.onclick = () => { $('#dlg-hilfe').close(); setze({ q: b.textContent }); });
   $('#f-jahr').onchange = (e) => { if (e.target.value !== '__m') setze({ jahr: e.target.value }); };
-  $('#f-monat').onchange = (e) => setze({ monat: e.target.value });
+  $('#f-monat').onchange = (e) => { if (e.target.value !== '__m') setze({ monat: e.target.value }); };
   $('#f-konto').onchange = (e) => setze({ konto: e.target.value });
   $('#f-kat').onchange = (e) => setze({ kat: e.target.value, ukat: '' });
   $('#f-umb').onchange = (e) => setze({ umb: e.target.checked });
