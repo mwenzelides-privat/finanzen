@@ -282,6 +282,8 @@ body.chat-offen .chat-knopf { display: none; }
   .chart { height: 240px; }
   .t .konto-sp, .t .kat-sp, .t .sp-m { display: none; }
   .nur-m { display: inline; }
+  .t.pivot td, .t.pivot th { padding-left: 2px; padding-right: 3px; font-size: 12px; }
+  .t.pivot .erste { padding-left: 8px; }
   .t .datum { width: auto; font-size: 13px; }
   .tabs { flex: 1 1 100%; flex-wrap: wrap; }
   .tabs button { padding: 6px 8px; font-size: 14px; }

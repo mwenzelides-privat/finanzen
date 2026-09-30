@@ -57,13 +57,21 @@ function aufbereiten(j) {
 }
 
 // ======================================================================= Filtern
+// Gewählte Jahre: S.jahr ist „2025“ oder „2023,2025“ (mehrere = Vergleich)
+const jahreWahl = () => (S.jahr ? String(S.jahr).split(',').map(Number).filter(Boolean).sort((a, b) => a - b) : []);
+const einJahr = () => { const j = jahreWahl(); return j.length === 1 ? j[0] : 0; };
+const vergleichsModus = () => jahreWahl().length > 1;
+const JAHRES_FARBEN = ['--accent', '--aus', '--ein', '#9085e9', '#eda100', '#e87ba4', '#4a3aa7', '--muted'];
+// Farbe je Jahr im Vergleich: das neueste Jahr in Blau, davor Orange, Grün, …
+function jahresFarbe(idx, anzahl) { const f = JAHRES_FARBEN[(anzahl - 1 - idx) % JAHRES_FARBEN.length]; return f.startsWith('--') ? css(f) : f; }
+
 // Prüffunktion für alle Filter; mitJahr = false lässt Jahr und Zeitangaben der Suche weg (für den Vorjahresvergleich)
 function pruefer(conds, mitJahr = true) {
   const test = matcher(mitJahr ? conds : conds.filter((c) => c.kind !== 'zeit'));
-  const jahr = mitJahr ? +S.jahr || 0 : 0, monat = +S.monat || 0;
+  const jahre = mitJahr ? jahreWahl() : [], monat = +S.monat || 0;
   const konto = S.konto ? D.kontoIdx.get(S.konto) ?? -2 : -1;
   return (r) => (S.umb || r.art !== 'Umbuchung')
-    && (!jahr || r.y === jahr) && (!monat || r.m === monat) && (konto === -1 || r.k === konto)
+    && (!jahre.length || jahre.includes(r.y)) && (!monat || r.m === monat) && (konto === -1 || r.k === konto)
     && (!S.kat || r.kat === S.kat) && (!S.ukat || r.ukat === S.ukat)
     && (S.art === 'alle' || (S.art === 'aus' ? r.art === 'Ausgabe' : r.art === 'Einnahme'))
     && test(r);
@@ -81,9 +89,10 @@ function filtern() {
 // Im laufenden Jahr wird nur bis zum selben Tag verglichen (01.01.–28.09. mit 01.01.–28.09. des Vorjahres).
 function vergleich(conds) {
   const spans = conds.filter((c) => c.span);
-  if (!S.jahr && !spans.length) return null;
+  if (vergleichsModus() || (!einJahr() && !spans.length)) return null;
   let a = '0000-00-00', b = '9999-99-99';
-  if (S.jahr) { const mm = S.monat ? String(S.monat).padStart(2, '0') : ''; a = `${S.jahr}-${mm || '01'}-01`; b = `${S.jahr}-${mm || '12'}-31`; }
+  const ej = einJahr();
+  if (ej) { const mm = S.monat ? String(S.monat).padStart(2, '0') : ''; a = `${ej}-${mm || '01'}-01`; b = `${ej}-${mm || '12'}-31`; }
   for (const c of spans) { if (c.span[0] + '-01' > a) a = c.span[0] + '-01'; if (c.span[1] + '-31' < b) b = c.span[1] + '-31'; }
   const bVoll = b;
   if (b > D.bis) b = D.bis;
@@ -104,15 +113,25 @@ function vergleich(conds) {
 }
 
 // Alle Treffer in einem Jahr? Dann zeigen Grafik und Übersicht Monate statt Jahre.
-const proMonat = () => (S.jahr ? +S.jahr : F.length && F[0].y === F[F.length - 1].y ? F[0].y : 0);
+const proMonat = () => (einJahr() || (vergleichsModus() ? 0 : F.length && F[0].y === F[F.length - 1].y ? F[0].y : 0));
 
 function monatsSpanne(conds) {
-  if (S.jahr && S.monat) return 1;
+  if (einJahr() && S.monat) return 1;
   const k = S.konto ? D.konten[D.kontoIdx.get(S.konto)] : null;
   let lo = (k?.von || D.von).slice(0, 7), hi = (k?.bis || D.bis).slice(0, 7);
+  const jw = jahreWahl();
+  if (jw.length > 1) {
+    if (S.monat) return jw.length;
+    let n = 0;
+    for (const y of jw) {
+      const a = `${y}-01` < lo ? lo : `${y}-01`, b = `${y}-12` > hi ? hi : `${y}-12`;
+      if (a <= b) n += (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7)) + 1;
+    }
+    return Math.max(1, n);
+  }
   if (S.monat) return new Set(D.rows.filter((r) => r.m === +S.monat && r.d.slice(0, 7) >= lo && r.d.slice(0, 7) <= hi).map((r) => r.y)).size || 1;
   let a = lo, b = hi;
-  if (S.jahr) { a = `${S.jahr}-01`; b = `${S.jahr}-12`; }
+  if (einJahr()) { a = `${einJahr()}-01`; b = `${einJahr()}-12`; }
   for (const c of conds) if (c.span) { if (c.span[0] > a) a = c.span[0]; if (c.span[1] < b) b = c.span[1]; }
   if (a < lo) a = lo;
   if (b > hi) b = hi;
@@ -125,19 +144,33 @@ function selectsFuellen() {
   const opt = (v, t) => `<option value="${esc(v)}">${esc(t)}</option>`;
   $('#f-jahr').innerHTML = opt('', 'Alle Jahre') + [...D.jahre].reverse().map((y) => opt(y, y)).join('');
   $('#jahre').innerHTML = `<button data-j="">Alle</button>` + [...D.jahre].reverse().map((y) => `<button data-j="${y}">${y}</button>`).join('');
-  $('#jahre').querySelectorAll('button').forEach((b) => b.onclick = () => setze({ jahr: b.dataset.j && S.jahr === b.dataset.j ? '' : b.dataset.j }));
+  let letzter = 0;
+  $('#jahre').title = 'Klick: Jahr an/aus – mehrere Jahre werden verglichen. Umschalt + Klick: ganzer Zeitraum.';
+  $('#jahre').querySelectorAll('button').forEach((b) => b.onclick = (e) => {
+    const j = +b.dataset.j;
+    if (!j) { letzter = 0; return setze({ jahr: '' }); }
+    let w = jahreWahl();
+    if (e.shiftKey && letzter) { const a = Math.min(j, letzter), z = Math.max(j, letzter); w = D.jahre.filter((y) => y >= a && y <= z); }
+    else w = w.includes(j) ? w.filter((y) => y !== j) : [...w, j];
+    letzter = j;
+    setze({ jahr: w.sort((x, y) => x - y).join(',') });
+  });
   $('#f-monat').innerHTML = opt('', 'Alle Monate') + MONAT.map((m, i) => opt(i + 1, m)).join('');
   $('#f-konto').innerHTML = opt('', 'Alle Konten') + D.konten.map((k) => opt(k.name, k.name)).join('');
   $('#f-kat').innerHTML = opt('', 'Alle Kategorien') + D.kats.map((k) => opt(k, k)).join('');
 }
 
 function filterZeigen(conds) {
-  for (const [id, v] of [['#f-jahr', S.jahr], ['#f-monat', S.monat], ['#f-konto', S.konto], ['#f-kat', S.kat]]) {
+  const jw = jahreWahl();
+  const fj = $('#f-jahr');
+  fj.querySelector('option[value="__m"]')?.remove();
+  if (jw.length > 1) fj.append(Object.assign(document.createElement('option'), { value: '__m', textContent: `${jw.length} Jahre: ${jw.join(', ')}` }));
+  for (const [id, v] of [['#f-jahr', jw.length > 1 ? '__m' : S.jahr], ['#f-monat', S.monat], ['#f-konto', S.konto], ['#f-kat', S.kat]]) {
     const el = $(id); el.value = v; el.classList.toggle('aktiv', !!v);
   }
   document.querySelectorAll('#f-art button').forEach((b) => b.classList.toggle('an', b.dataset.v === S.art));
   $('#jahre').querySelectorAll('button').forEach((b) => {
-    const an = b.dataset.j === String(S.jahr || '');
+    const an = b.dataset.j ? jw.includes(+b.dataset.j) : !jw.length;
     b.classList.toggle('an', an);
     b.setAttribute('aria-pressed', String(an));
     if (an) { const box = $('#jahre'); box.scrollLeft = Math.max(0, b.offsetLeft - box.offsetLeft - box.clientWidth / 2 + b.offsetWidth / 2); }
@@ -175,8 +208,24 @@ function veraenderung(jetzt, vorher, mehrIstGut) {
   return `<div class="d ${p === 0 ? 'muted' : gut ? 'pos' : 'neg'}" title="${tip}">${pf} ${Math.abs(p)} % · ${V.label}: ${eur0(vorher)}</div>`;
 }
 
+// Vergleich mehrerer Jahre: Veränderung vom ersten zum letzten gewählten Jahr, alle Jahre im Tooltip
+function jahresZeile(proJahr, feld, mehrIstGut, alsBetrag = false) {
+  const [y1, s1] = proJahr[0], [y2, s2] = proJahr[proJahr.length - 1];
+  const a = s1[feld], b = s2[feld];
+  const tip = proJahr.map(([y, x]) => `${y}: ${feld === 'n' ? NUM.format(x[feld]) : eur0(x[feld])}`).join(' · ');
+  const teil = y2 === +D.bis.slice(0, 4) && D.bis.slice(5) !== '12-31' ? ` (${y2} bis ${dde(D.bis).slice(0, 6)})` : '';
+  if (alsBetrag) { const d = b - a; return `<div class="d ${cls(d)}" title="${tip}${teil}">${d >= 0 ? '▲ +' : '▼ '}${eur0(d)} · ${y2} ggü. ${y1}</div>`; }
+  if (feld === 'n') return `<div class="d muted" title="${tip}">${tip}</div>`;
+  if (!a) return `<div class="d muted" title="${tip}">${tip}</div>`;
+  const p = Math.round(((Math.abs(b) - Math.abs(a)) / Math.abs(a)) * 100);
+  const gut = (p > 0) === mehrIstGut;
+  return `<div class="d ${p === 0 ? 'muted' : gut ? 'pos' : 'neg'}" title="${tip}${teil}">${p > 0 ? '▲' : p < 0 ? '▼' : '='} ${Math.abs(p)} % · ${y2} ggü. ${y1}: ${eur0(a)}</div>`;
+}
+
 function kennzahlen(conds) {
   const { ein, aus, erg } = summen(F);
+  const jw = jahreWahl();
+  const proJahr = jw.length > 1 ? jw.map((y) => [y, summen(F.filter((r) => r.y === y))]) : null;
   const vs = V ? summen(V.rows) : null;
   const mon = monatsSpanne(conds);
   const text = conds.some((c) => c.kind === 'text' || c.kind === 'betrag');
@@ -191,11 +240,11 @@ function kennzahlen(conds) {
     return `<div class="d ${cls(d)}" title="${V.label}: ${eur0(vs.erg)}">${d >= 0 ? '▲ +' : '▼ '}${eur0(d)} · ${V.label}: ${eur0(vs.erg)}</div>`;
   };
   $('#kpis').innerHTML = [
-    kpi('Einnahmen', eur0(ein), 'pos', mon > 1 ? `Ø ${avg(ein)} pro ${mon > 24 ? 'Jahr' : 'Monat'}` : '&nbsp;', veraenderung(ein, vs?.ein, true)),
-    kpi('Ausgaben', eur0(aus), 'neg', mon > 1 ? `Ø ${avg(aus)} pro ${mon > 24 ? 'Jahr' : 'Monat'}` : '&nbsp;', veraenderung(aus, vs?.aus, false)),
-    gesamt ? kpi(erg >= 0 ? 'Überschuss' : 'Fehlbetrag', eur0(erg), cls(erg), quote === null ? 'Einnahmen minus Ausgaben' : quote >= 0 ? `${quote} % der Einnahmen übrig` : `${-quote} % mehr ausgegeben als eingenommen`, diffErg())
-      : kpi('Summe der Treffer', eur0(erg), cls(erg), 'Einnahmen minus Ausgaben', diffErg()),
-    kpi('Buchungen', NUM.format(F.length), '', zr, V ? `<div class="d muted">${V.label}: ${NUM.format(vs.n)}</div>` : ''),
+    kpi('Einnahmen', eur0(ein), 'pos', mon > 1 ? `Ø ${avg(ein)} pro ${mon > 24 ? 'Jahr' : 'Monat'}` : '&nbsp;', proJahr ? jahresZeile(proJahr, 'ein', true) : veraenderung(ein, vs?.ein, true)),
+    kpi('Ausgaben', eur0(aus), 'neg', mon > 1 ? `Ø ${avg(aus)} pro ${mon > 24 ? 'Jahr' : 'Monat'}` : '&nbsp;', proJahr ? jahresZeile(proJahr, 'aus', false) : veraenderung(aus, vs?.aus, false)),
+    gesamt ? kpi(erg >= 0 ? 'Überschuss' : 'Fehlbetrag', eur0(erg), cls(erg), quote === null ? 'Einnahmen minus Ausgaben' : quote >= 0 ? `${quote} % der Einnahmen übrig` : `${-quote} % mehr ausgegeben als eingenommen`, proJahr ? jahresZeile(proJahr, 'erg', true, true) : diffErg())
+      : kpi('Summe der Treffer', eur0(erg), cls(erg), 'Einnahmen minus Ausgaben', proJahr ? jahresZeile(proJahr, 'erg', true, true) : diffErg()),
+    kpi('Buchungen', NUM.format(F.length), '', zr, proJahr ? jahresZeile(proJahr, 'n') : V ? `<div class="d muted">${V.label}: ${NUM.format(vs.n)}</div>` : ''),
   ].join('');
 }
 
@@ -233,7 +282,45 @@ function zeichne(id, cfg) {
   charts[id] = new window.Chart($('#' + id), cfg);
 }
 
+// Mehrere Jahre: je Monat ein Balken pro Jahr (ab 5 Jahren Linien)
+function verlaufVergleich() {
+  const jw = jahreWahl(), einM = S.art === 'ein';
+  const was = einM ? 'Einnahmen' : 'Ausgaben';
+  const reihen = jw.map(() => MON.map(() => 0));
+  for (const r of F) {
+    const j = jw.indexOf(r.y);
+    if (j < 0 || (einM ? r.art !== 'Einnahme' : r.art !== 'Ausgabe')) continue;
+    reihen[j][r.m - 1] += einM ? r.c : -r.c;
+  }
+  const linie = jw.length > 4;
+  const ds = jw.map((y, j) => {
+    const f = jahresFarbe(j, jw.length);
+    return linie
+      ? { type: 'line', label: String(y), data: reihen[j].map((c) => c / 100), borderColor: f, backgroundColor: f, borderWidth: 2, pointRadius: 2.5, tension: 0.3, fill: false }
+      : { label: String(y), data: reihen[j].map((c) => c / 100), backgroundColor: alpha(f, .85), hoverBackgroundColor: f, borderRadius: 4, maxBarThickness: 26 };
+  });
+  $('#t-verlauf').textContent = `${was} je Monat im Vergleich`;
+  $('#h-verlauf').textContent = S.art === 'alle' ? 'Einnahmen: oben „Einnahmen“ wählen' : 'Balken anklicken: Jahr und Monat';
+  const o = basis();
+  o.interaction = { mode: 'index', intersect: false };
+  o.plugins.legend = { display: true, position: 'top', align: 'end', labels: { color: css('--text-2'), usePointStyle: true, pointStyle: 'rectRounded', boxWidth: 10, font: { size: 12 } } };
+  o.plugins.tooltip.callbacks = {
+    title: (it) => `${was} im ${MONAT[it[0].dataIndex]}`,
+    label: (it) => ` ${it.dataset.label}: ${EUR0.format(it.raw)}`,
+    footer: (it) => {
+      if (it.length < 2) return '';
+      const a = it[0].raw, b = it[it.length - 1].raw, d = b - a;
+      return `${it[it.length - 1].dataset.label} ggü. ${it[0].dataset.label}: ${d >= 0 ? '+' : ''}${EUR0.format(d)}${a ? ` (${d >= 0 ? '+' : ''}${Math.round((d / a) * 100)} %)` : ''}`;
+    },
+  };
+  o.scales = { x: { ...achsenStil(), grid: { display: false } }, y: { ...achsenStil(), ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 6 } } };
+  o.onClick = (_, el) => { if (el.length) setze({ jahr: String(jw[el[0].datasetIndex]), monat: String(el[0].index + 1) }); };
+  o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
+  zeichne('c-verlauf', { type: 'bar', data: { labels: MON, datasets: ds }, options: o });
+}
+
 function verlauf() {
+  if (vergleichsModus()) return verlaufVergleich();
   const jahr = proMonat();
   let keys, label, key;
   if (jahr) { keys = MON.map((_, i) => i + 1); label = (k) => MON[k - 1]; key = (r) => r.m; }
@@ -250,7 +337,7 @@ function verlauf() {
     if (r.art === 'Einnahme') ein[i] += r.c; else if (r.art === 'Ausgabe') aus[i] -= r.c;
   }
   $('#t-verlauf').textContent = jahr ? `Verlauf ${jahr} nach Monaten` : 'Verlauf nach Jahren';
-  $('#h-verlauf').textContent = jahr && !S.monat ? 'Monat anklicken zum Filtern' : !jahr ? 'Jahr anklicken zum Filtern' : '';
+  $('#h-verlauf').textContent = jahr && !S.monat ? (einJahr() ? 'Weitere Jahre oben anklicken zum Vergleichen' : 'Monat anklicken zum Filtern') : !jahr ? 'Jahr anklicken zum Filtern' : '';
   const cE = css('--ein'), cA = css('--aus');
   const ds = [];
   if (S.art !== 'aus') ds.push({ label: 'Einnahmen', data: ein.map((c) => c / 100), backgroundColor: alpha(cE, .85), hoverBackgroundColor: cE, borderRadius: 4, maxBarThickness: 34 });
@@ -299,9 +386,48 @@ const wertLabels = {
   },
 };
 
+// Mehrere Jahre: je Kategorie ein Balken pro Jahr
+function kategorienVergleich(einMode, unter) {
+  const jw = jahreWahl();
+  const m = new Map();
+  for (const r of F) {
+    if (r.art === 'Umbuchung' || r.art === 'Sparen') continue;
+    if (einMode ? r.art !== 'Einnahme' : (!S.kat && r.kat === 'Einnahmen')) continue;
+    const k = unter ? r.ukat || '(ohne Unterkategorie)' : r.kat;
+    if (!m.has(k)) m.set(k, jw.map(() => 0));
+    m.get(k)[jw.indexOf(r.y)] += einMode ? r.c : -r.c;
+  }
+  const list = [...m].filter(([, v]) => v.some((x) => x > 0)).sort((a, b) => b[1].reduce((s, x) => s + x, 0) - a[1].reduce((s, x) => s + x, 0)).slice(0, 10);
+  $('#t-kat').textContent = `${einMode ? 'Einnahmen' : 'Ausgaben'} nach ${unter ? 'Unterkategorie' : 'Kategorie'} im Vergleich`;
+  $('#h-kat').textContent = unter ? S.kat : list.length ? 'Balken anklicken zum Filtern' : '';
+  $('#chart-kat').style.height = `${Math.max(200, list.length * (8 + 11 * jw.length) + 50)}px`;
+  if (!list.length) { charts['c-kat']?.destroy(); delete charts['c-kat']; return; }
+  const o = basis();
+  o.indexAxis = 'y';
+  o.interaction = { mode: 'index', axis: 'y', intersect: false };
+  o.plugins.legend = { display: true, position: 'top', align: 'end', labels: { color: css('--text-2'), usePointStyle: true, pointStyle: 'rectRounded', boxWidth: 10, font: { size: 12 } } };
+  o.plugins.tooltip.callbacks = { label: (it) => ` ${it.dataset.label}: ${EUR0.format(it.raw)}` };
+  o.scales = {
+    x: { ...achsenStil(), beginAtZero: true, ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 5 } },
+    y: { ...achsenStil(), grid: { display: false }, ticks: { color: css('--text-2'), font: { size: 12.5 }, autoSkip: false } },
+  };
+  o.onClick = (_, el) => {
+    if (!el.length) return;
+    const k = list[el[0].index][0];
+    if (!unter) setze({ kat: k, ukat: '' }); else if (k !== '(ohne Unterkategorie)') setze({ ukat: S.ukat === k ? '' : k });
+  };
+  o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
+  zeichne('c-kat', {
+    type: 'bar',
+    data: { labels: list.map(([k]) => k), datasets: jw.map((y, j) => { const f = jahresFarbe(j, jw.length); return { label: String(y), data: list.map(([, v]) => v[j] / 100), backgroundColor: alpha(f, .85), hoverBackgroundColor: f, borderRadius: 3, maxBarThickness: 12 }; }) },
+    options: o,
+  });
+}
+
 function kategorien() {
   const einMode = S.art === 'ein' || S.kat === 'Einnahmen';
   const unter = !!S.kat;
+  if (vergleichsModus()) return kategorienVergleich(einMode, unter);
   const m = new Map();
   for (const r of F) {
     if (r.art === 'Umbuchung' || r.art === 'Sparen') continue;
@@ -394,9 +520,12 @@ function tabBuchungen(conds) {
 function pivotDaten(maxSpalten = Infinity) {
   const jahr = proMonat(), unter = !!S.kat;
   let cols;
+  const jw = jahreWahl();
   if (jahr) cols = MON.map((_, i) => i + 1);
+  else if (jw.length > 1) cols = [...jw];
   else { cols = []; const a = F.length ? F[0].y : D.jahre[0], b = F.length ? F[F.length - 1].y : a; for (let y = a; y <= b; y++) cols.push(y); }
   const anzahl = cols.length;
+  let diff = !jahr && jw.length > 1;  // Vergleich: erstes → letztes gewähltes Jahr
   const pos = new Map(cols.map((c, i) => [c, i]));
   if (cols.length > maxSpalten) {
     const k = cols.length - Math.max(1, maxSpalten - 1);
@@ -405,6 +534,7 @@ function pivotDaten(maxSpalten = Infinity) {
     cols.slice(k).forEach((c, i) => pos.set(c, i + 1));
     cols = [jahr ? `${MON[zus[0] - 1]}–${MON[zus[zus.length - 1] - 1]}` : `bis ${zus[zus.length - 1]}`, ...cols.slice(k)];
   }
+  diff = diff ? [0, cols.length - 1] : null;
   const m = new Map();
   for (const r of F) {
     const k = unter ? r.ukat || '(ohne Unterkategorie)' : r.kat;
@@ -424,7 +554,7 @@ function pivotDaten(maxSpalten = Infinity) {
     for (const k of vj.keys()) if (!m.has(k)) rows.push({ key: k, v: cols.map(() => 0), sum: 0 });
     rows.sort((a, b) => order(a.key) - order(b.key) || a.sum - b.sum);
   }
-  return { jahr, unter, cols, label, rows, sums, vj, anzahl, vjTotal: vj ? [...vj.values()].reduce((a, b) => a + b, 0) : 0, total: rows.reduce((s, r) => s + r.sum, 0) };
+  return { jahr, unter, cols, label, rows, sums, vj, anzahl, diff, vjTotal: vj ? [...vj.values()].reduce((a, b) => a + b, 0) : 0, total: rows.reduce((s, r) => s + r.sum, 0) };
 }
 
 // Passt immer in die Breite: erst normale Beträge, sonst in Tsd. €, sonst ältere Spalten zusammengefasst.
@@ -432,16 +562,18 @@ function pivotDaten(maxSpalten = Infinity) {
 function tabUebersicht() {
   const breite = $('#tab-inhalt').clientWidth || 1200;
   const schmal = breite < 700;
-  const erste = schmal ? 104 : 170;
+  const erste = schmal ? 88 : 170;
   let p = pivotDaten();
   if (!p.rows.length) return '<div class="leer">Keine Buchungen gefunden.</div>';
-  const extra = schmal ? 1 : 2 + (p.vj ? 2 : 0);
+  // Im Jahresvergleich auf dem Handy: gewählte Jahre + Veränderung, ohne Summe
+  const ohneSumme = schmal && !!p.diff;
+  const extra = schmal ? 1 : 2 + (p.vj ? 2 : 0) + (p.diff ? 1 : 0);
   const platz = (w) => Math.floor((breite - erste - 16 - extra * w * 1.3) / w);
   // Stufen: „-15.760 €“ → „-15.760“ (in €) → „-15,8“ (in Tsd. €) → ältere Spalten zusammenfassen
   let stufe = 0;
   if (p.cols.length > platz(86)) stufe = 1;
   if (stufe && p.cols.length > platz(62)) stufe = 2;
-  if (stufe === 2 && p.cols.length > platz(50)) p = pivotDaten(Math.max(1, platz(50)));
+  if (stufe === 2 && p.cols.length > platz(50) && !p.diff) p = pivotDaten(Math.max(1, platz(50)));
   const ew = `style="width:${Math.round([86, 62, 50][stufe] * 1.3)}px"`;  // Summe, Ø, Vorjahr etwas breiter
   const kompakt = stufe > 0;
   const n = p.anzahl;
@@ -450,16 +582,18 @@ function tabUebersicht() {
   const z = (c, extraCls = '') => (c ? `<td class="r ${cls(c)} ${extraCls}" title="${eur(c)}">${f(c)}</td>` : `<td class="r muted ${extraCls}">–</td>`);
   const vjZellen = (jetzt, vorher) => (p.vj && !schmal ? `${z(vorher, 'vj')}<td class="r ${cls(jetzt - vorher)}" title="${eur(jetzt - vorher)}">${jetzt - vorher ? (jetzt - vorher > 0 ? '+' : '') + f(jetzt - vorher) : '–'}</td>` : '');
   const avg = (c) => (schmal ? '' : z(c / n));
-  let h = `<div class="tab-scroll"><table class="t klein fix pivot"><thead><tr>
+  const dz = (v) => (p.diff ? (() => { const d = v[p.diff[1]] - v[p.diff[0]]; return `<td class="r ${cls(d)} vj" title="${eur(d)}">${d ? (d > 0 ? '+' : '') + f(d) : '–'}</td>`; })() : '');
+  let h = `<div class="tab-scroll"><table class="t klein fix pivot" style="width:${Math.min(breite, erste + (p.cols.length + extra) * 130)}px"><thead><tr>
     <th class="erste" style="width:${erste}px">${p.unter ? 'Unterkategorie' : 'Kategorie'}${kompakt ? `<small class="muted"> in ${stufe === 2 ? 'Tsd. ' : ''}€</small>` : ''}</th>
     ${p.cols.map((c) => `<th class="r${typeof c === 'number' ? ' sort' : ''}"${typeof c === 'number' ? ` data-spalte="${c}" title="${p.jahr ? 'Monat' : 'Jahr'} filtern"` : ' title="zusammengefasst"'}>${p.label(c)}</th>`).join('')}
-    <th class="r" ${ew}>Summe</th>${schmal ? '' : `<th class="r" ${ew} title="Durchschnitt je ${p.jahr ? 'Monat' : 'Jahr'}">Ø ${p.jahr ? 'Mon.' : 'Jahr'}</th>`}
+    ${ohneSumme ? '' : `<th class="r" ${ew}>Summe</th>`}${schmal ? '' : `<th class="r" ${ew} title="Durchschnitt je ${p.jahr ? 'Monat' : 'Jahr'}">Ø ${p.jahr ? 'Mon.' : 'Jahr'}</th>`}
+    ${p.diff ? `<th class="r vj" ${ew} title="Veränderung ${p.cols[p.diff[1]]} gegenüber ${p.cols[p.diff[0]]}">± ${String(p.cols[p.diff[0]]).slice(2)}→${String(p.cols[p.diff[1]]).slice(2)}</th>` : ''}
     ${p.vj && !schmal ? `<th class="r vj" ${ew} title="Gleicher Zeitraum ein Jahr früher">${esc(V.label)}</th><th class="r" ${ew} title="Veränderung gegenüber ${esc(V.label)}">± Vorj.</th>` : ''}</tr></thead><tbody>`;
   for (const r of p.rows) {
     h += `<tr class="klick" data-zeile="${esc(r.key)}"><td class="erste" title="${esc(r.key)}">${esc(r.key)}</td>${r.v.map((c) => z(c)).join('')}
-      ${z(r.sum, 'fett')}${avg(r.sum)}${vjZellen(r.sum, p.vj?.get(r.key) || 0)}</tr>`;
+      ${ohneSumme ? '' : z(r.sum, 'fett')}${avg(r.sum)}${dz(r.v)}${vjZellen(r.sum, p.vj?.get(r.key) || 0)}</tr>`;
   }
-  h += `</tbody><tfoot><tr><td class="erste">Ergebnis</td>${p.sums.map((c) => z(c)).join('')}${z(p.total)}${avg(p.total)}${vjZellen(p.total, p.vjTotal)}</tr></tfoot></table></div>`;
+  h += `</tbody><tfoot><tr><td class="erste">Ergebnis</td>${p.sums.map((c) => z(c)).join('')}${ohneSumme ? '' : z(p.total)}${avg(p.total)}${dz(p.sums)}${vjZellen(p.total, p.vjTotal)}</tr></tfoot></table></div>`;
   return h;
 }
 
@@ -467,7 +601,8 @@ function tabUebersicht() {
 function stichtag() {
   if (S.stichtag) return S.stichtag;
   let d = D.bis;
-  if (S.jahr) d = S.monat ? new Date(Date.UTC(+S.jahr, +S.monat, 0)).toISOString().slice(0, 10) : `${S.jahr}-12-31`;
+  const jw = jahreWahl();
+  if (jw.length) { const y = jw[jw.length - 1]; d = S.monat ? new Date(Date.UTC(y, +S.monat, 0)).toISOString().slice(0, 10) : `${y}-12-31`; }
   return d > D.bis ? D.bis : d;
 }
 
@@ -664,11 +799,13 @@ function tabelleExport() {
     const p = pivotDaten();
     const spalten = [{ titel: p.unter ? 'Unterkategorie' : 'Kategorie', typ: 'text', breite: 28 }, ...p.cols.map((c) => ({ titel: p.label(c), typ: 'euro', breite: 12 })),
       { titel: 'Summe', typ: 'euro', breite: 14 }, { titel: `Ø ${p.jahr ? 'Monat' : 'Jahr'}`, typ: 'euro', breite: 12 },
+      ...(p.diff ? [{ titel: `Veränderung ${p.cols[p.diff[0]]}→${p.cols[p.diff[1]]}`, typ: 'euro', breite: 18 }] : []),
       ...(p.vj ? [{ titel: V.label, typ: 'euro', breite: 16 }, { titel: 'Veränderung', typ: 'euro', breite: 13 }] : [])];
     const n = p.anzahl;
     const vjw = (jetzt, vorher) => (p.vj ? [vorher / 100, (jetzt - vorher) / 100] : []);
-    const zeilen = [...p.rows.map((r) => [r.key, ...r.v.map((c) => c / 100), r.sum / 100, Math.round(r.sum / n) / 100, ...vjw(r.sum, p.vj?.get(r.key) || 0)]),
-      ['Ergebnis', ...p.sums.map((c) => c / 100), p.total / 100, Math.round(p.total / n) / 100, ...vjw(p.total, p.vjTotal)]];
+    const dw = (v) => (p.diff ? [(v[p.diff[1]] - v[p.diff[0]]) / 100] : []);
+    const zeilen = [...p.rows.map((r) => [r.key, ...r.v.map((c) => c / 100), r.sum / 100, Math.round(r.sum / n) / 100, ...dw(r.v), ...vjw(r.sum, p.vj?.get(r.key) || 0)]),
+      ['Ergebnis', ...p.sums.map((c) => c / 100), p.total / 100, Math.round(p.total / n) / 100, ...dw(p.sums), ...vjw(p.total, p.vjTotal)]];
     return { name: dateiname(p.jahr ? `Kategorien ${p.jahr}` : 'Kategorien'), blatt: 'Kategorien', spalten, zeilen };
   }
   if (S.tab === 'fix') {
@@ -902,7 +1039,7 @@ function events() {
   });
   $('#q-hilfe').onclick = () => $('#dlg-hilfe').showModal();
   $('#beispiele').querySelectorAll('button').forEach((b) => b.onclick = () => { $('#dlg-hilfe').close(); setze({ q: b.textContent }); });
-  $('#f-jahr').onchange = (e) => setze({ jahr: e.target.value });
+  $('#f-jahr').onchange = (e) => { if (e.target.value !== '__m') setze({ jahr: e.target.value }); };
   $('#f-monat').onchange = (e) => setze({ monat: e.target.value });
   $('#f-konto').onchange = (e) => setze({ konto: e.target.value });
   $('#f-kat').onchange = (e) => setze({ kat: e.target.value, ukat: '' });
