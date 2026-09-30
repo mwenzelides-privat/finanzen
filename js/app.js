@@ -122,6 +122,8 @@ function monatsSpanne(conds) {
 function selectsFuellen() {
   const opt = (v, t) => `<option value="${esc(v)}">${esc(t)}</option>`;
   $('#f-jahr').innerHTML = opt('', 'Alle Jahre') + [...D.jahre].reverse().map((y) => opt(y, y)).join('');
+  $('#jahre').innerHTML = `<button data-j="">Alle Jahre</button>` + [...D.jahre].reverse().map((y) => `<button data-j="${y}">${y}</button>`).join('');
+  $('#jahre').querySelectorAll('button').forEach((b) => b.onclick = () => setze({ jahr: b.dataset.j && S.jahr === b.dataset.j ? '' : b.dataset.j }));
   $('#f-monat').innerHTML = opt('', 'Alle Monate') + MONAT.map((m, i) => opt(i + 1, m)).join('');
   $('#f-konto').innerHTML = opt('', 'Alle Konten') + D.konten.map((k) => opt(k.name, k.name)).join('');
   $('#f-kat').innerHTML = opt('', 'Alle Kategorien') + D.kats.map((k) => opt(k, k)).join('');
@@ -132,6 +134,12 @@ function filterZeigen(conds) {
     const el = $(id); el.value = v; el.classList.toggle('aktiv', !!v);
   }
   document.querySelectorAll('#f-art button').forEach((b) => b.classList.toggle('an', b.dataset.v === S.art));
+  $('#jahre').querySelectorAll('button').forEach((b) => {
+    const an = b.dataset.j === String(S.jahr || '');
+    b.classList.toggle('an', an);
+    b.setAttribute('aria-pressed', String(an));
+    if (an) { const box = $('#jahre'); box.scrollLeft = Math.max(0, b.offsetLeft - box.offsetLeft - box.clientWidth / 2 + b.offsetWidth / 2); }
+  });
   $('#f-umb').checked = S.umb;
   if ($('#q').value !== S.q) $('#q').value = S.q;
   const chips = conds.map((c, i) => `<button class="chip" data-cond="${i}" title="Aus der Suche entfernen">${esc(c.label)}<span class="x">×</span></button>`);
@@ -744,7 +752,8 @@ function hashLesen() {
 function standZeigen() {
   const j = D.j;
   $('#stand').textContent = `${NUM.format(D.rows.length)} Buchungen · ${dde(D.von)} – ${dde(D.bis)}`;
-  const herkunft = { drive: 'aus Google Drive', datei: `aus der Datei ${quelle.name}`, lokal: 'lokale Testdaten' }[quelle.quelle] || '';
+  const mail = Q.kontoEmail?.();
+  const herkunft = { drive: `aus Google Drive${mail ? ` (${mail})` : ''}`, datei: `aus der Datei ${quelle.name}`, lokal: 'lokale Testdaten' }[quelle.quelle] || '';
   const erstellt = j.erstellt ? `${dde(j.erstellt.slice(0, 10))}, ${j.erstellt.slice(11, 16)} Uhr` : '';
   $('#fuss').textContent = `Daten ${herkunft}, erstellt am ${erstellt}. Neue Daten: in „10 Finanzen“ aktualisieren.py starten, dann hier ↻.`;
   $('#menu-quelle').textContent = `Aktuell: ${NUM.format(D.rows.length)} Buchungen ${herkunft}, erstellt am ${erstellt}.`;
@@ -874,6 +883,9 @@ async function start() {
   let v = null;
   if (LOKAL) v = await Q.lokalLaden().catch(() => null);
   if (!v) v = await Q.cacheLesen();
+  Q.vorladen?.();
+  // Gespeicherte Daten vor dem automatischen Aufräumen des Browsers schützen
+  navigator.storage?.persist?.().catch(() => {});
   if (v) {
     try { anzeigen(v); } catch (e) { return startZeigen(e.message); }
     if (v.quelle === 'drive') driveHolen(false).catch(() => {});

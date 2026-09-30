@@ -107,7 +107,12 @@ main { max-width: 1240px; margin: 0 auto; padding: 16px 16px 40px; }
 /* ============ Filter ============ */
 .filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
 .filter select { height: 36px; padding: 0 30px 0 11px; border-radius: 10px; border: 1px solid var(--border-strong); background-color: var(--surface); max-width: 220px; }
-.filter select.aktiv { border-color: var(--accent); background-color: var(--accent-soft); }
+.filter select.aktiv { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 600; }
+.filter select option { background: var(--surface); color: var(--text); font-weight: 400; }
+.jahre { display: flex; gap: 6px; margin-top: 10px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.jahre button { flex: none; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-2); border-radius: 99px; padding: 5px 13px; font-size: 13.5px; }
+.jahre button:hover { border-color: var(--accent); color: var(--accent); }
+.jahre button.an { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 .seg { display: inline-flex; padding: 3px; border-radius: 11px; background: var(--surface-2); border: 1px solid var(--border); }
 .seg button { border: 0; background: none; padding: 5px 12px; border-radius: 8px; font-size: 14px; color: var(--text-2); }
 .seg button.an { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .12); font-weight: 550; }

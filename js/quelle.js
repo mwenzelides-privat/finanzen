@@ -5,7 +5,7 @@ import { CONFIG } from '../config.js';
 const SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
 const GIS = 'https://accounts.google.com/gsi/client';
 const API = 'https://www.googleapis.com/drive/v3/files';
-const K = { token: 'fd.token', verbunden: 'fd.verbunden' };
+const K = { token: 'fd.token', verbunden: 'fd.verbunden', email: 'fd.email' };
 const DB = 'finanzen-dashboard', STORE = 'daten';
 
 const ls = {
@@ -83,18 +83,25 @@ function loadScript(src) {
   });
 }
 
-// Muss aus einem Klick heraus aufgerufen werden (öffnet ggf. das Google-Anmeldefenster)
+// Google-Anmeldung vorab laden, damit ein Klick auf ↻ sofort das Fenster öffnen kann
+export function vorladen() { if (warVerbunden() && navigator.onLine) loadScript(GIS).catch(() => {}); }
+
+// Muss aus einem Klick heraus aufgerufen werden (öffnet ggf. das Google-Anmeldefenster).
+// Mit dem gemerkten Konto (login_hint) schließt sich das Fenster nach der ersten Freigabe von selbst,
+// auch wenn im Browser mehrere Google-Konten angemeldet sind.
 export async function anmelden() {
   await loadScript(GIS);
   return new Promise((resolve, reject) => {
     const client = google.accounts.oauth2.initTokenClient({
       client_id: CONFIG.googleClientId,
       scope: SCOPE,
+      login_hint: ls.get(K.email) || undefined,
       callback: (r) => {
         if (r.error) return reject(new Error(r.error_description || r.error));
         if (!google.accounts.oauth2.hasGrantedAllScopes(r, SCOPE)) return reject(new Error('Lesezugriff auf Google Drive wurde nicht erlaubt.'));
         ls.set(K.token, JSON.stringify({ t: r.access_token, exp: Date.now() + (Number(r.expires_in || 3600) - 120) * 1000 }));
         ls.set(K.verbunden, '1');
+        kontoMerken();
         resolve();
       },
       error_callback: (e) => reject(new Error(
@@ -102,14 +109,24 @@ export async function anmelden() {
           : e?.type === 'popup_failed_to_open' ? 'Pop-up wurde blockiert – bitte Pop-ups für diese Seite erlauben.'
             : (e?.message || 'Anmeldung fehlgeschlagen.'))),
     });
-    client.requestAccessToken({ prompt: warVerbunden() ? '' : 'consent' });
+    client.requestAccessToken({ prompt: '' });
   });
 }
+
+// Welches Google-Konto verbunden ist (für login_hint und die Anzeige)
+async function kontoMerken() {
+  try {
+    const r = await api('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)');
+    const m = (await r.json()).user?.emailAddress;
+    if (m) ls.set(K.email, m);
+  } catch {}
+}
+export const kontoEmail = () => ls.get(K.email);
 
 export function abmelden() {
   const t = tokenObj()?.t;
   if (t && window.google?.accounts?.oauth2) google.accounts.oauth2.revoke(t, () => {});
-  ls.del(K.token); ls.del(K.verbunden);
+  ls.del(K.token); ls.del(K.verbunden); ls.del(K.email);
 }
 
 async function api(url) {
