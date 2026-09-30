@@ -137,6 +137,8 @@ main { max-width: 1640px; margin: 0 auto; padding: 16px 16px 40px; }
 .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); min-width: 0;
   font: inherit; color: inherit; text-align: left; width: 100%; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
 .kpi:hover { border-color: var(--accent); }
+.kpi.neben { opacity: .6; }
+.kpi.neben:hover { opacity: 1; }
 .kpi.an { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset, var(--shadow); }
 .kpi:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .kpi .l { font-size: 13px; color: var(--muted); }

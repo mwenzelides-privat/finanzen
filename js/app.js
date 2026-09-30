@@ -70,22 +70,25 @@ const JAHRES_FARBEN = ['--accent', '--aus', '--ein', '#9085e9', '#eda100', '#e87
 // Farbe je Jahr im Vergleich: das neueste Jahr in Blau, davor Orange, Grün, …
 function jahresFarbe(idx, anzahl) { const f = JAHRES_FARBEN[(anzahl - 1 - idx) % JAHRES_FARBEN.length]; return f.startsWith('--') ? css(f) : f; }
 
-// Prüffunktion für alle Filter; mitJahr = false lässt Jahr und Zeitangaben der Suche weg (für den Vorjahresvergleich)
-function pruefer(conds, mitJahr = true) {
+// Prüffunktion für alle Filter; mitJahr = false lässt Jahr und Zeitangaben der Suche weg (für den Vorjahresvergleich),
+// mitArt = false den Filter „nur Einnahmen/Ausgaben“ (für die Kennzahlen, die immer beide Seiten zeigen)
+function pruefer(conds, mitJahr = true, mitArt = true) {
   const test = matcher(mitJahr ? conds : conds.filter((c) => c.kind !== 'zeit'));
   const jahre = mitJahr ? jahreWahl() : [], monate = monateWahl();
   const konto = S.konto ? D.kontoIdx.get(S.konto) ?? -2 : -1;
   return (r) => (S.umb || r.art !== 'Umbuchung')
     && (!jahre.length || jahre.includes(r.y)) && (!monate.length || monate.includes(r.m)) && (konto === -1 || r.k === konto)
     && (!S.kat || r.kat === S.kat) && (!S.ukat || r.ukat === S.ukat)
-    && (S.art === 'alle' || (S.art === 'aus' ? r.art === 'Ausgabe' : r.art === 'Einnahme'))
+    && (!mitArt || S.art === 'alle' || (S.art === 'aus' ? r.art === 'Ausgabe' : r.art === 'Einnahme'))
     && test(r);
 }
 
 let V = null;          // Vergleichszeitraum (ein Jahr früher) mit seinen Buchungen
+let FK = [];           // wie F, aber ohne den Filter Einnahmen/Ausgaben (für die Kennzahlen)
 function filtern() {
   const conds = parse(S.q);
   F = D.rows.filter(pruefer(conds));
+  FK = S.art === 'alle' ? F : D.rows.filter(pruefer(conds, true, false));
   V = vergleich(conds);
   return conds;
 }
@@ -107,6 +110,8 @@ function vergleich(conds) {
   if (vb < D.von) return null;
   const t = pruefer(conds, false);
   const rows = D.rows.filter((r) => r.d >= va && r.d <= vb && t(r));
+  const tk = pruefer(conds, false, false);
+  const rowsAlle = S.art === 'alle' ? rows : D.rows.filter((r) => r.d >= va && r.d <= vb && tk(r));
   const y1 = +va.slice(0, 4), y2 = +vb.slice(0, 4);
   const ganzesJahr = va.slice(5) === '01-01' && bVoll === b && b.slice(5) === '12-31';
   const ganzerMonat = va.slice(5, 7) === vb.slice(5, 7) && va.slice(8) === '01' && bVoll === b;
@@ -114,7 +119,7 @@ function vergleich(conds) {
   const label = ganzesJahr ? (y1 === y2 ? String(y1) : `${y1}–${y2}`)
     : ganzerMonat && y1 === y2 ? `${MON[+va.slice(5, 7) - 1]} ${y1}`
       : `${tm(va)}–${tm(vb)}${y2}`;
-  return { va, vb, rows, label, jahr: y1 === y2 ? y1 : 0 };
+  return { va, vb, rows, rowsAlle, label, jahr: y1 === y2 ? y1 : 0 };
 }
 
 // Alle Treffer in einem Jahr? Dann zeigen Grafik und Übersicht Monate statt Jahre.
@@ -249,17 +254,18 @@ function jahresZeile(proJahr, feld, mehrIstGut, alsBetrag = false) {
 }
 
 function kennzahlen(conds) {
-  const { ein, aus, erg } = summen(F);
+  // Einnahmen, Ausgaben und Saldo immer aus beiden Seiten – „nur Ausgaben“ wirkt auf Liste und Grafiken, nicht auf die Kacheln
+  const { ein, aus, erg } = summen(FK);
   const jw = jahreWahl();
-  const proJahr = jw.length > 1 ? jw.map((y) => [y, summen(F.filter((r) => r.y === y))]) : null;
-  const vs = V ? summen(V.rows) : null;
+  const proJahr = jw.length > 1 ? jw.map((y) => [y, { ...summen(FK.filter((r) => r.y === y)), n: F.filter((r) => r.y === y).length }]) : null;
+  const vs = V ? { ...summen(V.rowsAlle), n: V.rows.length } : null;
   const mon = monatsSpanne(conds);
   const text = conds.some((c) => c.kind === 'text' || c.kind === 'betrag');
-  const gesamt = !text && S.art === 'alle' && !S.kat;
+  const gesamt = !text && !S.kat;
   const quote = ein > 0 && gesamt ? Math.round((erg / ein) * 100) : null;
   const zr = F.length ? `${dde(F[0].d)} – ${dde(F[F.length - 1].d)}` : 'keine Treffer';
   const avg = (c) => (mon > 24 ? eur0((c / mon) * 12) : eur0(c / mon));
-  const kpi = (l, v, c, s, d = '', k = '', tip = '', an = false) => `<button class="kpi${an ? ' an' : ''}" data-kpi="${k}" title="${tip}"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div>${d}</button>`;
+  const kpi = (l, v, c, s, d = '', k = '', tip = '', an = false) => `<button class="kpi${an ? ' an' : ''}${(k === 'ein' || k === 'aus') && S.art !== 'alle' && S.art !== k ? ' neben' : ''}" data-kpi="${k}" title="${tip}"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div>${d}</button>`;
   const diffErg = () => {
     if (!V) return '';
     const d = erg - vs.erg;
@@ -273,7 +279,7 @@ function kennzahlen(conds) {
     gesamt ? kpi(erg >= 0 ? 'Überschuss' : 'Fehlbetrag', eur0(erg), cls(erg), quote === null ? 'Einnahmen minus Ausgaben' : quote >= 0 ? `${quote} % der Einnahmen übrig` : `${-quote} % mehr ausgegeben als eingenommen`, proJahr ? jahresZeile(proJahr, 'erg', true, true) : diffErg(),
       'erg', 'Klick: Einnahmen und Ausgaben nach Kategorien', S.tab === 'uebersicht' && S.art === 'alle')
       : kpi('Summe der Treffer', eur0(erg), cls(erg), 'Einnahmen minus Ausgaben', proJahr ? jahresZeile(proJahr, 'erg', true, true) : diffErg(), 'erg', 'Klick: nach Kategorien aufteilen', S.tab === 'uebersicht'),
-    kpi('Buchungen', NUM.format(F.length), '', zr, proJahr ? jahresZeile(proJahr, 'n') : V ? `<div class="d muted">${V.label}: ${NUM.format(vs.n)}</div>` : '',
+    kpi(S.art === 'alle' ? 'Buchungen' : S.art === 'aus' ? 'Buchungen (nur Ausgaben)' : 'Buchungen (nur Einnahmen)', NUM.format(F.length), '', zr, proJahr ? jahresZeile(proJahr, 'n') : V ? `<div class="d muted">${V.label}: ${NUM.format(vs.n)}</div>` : '',
       'n', 'Klick: Liste der Buchungen', S.tab === 'buchungen' && S.art === 'alle'),
   ].join('');
   $('#kpis').querySelectorAll('[data-kpi]').forEach((b) => b.onclick = () => kpiKlick(b.dataset.kpi));
@@ -281,11 +287,9 @@ function kennzahlen(conds) {
 
 // Klick auf eine Kennzahl: Einnahmen/Ausgaben filtern (nochmal klicken = aus), Überschuss → Kategorien, Buchungen → Liste
 function kpiKlick(k) {
-  const tabelleTab = ['buchungen', 'uebersicht'].includes(S.tab) ? S.tab : 'buchungen';
-  if (k === 'ein' || k === 'aus') setze({ art: S.art === k ? 'alle' : k, tab: tabelleTab });
+  if (k === 'ein' || k === 'aus') setze({ art: S.art === k ? 'alle' : k });   // Reiter und Scrollposition bleiben
   else if (k === 'erg') setze({ art: 'alle', tab: 'uebersicht' });
   else setze({ art: 'alle', tab: 'buchungen' });
-  $('#tabs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // ======================================================================= Grafiken
