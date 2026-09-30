@@ -7,13 +7,13 @@
   <meta name="referrer" content="no-referrer">
   <title>Finanzen</title>
   <meta name="description" content="Private Finanzen – Dashboard mit Suche, Grafiken und Tabellen-Export">
-  <meta name="theme-color" content="#0f0f0e">
+  <meta name="theme-color" content="#2a78d6">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="css/app.css">
   <script>
-    try { var t = localStorage.getItem('fd.theme') || 'dark'; if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) { document.documentElement.dataset.theme = 'dark'; }
+    try { var t = localStorage.getItem('fd.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else if (!t) document.documentElement.dataset.theme = 'light'; } catch (e) {}
   </script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <script type="module" src="js/app.js"></script>

@@ -952,9 +952,12 @@ function tabFixkosten(conds) {
     if (f.aktiv) { g.summe += f.proMonat; g.laufend++; }
   }
   const arten = [...gruppen.values()].sort((a, b) => b.summe - a.summe || a.art.localeCompare(b.art, 'de'));
-  arten.forEach((g, i) => { g.farbe = ART_FARBEN[i % ART_FARBEN.length]; });
+  // Farben: laufende Arten nach Größe, danach die übrigen (auch beendete) – gleich in Kreis, Verlauf und Liste
+  const farbe = new Map();
+  for (const a of [...arten.map((g) => g.art), ...alle.map(fixArt)]) if (!farbe.has(a)) farbe.set(a, ART_FARBEN[farbe.size % ART_FARBEN.length]);
+  arten.forEach((g) => { g.farbe = farbe.get(g.art); });
   const imKreis = arten.filter((g) => g.summe > 0);
-  fixGrafik = imKreis.length ? { arten: imKreis, pm } : null;
+  fixGrafik = imKreis.length ? { arten: imKreis, pm, verlauf: fixVerlauf(alle, farbe) } : null;
 
   const seg = (v, t) => `<button data-fixansicht="${v}" class="${fixAnsicht === v ? 'an' : ''}">${t}</button>`;
   let h = `<div class="fix-kopf">
@@ -964,9 +967,12 @@ function tabFixkosten(conds) {
       ${ausg > 0 && !conds.length && !S.kat && !S.konto ? `<div class="fix-zahl"><span class="l">Anteil an deinen Ausgaben</span><b>${NUM.format(Math.round((pm / ausg) * 100))} %</b><span class="muted">Ø der letzten 12 Monate: ${eur0(ausg)} / Monat</span></div>` : ''}
     </div>
     ${fixGrafik ? `<div class="fix-ueberblick">
-      <div class="fix-ring"><canvas id="c-fix"></canvas><div class="fix-ring-mitte"><b>${eur0(pm)}</b><span>pro Monat</span></div></div>
+      <div class="fix-ring-box"><div class="fix-ring"><canvas id="c-fix"></canvas><div class="fix-ring-mitte"><b>${eur0(pm)}</b><span>pro Monat = 100 %</span></div></div>
+        <div class="fix-grafik-t">Anteile an den laufenden Fixkosten</div></div>
       <div class="fix-legende"><div class="fix-leg-kopf"><span>Art der Fixkosten</span><span>pro Monat</span><span>Anteil</span></div>${imKreis.map((g) => `<button class="fix-leg" data-fixgruppe="${esc(g.art)}"><span class="punkt" style="background:${g.farbe}"></span><span class="name">${esc(g.art)}</span><span class="betrag">${eur0(g.summe)}</span><span class="anteil">${pct(g.summe)}</span></button>`).join('')}
         <div class="fix-leg-fuss">Anteil = Anteil an deinen laufenden Fixkosten von ${eur0(pm)} pro Monat (= 100 %).</div></div>
+      <div class="fix-trend"><div class="fix-grafik-t">Fixkosten pro Monat im Zeitverlauf</div><div class="fix-trend-c"><canvas id="c-fix-trend"></canvas></div>
+        <div class="fix-leg-fuss">Summe der regelmäßigen Zahlungen, die im jeweiligen Monat liefen (jährliche anteilig), gestapelt nach Art.</div></div>
     </div>` : ''}
     <div class="fix-leiste"><div class="seg fix-seg">${seg('laufend', `Laufend (${aktiv.length})`)}${nFrueher ? seg('frueher', `+ frühere seit 2020 (${nFrueher})`) : ''}${nFrueher + nAelter ? seg('alle', `alle (${alle.length})`) : ''}</div>
       ${arten.length ? `<button class="link" id="fix-alle-auf">${arten.every((g) => fixOffen.has(g.art)) ? 'Alle zuklappen' : 'Alle aufklappen'}</button>` : ''}</div>
@@ -1021,7 +1027,27 @@ function tabFixkosten(conds) {
 // Kreisdiagramm der Fixkosten-Arten; ein Klick auf ein Segment klappt die Gruppe auf
 function fixGrafikZeichnen() {
   if (!fixGrafik || !$('#c-fix')) return;
-  const { arten, pm } = fixGrafik;
+  const { arten, pm, verlauf: vl } = fixGrafik;
+  if (vl && $('#c-fix-trend')) {
+    const o = basis();
+    o.interaction = { mode: 'index', intersect: false };
+    o.plugins.tooltip.callbacks = {
+      title: (it) => { const [yy, mm] = vl.monate[it[0].dataIndex].split('-'); return `${MONAT[+mm - 1]} ${yy}`; },
+      label: (it) => (it.raw ? ` ${it.dataset.label}: ${EUR0.format(it.raw)}` : null),
+      footer: (it) => `Zusammen: ${EUR0.format(it.reduce((s, x) => s + x.raw, 0))} pro Monat`,
+    };
+    o.plugins.tooltip.filter = (it) => it.raw > 0;
+    o.scales = {
+      x: { ...achsenStil(), stacked: true, grid: { display: false }, ticks: { ...achsenStil().ticks, maxRotation: 0, autoSkip: false,
+        callback: (_, i) => { const [yy, mm] = vl.monate[i].split('-'); return mm === '01' ? yy : mm === '07' ? MON[6] : ''; } } },
+      y: { ...achsenStil(), stacked: true, ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 5 } },
+    };
+    zeichne('c-fix-trend', {
+      type: 'bar',
+      data: { labels: vl.monate, datasets: vl.arten.map((a) => ({ label: a.art, data: a.werte.map((c) => Math.round(c) / 100), backgroundColor: a.farbe, borderWidth: 0, barPercentage: 0.9, categoryPercentage: 0.9 })) },
+      options: o,
+    });
+  }
   zeichne('c-fix', {
     type: 'doughnut',
     data: { labels: arten.map((g) => g.art), datasets: [{ data: arten.map((g) => g.summe / 100), backgroundColor: arten.map((g) => g.farbe), borderWidth: 0, spacing: 2, hoverOffset: 6 }] },
@@ -1029,12 +1055,34 @@ function fixGrafikZeichnen() {
       responsive: true, maintainAspectRatio: false, cutout: '68%', animation: { duration: 250 },
       plugins: {
         legend: { display: false },
-        tooltip: { ...basis().plugins.tooltip, callbacks: { label: (it) => ` ${EUR0.format(it.raw)} · ${NUM.format(Math.round((it.raw * 100 / (pm / 100)) * 10) / 10)} %` } },
+        tooltip: { ...basis().plugins.tooltip, callbacks: { label: (it) => ` ${EUR0.format(it.raw)} pro Monat · ${NUM.format(Math.round((it.raw * 100 / (pm / 100)) * 10) / 10)} % der Fixkosten` } },
       },
       onClick: (_, el) => { if (el.length) fixGruppeUmschalten(arten[el[0].index].art, true); },
       onHover: (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; },
     },
   });
+}
+
+// Fixkosten je Monat der letzten 36 Monate: je Vertrag die damals gültige Rate (einmalige Ausreißer ignoriert)
+function fixVerlauf(vertraege, farbe) {
+  const ende = D.bis.slice(0, 7), monate = [];
+  let [y, m] = ende.split('-').map(Number);
+  for (let i = 0; i < 36; i++) { monate.unshift(`${y}-${String(m).padStart(2, '0')}`); if (--m === 0) { m = 12; y--; } }
+  const reihen = new Map();
+  for (const f of vertraege) {
+    const stufen = f.stufen.filter((x, i, a) => x.n > 1 || i === a.length - 1);
+    const bis = f.aktiv ? ende : f.zuletzt.slice(0, 7);
+    const art = fixArt(f);
+    if (!reihen.has(art)) reihen.set(art, monate.map(() => 0));
+    const werte = reihen.get(art);
+    monate.forEach((mo, i) => {
+      if (mo < f.seit.slice(0, 7) || mo > bis) return;
+      const st = [...stufen].reverse().find((x) => x.von.slice(0, 7) <= mo) || stufen[0];
+      werte[i] += (st.betrag * f.rh.proJahr) / 12;
+    });
+  }
+  const arten = [...reihen].filter(([, w]) => w.some(Boolean)).sort((a, b) => b[1][b[1].length - 1] - a[1][a[1].length - 1] || b[1].reduce((s, x) => s + x, 0) - a[1].reduce((s, x) => s + x, 0));
+  return { monate, arten: arten.map(([art, w]) => ({ art, werte: w, farbe: farbe.get(art) })) };
 }
 
 function fixGruppeUmschalten(art, nurAuf = false) {
@@ -1314,8 +1362,8 @@ function startZeigen(fehler) {
 
 function themeSetzen(t) {
   if (t) { try { localStorage.setItem('fd.theme', t); } catch {} }
-  let cur = 'dark';   // Standard: dunkel
-  try { cur = localStorage.getItem('fd.theme') || 'dark'; } catch {}
+  let cur = 'light';   // Standard: hell
+  try { cur = localStorage.getItem('fd.theme') || 'light'; } catch {}
   if (cur === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = cur;
   document.querySelectorAll('#m-theme button').forEach((b) => b.classList.toggle('an', b.dataset.v === cur));
   if (D) { verlauf(); kategorien(); }
