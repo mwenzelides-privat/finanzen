@@ -537,7 +537,13 @@ function tabBuchungen(conds) {
         <label class="st-zuordnen klein">Steuer: <select data-steuer-i="${r.i}">${postenOptionen(steuerPosten(r), true)}</select></label></td></tr>`;
     }
   }
-  h += '</tbody></table></div>';
+  // Summenzeile über alle Treffer (nicht nur die angezeigten)
+  let ein = 0, aus = 0;
+  for (const r of rows) { if (r.c > 0) ein += r.c; else aus += r.c; }
+  h += `</tbody><tfoot><tr class="summe-zeile"><td class="datum"></td>
+    <td><div class="wer">Summe ${rows.length === 1 ? 'der Buchung' : `aller ${NUM.format(rows.length)} Buchungen`}</div>
+      <div class="zweck">Eingänge ${eur(ein)} · Ausgänge ${eur(aus)}</div></td>
+    <td class="kat-sp"></td><td class="konto-sp"></td><td class="r betrag ${cls(ein + aus)}">${eur(ein + aus)}</td></tr></tfoot></table></div>`;
   if (rows.length > limit) h += `<div class="mehr">${NUM.format(limit)} von ${NUM.format(rows.length)} angezeigt <button class="btn sm" id="mehr">Weitere ${NUM.format(Math.min(500, rows.length - limit))} anzeigen</button></div>`;
   else if (rows.length > 20) h += `<div class="mehr">Alle ${NUM.format(rows.length)} Buchungen angezeigt</div>`;
   return h;

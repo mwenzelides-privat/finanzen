@@ -32,20 +32,42 @@ const ABSCHNITTE = [
 const pausch = (j) => (j >= 2023 ? 123000 : j >= 2022 ? 120000 : 100000);
 
 const POSTEN = [
-  ['wk-arbeitsmittel', 'wk', 'Arbeitsmittel'], ['wk-fortbildung', 'wk', 'Fortbildung, Seminare, Studium'], ['wk-verbaende', 'wk', 'Berufsverbände, Gewerkschaft'],
-  ['wk-kleidung', 'wk', 'Berufskleidung'], ['wk-arbeitszimmer', 'wk', 'Arbeitszimmer, Homeoffice'], ['wk-fahrten', 'wk', 'Fahrkarten, Reisekosten'],
-  ['wk-uebernachtung', 'wk', 'Übernachtungen (Dienstreisen)'], ['wk-telefon', 'wk', 'Telefon und Internet (beruflicher Anteil)'], ['wk-porto', 'wk', 'Porto, Büromaterial'],
-  ['wk-rechtsschutz', 'wk', 'Berufsrechtsschutz, Rechts- und Beratungskosten'], ['wk-steuerberatung', 'wk', 'Steuerberatung'], ['wk-sonstige', 'wk', 'Sonstige Werbungskosten'],
-  ['vs-kv', 'vorsorge', 'Kranken- und Pflegeversicherung'], ['vs-riester', 'vorsorge', 'Riester-Rente'], ['vs-leben', 'vorsorge', 'Lebensversicherungen'],
-  ['vs-bu', 'vorsorge', 'Berufsunfähigkeitsversicherung'], ['vs-haftpflicht', 'vorsorge', 'Haftpflichtversicherungen'], ['vs-weitere', 'vorsorge', 'Unfall-, Kfz- und weitere Versicherungen'],
-  ['sa-unterhalt', 'sonder', 'Unterhalt an den Ehegatten (Realsplitting)'], ['sa-spenden', 'sonder', 'Spenden und Mitgliedsbeiträge'], ['sa-schulgeld', 'sonder', 'Schulgeld'],
-  ['sa-kirchensteuer', 'sonder', 'Kirchensteuer'],
-  ['agb-krankheit', 'agb', 'Krankheitskosten (Arzt, Zahnarzt, Brille, Medikamente)'], ['agb-sonstige', 'agb', 'Sonstige außergewöhnliche Belastungen'],
-  ['ha-handwerker', 'haushalt', 'Handwerkerleistungen'], ['ha-dienstleistung', 'haushalt', 'Haushaltsnahe Dienstleistungen'], ['ha-nebenkosten', 'haushalt', 'Nebenkosten, Hausgeld (Abrechnung prüfen)'],
-  ['ki-betreuung', 'kinder', 'Kinderbetreuung'],
-  ['ein-lohn', 'einnahmen', 'Arbeitslohn (Auszahlungen)'], ['ein-kindergeld', 'einnahmen', 'Kindergeld'], ['ein-kapital', 'einnahmen', 'Kapitalerträge, Zinsen'],
-  ['ein-miete', 'einnahmen', 'Mieteinnahmen'], ['ein-sonstige', 'einnahmen', 'Weitere Einnahmen'], ['ein-steuern', 'einnahmen', 'Zahlungen an das und Erstattungen vom Finanzamt'],
-].map(([id, abschnitt, name]) => ({ id, abschnitt, name }));
+  ['wk-arbeitsmittel', 'wk', 'Arbeitsmittel', 'Arbeitsgeräte für den Beruf (Computer, Werkzeug, Fachbücher). Bis 952 € brutto im Jahr des Kaufs, teurere über die Nutzungsdauer; private Mitnutzung anteilig.'],
+  ['wk-fortbildung', 'wk', 'Fortbildung, Seminare, Studium', 'Kurse, Seminare und Studium mit Bezug zum Beruf, einschließlich Fahrt- und Übernachtungskosten.'],
+  ['wk-verbaende', 'wk', 'Berufsverbände, Gewerkschaft', 'Beiträge zu Gewerkschaft oder Berufsverband.'],
+  ['wk-kleidung', 'wk', 'Berufskleidung', 'Nur typische Berufs- oder Schutzkleidung (Uniform, Sicherheitsschuhe), keine Alltagskleidung.'],
+  ['wk-arbeitszimmer', 'wk', 'Arbeitszimmer, Homeoffice', 'Arbeitszimmer nur, wenn es der Mittelpunkt der Arbeit ist; sonst Homeoffice-Pauschale 6 € je Tag (höchstens 1.260 € im Jahr).'],
+  ['wk-fahrten', 'wk', 'Fahrkarten, Reisekosten', 'Dienstliche Fahrten und Reisen. Der tägliche Weg zur Arbeit läuft über die Entfernungspauschale, nicht über Belege.'],
+  ['wk-uebernachtung', 'wk', 'Übernachtungen (Dienstreisen)', 'Hotelkosten auf beruflichen Reisen, soweit der Arbeitgeber sie nicht erstattet. Essen zählt nur über Verpflegungspauschalen.'],
+  ['wk-telefon', 'wk', 'Telefon und Internet (beruflicher Anteil)', 'Beruflicher Anteil von Telefon und Internet: ohne Nachweis 20 % der Rechnung, höchstens 20 € im Monat.'],
+  ['wk-porto', 'wk', 'Porto, Büromaterial', 'Porto und Büromaterial für berufliche Zwecke, z. B. Bewerbungen.'],
+  ['wk-rechtsschutz', 'wk', 'Berufsrechtsschutz, Rechts- und Beratungskosten', 'Berufsrechtsschutz (Anteil) und Anwaltskosten in beruflichen Angelegenheiten, z. B. Arbeitsrecht. Private Rechtsstreitigkeiten zählen nicht.'],
+  ['wk-steuerberatung', 'wk', 'Steuerberatung', 'Der Anteil der Steuerberatung für die Einkünfte (z. B. Anlage N). Der private Teil ist nicht absetzbar.'],
+  ['wk-umzug', 'wk', 'Umzugskosten (beruflich)', 'Nur bei beruflich veranlasstem Umzug (neue Stelle, Arbeitsweg deutlich kürzer): Wohnungssuche, Transport, Makler für eine Mietwohnung, Umzugspauschale.'],
+  ['wk-sonstige', 'wk', 'Sonstige Werbungskosten', 'Weitere berufliche Kosten, z. B. Bewerbungen oder doppelte Haushaltsführung.'],
+  ['vs-kv', 'vorsorge', 'Kranken- und Pflegeversicherung', 'Basisbeiträge zur Kranken- und Pflegeversicherung voll; Zusatzversicherungen nur begrenzt.'],
+  ['vs-riester', 'vorsorge', 'Riester-Rente', 'Riester-Beiträge (Anlage AV): Zulagen oder Sonderausgabenabzug bis 2.100 € im Jahr.'],
+  ['vs-leben', 'vorsorge', 'Lebensversicherungen', 'Nur Risikolebensversicherungen sowie Kapital-Lebensversicherungen mit Vertragsbeginn vor 2005; begrenzt abziehbar.'],
+  ['vs-bu', 'vorsorge', 'Berufsunfähigkeitsversicherung', 'Sonstige Vorsorgeaufwendungen – begrenzt; der Rahmen ist oft schon durch die Krankenversicherung ausgeschöpft.'],
+  ['vs-haftpflicht', 'vorsorge', 'Haftpflichtversicherungen', 'Privat-, Kfz- und Tierhalterhaftpflicht – sonstige Vorsorgeaufwendungen (begrenzt).'],
+  ['vs-weitere', 'vorsorge', 'Unfall-, Kfz- und weitere Versicherungen', 'Unfallversicherung, Kfz-Haftpflichtanteil – begrenzt. Kasko, Hausrat, Glas und private Rechtsschutzversicherungen zählen nicht.'],
+  ['sa-unterhalt', 'sonder', 'Unterhalt an den Ehegatten (Realsplitting)', 'Unterhalt an den getrennt lebenden oder geschiedenen Ehegatten (Anlage U), nur mit ihrer Zustimmung – sie versteuert ihn dann. Kindesunterhalt zählt nicht.'],
+  ['sa-spenden', 'sonder', 'Spenden und Mitgliedsbeiträge', 'Spenden und Beiträge an gemeinnützige Organisationen; bis 300 € reicht der Kontoauszug als Nachweis.'],
+  ['sa-schulgeld', 'sonder', 'Schulgeld', '30 % des Schulgelds für Privatschulen, höchstens 5.000 € – ohne Verpflegung und Betreuung.'],
+  ['sa-kirchensteuer', 'sonder', 'Kirchensteuer', 'Selbst gezahlte Kirchensteuer, auch Nachzahlungen.'],
+  ['agb-krankheit', 'agb', 'Krankheitskosten (Arzt, Zahnarzt, Brille, Medikamente)', 'Selbst getragene Krankheitskosten: Arzt, Zahnarzt, Brille, Medikamente mit Rezept, Physiotherapie. Wirken über der zumutbaren Belastung.'],
+  ['agb-sonstige', 'agb', 'Sonstige außergewöhnliche Belastungen', 'Z. B. Pflegekosten, Beerdigung, Unterhalt an bedürftige Angehörige.'],
+  ['ha-handwerker', 'haushalt', 'Handwerkerleistungen', 'Arbeitskosten von Handwerkern im eigenen Haushalt laut Rechnung, unbar bezahlt. Material zählt nicht.'],
+  ['ha-dienstleistung', 'haushalt', 'Haushaltsnahe Dienstleistungen', 'Reinigung, Gartenpflege, privates Umzugsunternehmen, Pflegedienst im Haushalt – Arbeitskosten laut Rechnung.'],
+  ['ha-nebenkosten', 'haushalt', 'Nebenkosten, Hausgeld (Abrechnung prüfen)', 'Nur die Arbeitsanteile aus der jährlichen Neben- oder Hausgeldabrechnung (Hausmeister, Treppenhausreinigung, Schornsteinfeger).'],
+  ['ki-betreuung', 'kinder', 'Kinderbetreuung', 'Kita, Tagesmutter, Hort, Babysitter für Kinder unter 14, unbar bezahlt – ohne Verpflegung und Unterricht.'],
+  ['ein-lohn', 'einnahmen', 'Arbeitslohn (Auszahlungen)', 'Zur Kontrolle; maßgeblich ist die Lohnsteuerbescheinigung.'],
+  ['ein-kindergeld', 'einnahmen', 'Kindergeld', 'Zur Kontrolle; wird mit dem Kinderfreibetrag verglichen.'],
+  ['ein-kapital', 'einnahmen', 'Kapitalerträge, Zinsen', 'Zur Kontrolle; maßgeblich sind die Steuerbescheinigungen der Banken.'],
+  ['ein-miete', 'einnahmen', 'Mieteinnahmen', 'Mieteinnahmen gehören in die Anlage V.'],
+  ['ein-sonstige', 'einnahmen', 'Weitere Einnahmen', 'Zur Kontrolle.'],
+  ['ein-steuern', 'einnahmen', 'Zahlungen an das und Erstattungen vom Finanzamt', 'Vorauszahlungen und Nachzahlungen werden auf die Steuer angerechnet – wichtig für die Steuerberaterin.'],
+].map(([id, abschnitt, name, info]) => ({ id, abschnitt, name, info }));
 const POSTEN_ID = new Map(POSTEN.map((p) => [p.id, p]));
 
 // Steuerkategorien aus WISO/Buhl → Posten
@@ -81,20 +103,38 @@ const WORT_VORSCHLAG = [
 const RESTAURANT = /restaurant|gasthaus|gasthof|wirtshaus|pizz|sushi|imbiss|\bcafe|bistro|braeu|brauerei|grill|kebab|doener|burger|mcd|trattoria|osteria|biergarten|baeckerei|metzgerei|wok\b/;
 const MARKT = /\bobi\b|hagebau|bauhaus|hornbach|toom|baywa|dehner|globus|hellweg|raiffeisen|gartencenter|\bikea\b/;
 
-// Plausibilitätsprüfung: liefert [Art, Text] – 'pruefen' (Zweifel) oder 'info' (nur Hinweis)
+// Plausibilitätsprüfung: { art: 'pruefen' | 'info', text (Einschätzung), rat (Empfehlung), aktionen: [{ t, p ('x' = ausschließen), notiz }] }
+const AUS = { t: '✕ Ausschließen – nicht absetzbar', p: 'x' };
 function pruefung(r, p) {
   const t = norm(`${r.g} ${r.z}`);
-  if (p === 'wk-uebernachtung' && (RESTAURANT.test(t) || r.kat === 'Essen & Trinken')) return ['pruefen', 'Restaurant/Verpflegung: nur bei beruflicher Reise; Verpflegung läuft meist über Pauschalen.'];
-  if ((p === 'ha-handwerker' || p === 'ha-dienstleistung') && MARKT.test(norm(r.g))) return ['pruefen', 'Einkauf im Bau- oder Gartenmarkt ist Material und nach § 35a nicht begünstigt.'];
-  if (p === 'ha-nebenkosten') return ['pruefen', 'Nur Arbeitskosten aus der Neben-/Hausgeldabrechnung zählen (Hausmeister, Reinigung, Schornsteinfeger), nicht der Verbrauch.'];
-  if (p === 'sa-unterhalt' && (/kind|gesamt/.test(norm(r.z)) || r.ukat === 'Kindesunterhalt')) return ['pruefen', 'Enthält Kindesunterhalt: absetzbar ist nur der Anteil für den Ehegatten.'];
-  if (p === 'wk-arbeitszimmer' && /immobilienscout|immowelt|wohnungsboerse/.test(t)) return ['pruefen', 'Sieht nach Wohnungssuche aus, nicht nach Arbeitszimmer.'];
-  if (p === 'sa-schulgeld') return ['pruefen', 'Nur Schulgeld für Privatschulen (30 %); Klassenfahrten, Material und Essen zählen nicht.'];
-  if (p === 'ki-betreuung' && /urlaub|reise|ferien(?!betreuung)/.test(t)) return ['pruefen', 'Urlaub oder Reise ist keine Kinderbetreuung.'];
-  if (p === 'vs-weitere' && /hausrat|glasvers|reise|rechtsschutz/.test(norm(`${r.ukat} ${r.z}`))) return ['pruefen', 'Sach- und private Rechtsschutzversicherungen sind nicht absetzbar.'];
-  if (p === 'wk-arbeitsmittel' && r.c < -80000) return ['pruefen', 'Über 952 € brutto: wird über die Nutzungsdauer abgeschrieben (Computer/Software: 1 Jahr).'];
-  if (p === 'wk-telefon') return ['info', 'Beruflicher Anteil: ohne Nachweis pauschal 20 % der Rechnung, höchstens 20 € im Monat.'];
-  if (p === 'wk-steuerberatung') return ['info', 'Nur der Anteil für die Einkünfte (z. B. Anlage N) ist Werbungskosten, der private Teil nicht.'];
+  if (p === 'wk-uebernachtung' && (RESTAURANT.test(t) || r.kat === 'Essen & Trinken')) return { art: 'pruefen',
+    text: 'Das ist ein Restaurantbesuch, keine Übernachtung. Essen ist steuerlich fast nie absetzbar – auch auf Dienstreisen gibt es dafür nur Verpflegungspauschalen, keine Belege.',
+    rat: 'Privates Essen → ausschließen. Nur eine Hotelrechnung auf beruflicher Reise gehört hierher.', aktionen: [AUS, { t: 'Ist eine Hotelrechnung (Dienstreise) – behalten', p: 'wk-uebernachtung' }] };
+  if ((p === 'ha-handwerker' || p === 'ha-dienstleistung') && MARKT.test(norm(r.g))) return { art: 'pruefen',
+    text: 'Einkauf im Bau- oder Gartenmarkt = Material. Nach § 35a zählen nur die Arbeitskosten eines Handwerkers laut Rechnung, nicht selbst gekauftes Material.',
+    rat: 'Ausschließen.', aktionen: [AUS] };
+  if (p === 'ha-nebenkosten') return { art: 'pruefen',
+    text: 'Abschläge für Strom, Gas, Wasser, Heizung oder Müll sind selbst nicht absetzbar. Absetzbar sind nur Arbeitsanteile (Hausmeister, Treppenhausreinigung, Gartenpflege, Schornsteinfeger) aus der jährlichen Neben- oder Hausgeldabrechnung.',
+    rat: 'Monatliche Abschläge → ausschließen. Die Jahresabrechnung (mit § 35a-Ausweis) direkt der Steuerberaterin geben.', aktionen: [AUS, { t: 'Ist eine Jahresabrechnung – behalten', p: 'ha-nebenkosten' }] };
+  if (p === 'sa-unterhalt' && (/kind|gesamt/.test(norm(r.z)) || r.ukat === 'Kindesunterhalt')) return { art: 'pruefen',
+    text: 'Die Zahlung enthält Kindes- und Ehegattenunterhalt. Absetzbar (Realsplitting, Anlage U) ist nur der Unterhalt für den Ehegatten, Kindesunterhalt nicht.',
+    rat: 'Behalten und in der Notiz den Ehegattenanteil angeben, z. B. „davon 1.360 € Ehegattenunterhalt“.', aktionen: [{ t: 'Behalten und Ehegattenanteil notieren', p: 'sa-unterhalt', notiz: true }, AUS] };
+  if (p === 'wk-arbeitszimmer' && /immobilienscout|immowelt|wohnungsboerse/.test(t)) return { art: 'pruefen',
+    text: 'Das ist Wohnungssuche, kein Arbeitszimmer. Kosten der Wohnungssuche sind nur absetzbar, wenn der Umzug beruflich veranlasst war (neue Stelle, Arbeitsweg deutlich kürzer) – dann als Umzugskosten. Privat veranlasst sind sie nicht absetzbar.',
+    rat: 'Privater Umzug → ausschließen. Beruflicher Umzug → als Umzugskosten übernehmen.', aktionen: [AUS, { t: 'Beruflicher Umzug – als Umzugskosten übernehmen', p: 'wk-umzug' }] };
+  if (p === 'sa-schulgeld') return { art: 'pruefen',
+    text: 'Schulgeld ist nur für Privatschulen absetzbar (30 %, höchstens 5.000 €). Bei einer staatlichen Schule sind es meist Klassenfahrt, Kopiergeld oder Material – das ist nicht absetzbar.',
+    rat: 'Staatliche Schule → ausschließen. Privatschule → behalten.', aktionen: [AUS, { t: 'Privatschule – als Schulgeld behalten', p: 'sa-schulgeld' }] };
+  if (p === 'ki-betreuung' && /urlaub|reise|ferien(?!betreuung)/.test(t)) return { art: 'pruefen',
+    text: 'Urlaubs- oder Reisekosten sind keine Kinderbetreuung und nicht absetzbar.', rat: 'Ausschließen.', aktionen: [AUS] };
+  if (p === 'vs-weitere' && /hausrat|glasvers|reise|rechtsschutz/.test(norm(`${r.ukat} ${r.z}`))) return { art: 'pruefen',
+    text: 'Hausrat-, Glas-, Reise- und private Rechtsschutzversicherungen sind nicht absetzbar. Ausnahme: Berufsrechtsschutz (anteilig als Werbungskosten).',
+    rat: 'Privat → ausschließen. Berufsrechtsschutz → dort übernehmen.', aktionen: [AUS, { t: 'Ist Berufsrechtsschutz – übernehmen', p: 'wk-rechtsschutz' }] };
+  if (p === 'wk-arbeitsmittel' && r.c < -80000) return { art: 'pruefen',
+    text: 'Über 952 € brutto wird über die Nutzungsdauer abgeschrieben (Computer und Software im Jahr des Kaufs komplett). Absetzbar ist es trotzdem, wenn es beruflich genutzt wird.',
+    rat: 'Beruflich genutzt → behalten, die Steuerberaterin rechnet die Abschreibung. Privat → ausschließen.', aktionen: [{ t: 'Beruflich genutzt – behalten', p: 'wk-arbeitsmittel' }, AUS] };
+  if (p === 'wk-telefon') return { art: 'info', text: 'Absetzbar ist nur der berufliche Anteil: ohne Nachweis pauschal 20 % der Rechnung, höchstens 20 € im Monat. Die Steuerberaterin rechnet den Anteil.', rat: '', aktionen: [] };
+  if (p === 'wk-steuerberatung') return { art: 'info', text: 'Absetzbar ist nur der Anteil für die Einkünfte (z. B. Anlage N), der private Teil nicht. Die Steuerberaterin teilt die Rechnung auf.', rat: '', aktionen: [] };
   return null;
 }
 
@@ -148,8 +188,14 @@ function einordnen(j) {
     const p = e?.p || a.p;
     const pr = pruefung(r, p);
     let status = e?.ok || e?.p ? 'bestaetigt' : a.quelle === 'buhl' ? 'uebernommen' : 'vorschlag';
-    if (status !== 'bestaetigt' && pr?.[0] === 'pruefen') status = 'pruefen';
-    out.push({ r, p, status, hinweis: pr?.[1] || '', notiz: e?.n || '', quelle: a?.quelle || 'manuell',
+    if (status !== 'bestaetigt' && pr?.art === 'pruefen') status = 'pruefen';
+    let hinweis = pr?.text || '', rat = pr?.rat || '', aktionen = status === 'bestaetigt' ? [] : pr?.aktionen || [];
+    if (status === 'vorschlag' && !hinweis) {
+      hinweis = `In WISO/Buhl nicht markiert – vorgeschlagen wegen: ${a.grund}. ${POSTEN_ID.get(p).info}`;
+      rat = 'Passt das, übernehmen. Sonst anderen Posten wählen oder ausschließen.';
+      aktionen = [{ t: `✓ Als „${POSTEN_ID.get(p).name}“ übernehmen`, p }, { t: '✕ Nicht steuerlich relevant', p: 'x' }];
+    }
+    out.push({ r, p, status, hinweis, rat, aktionen, notiz: e?.n || '', quelle: a?.quelle || 'manuell',
       grund: e?.p && e.p !== a?.p ? `von dir zugeordnet${a ? ` (automatisch wäre: ${POSTEN_ID.get(a.p).name})` : ''}` : a?.grund || 'von dir zugeordnet' });
   }
   return out;
@@ -225,7 +271,7 @@ export function steuerZeigen(el, c) {
           h += `<div class="st-zeile${x.status === 'ausgeschlossen' ? ' aus' : ''}" data-skey="${esc(x.r.skey)}">
             <div class="st-datum">${dde(x.r.d)}</div>
             <div class="st-text" data-sdetail title="Klicken für alle Details"><div class="titel">${detailOffen.has(x.r.skey) ? '▾' : '▸'} ${esc(x.r.g || x.r.z || '–')}</div><div class="unter">${esc(x.r.g ? x.r.z : '')}${x.r.st ? ` · Buhl: ${esc(x.r.st)}` : ''} · ${esc(D.konten[x.r.k].name)}</div>
-              ${x.hinweis ? `<div class="st-hinweis ${x.status === 'pruefen' ? 'st-pruef-t' : 'muted'}">${esc(x.hinweis)}</div>` : ''}
+              ${hinweisHtml(x)}
               ${x.notiz ? `<div class="st-notiz">Notiz: ${esc(x.notiz)}</div>` : ''}</div>
             <div class="st-rechts"><div class="betrag ${x.r.c > 0 ? 'pos' : ''}">${eur(x.r.c)}</div><span class="st-badge ${stc}">${st}</span>
               <div class="st-knoepfe"><select data-sposten title="Posten ändern">${postenOptionen(x.status === 'ausgeschlossen' ? 'x' : x.p)}</select>
@@ -277,6 +323,8 @@ function binden(el) {
     el.querySelector(`[data-sauf="${b.dataset.sabschnitt}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
   const zeile = (x) => x.closest('[data-skey]');
+  const buchungVon = (z) => D.rows.find((r) => r.skey === z.dataset.skey);
+  el.querySelectorAll('[data-saktion]').forEach((b) => b.onclick = () => { aktionAusfuehren(buchungVon(zeile(b)), b.dataset.saktion, !!b.dataset.snotizfrage); neu(); });
   el.querySelectorAll('[data-sdetail]').forEach((t) => t.onclick = () => { const k = zeile(t).dataset.skey; detailOffen.has(k) ? detailOffen.delete(k) : detailOffen.add(k); neu(); });
   el.querySelectorAll('[data-sdashboard]').forEach((b) => b.onclick = () => ctx.setze({ q: `"${b.dataset.sdashboard}"`, tab: 'buchungen', jahr: '', monat: '' }));
   el.querySelector('#st-pruefen')?.addEventListener('click', () => pruefModus(0));
@@ -318,6 +366,29 @@ function binden(el) {
   };
 }
 
+// Einschätzung + Empfehlung + Knöpfe (Liste und Prüffenster)
+function hinweisHtml(x) {
+  if (!x.hinweis) return '';
+  const pr = x.status === 'pruefen' || x.status === 'vorschlag';
+  return `<div class="st-rat${x.status === 'pruefen' ? ' pruef' : ''}">
+    <div><b>${pr ? 'Einschätzung' : 'Hinweis'}:</b> ${esc(x.hinweis)}</div>
+    ${x.rat ? `<div><b>Empfehlung:</b> ${esc(x.rat)}</div>` : ''}
+    ${x.aktionen?.length ? `<div class="st-rat-knoepfe">${x.aktionen.map((a) => `<button class="btn sm${a.p === 'x' ? ' danger' : ''}" data-saktion="${a.p}"${a.notiz ? ' data-snotizfrage="1"' : ''}>${esc(a.t)}</button>`).join('')}</div>` : ''}
+  </div>`;
+}
+
+// Knopf aus der Empfehlung ausführen
+function aktionAusfuehren(r, wert, mitNotiz) {
+  const e = entscheidungen[r.skey] || {};
+  if (wert === 'x') entscheidungen[r.skey] = { ...e, x: 1 };
+  else { entscheidungen[r.skey] = { ...e, p: wert, ok: 1 }; delete entscheidungen[r.skey].x; }
+  if (mitNotiz) {
+    const t = prompt('Notiz zu dieser Buchung (erscheint im PDF und in Excel):', e.n || '');
+    if (t && t.trim()) entscheidungen[r.skey].n = t.trim();
+  }
+  speichern();
+}
+
 // ---------------------------------------------------------------- Details einer Buchung
 const empfKey = (g) => norm(g).replace(/\d{4,}/g, '').replace(/\s+/g, ' ').trim();
 
@@ -327,10 +398,10 @@ function detailHtml(x, gross = false) {
     ['Datum', dde(r.d)], ['Betrag', eur(r.c)], ['Konto', D.konten[r.k].name], ['Empfänger / Auftraggeber', r.g || '–'],
     ['Verwendungszweck', r.z || '–'], ['Kategorie (Finanzguru)', `${r.kat}${r.ukat ? ' · ' + r.ukat : ''}`], ['Art', r.art],
     ['Steuerkategorie (WISO/Buhl)', r.st || '–'], ['Steuerposten', p ? `${ABSCHNITTE.find((a) => a.id === p.abschnitt).name} → ${p.name}` : '–'],
-    ['Warum so eingeordnet', x.grund || '–'], ...(r.v ? [['Vertrag', r.v]] : []), ...(r.t ? [['Tags', r.t]] : []), ...(r.n ? [['Notiz (Finanzguru)', r.n]] : []),
+    ['Was zählt hier', p?.info || '–'], ['Warum so eingeordnet', x.grund || '–'], ...(r.v ? [['Vertrag', r.v]] : []), ...(r.t ? [['Tags', r.t]] : []), ...(r.n ? [['Notiz (Finanzguru)', r.n]] : []),
   ];
   let h = `<dl class="st-felder">${felder.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`;
-  if (x.hinweis) h += `<div class="st-hinweis ${x.status === 'pruefen' ? 'st-pruef-t' : 'muted'}">${esc(x.hinweis)}</div>`;
+  if (gross) h = hinweisHtml(x) + h;
   // weitere Zahlungen an denselben Empfänger (alle Jahre)
   const key = empfKey(r.g);
   if (key) {
@@ -397,6 +468,7 @@ function pruefZeigen() {
     </div>
     <div class="st-dlg-fuss">
       <label class="klein">Steuerposten <select data-p="posten">${postenOptionen(x.status === 'ausgeschlossen' ? 'x' : x.p)}</select></label>
+      <div class="st-posten-info klein" data-p="info">${esc(POSTEN_ID.get(x.p)?.info || '')}</div>
       <div class="st-dlg-knoepfe">
         <button class="btn" data-p="zurueck" title="← Pfeiltaste">← Zurück</button>
         <button class="btn" data-p="notiz">Notiz</button>
@@ -409,6 +481,8 @@ function pruefZeigen() {
   const r = x.r;
   const weiter = () => { if (pruefI < pruefListe.length - 1) pruefI++; else pruefListe = []; pruefZeigen(); };
   dlg.querySelector('[data-p="zu"]').onclick = pruefSchliessen;
+  dlg.querySelector('[data-p="posten"]').onchange = (e) => { dlg.querySelector('[data-p="info"]').textContent = e.target.value === 'x' ? 'Wird nicht in die Steuerunterlagen übernommen.' : POSTEN_ID.get(e.target.value)?.info || ''; };
+  dlg.querySelectorAll('[data-saktion]').forEach((b) => b.onclick = () => { aktionAusfuehren(r, b.dataset.saktion, !!b.dataset.snotizfrage); weiter(); });
   dlg.querySelector('[data-p="weiter"]').onclick = weiter;
   dlg.querySelector('[data-p="zurueck"]').onclick = () => { if (pruefI > 0) pruefI--; pruefZeigen(); };
   dlg.querySelector('[data-p="ok"]').onclick = () => {

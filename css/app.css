@@ -327,6 +327,11 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; backgrou
 .st-aus { background: var(--surface-2); color: var(--muted); }
 .st-knoepfe { display: flex; gap: 2px; align-items: center; }
 .st-knoepfe select { max-width: 190px; height: 28px; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); font-size: 12.5px; }
+.st-rat { font-size: 13px; margin: 6px 0 2px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); color: var(--text-2); display: grid; gap: 4px; white-space: normal; }
+.st-rat.pruef { background: rgba(224, 96, 46, .08); border-left: 3px solid var(--aus); border-radius: 0 8px 8px 0; }
+.st-rat b { color: var(--text); font-weight: 600; }
+.st-rat-knoepfe { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.st-posten-info { color: var(--text-2); }
 .st-text[data-sdetail] { cursor: pointer; }
 .st-text[data-sdetail]:hover .titel { color: var(--accent); }
 .st-detail { grid-column: 1 / -1; background: var(--surface-2); border-radius: 10px; padding: 10px 14px; margin-top: 2px; }
@@ -446,3 +451,6 @@ body.chat-offen .chat-knopf { display: none; }
   body { background: #fff; }
   .card, .kpi { box-shadow: none; }
 }
+
+.t tfoot .summe-zeile td { background: var(--surface-2); }
+.t tfoot .summe-zeile .zweck { -webkit-line-clamp: unset; font-weight: 400; }
