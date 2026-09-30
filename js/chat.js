@@ -150,10 +150,11 @@ function fixkostenListe({ auch_beendete } = {}) {
   const f = app.fixkosten().filter((x) => auch_beendete || x.aktiv);
   return {
     stand: D.bis,
-    summe_pro_monat_laufend_euro: e2(-f.filter((x) => x.aktiv).reduce((s, x) => s + x.proMonat, 0)),
+    hinweis: 'Beiträge aufs Gemeinschaftskonto zählen zu den Fixkosten; Verträge, die vom Gemeinschaftskonto abgehen (gemeinsam=true), sind darin enthalten und nicht in der Summe.',
+    summe_pro_monat_laufend_euro: e2(-f.filter((x) => x.aktiv && !x.gemeinsam).reduce((s, x) => s + x.proMonat, 0)),
     zahlungen: f.map((x) => ({ empfaenger: x.name, verwendungszweck: x.zweck, kategorie: `${x.kat} / ${x.ukat}`, konto: D.konten[x.k].name, rhythmus: x.rh.name,
       betrag_euro: e2(-x.betrag), pro_monat_euro: e2(-x.proMonat), preisverlauf_euro: x.stufen.map((s) => ({ betrag: e2(s.betrag), von: s.von, bis: s.bis })),
-      seit: x.seit, zuletzt: x.zuletzt, laeuft: x.aktiv })),
+      seit: x.seit, zuletzt: x.zuletzt, laeuft: x.aktiv, ...(x.beitrag ? { beitrag_gemeinschaftskonto: true } : {}), ...(x.gemeinsam ? { gemeinsam: true } : {}) })),
   };
 }
 

@@ -711,6 +711,32 @@ const median = (a) => { const s = [...a].sort((x, y) => x - y), m = s.length >> 
 const zweckSignatur = (z) => norm(z).replace(/[^a-z ]+/g, ' ').replace(MONATSWORTE, ' ').replace(/\b[a-z]{1,2}\b/g, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(0, 4).join(' ');
 const empfaengerKey = (g) => norm(g).replace(/\d{5,}/g, '').replace(/\s+/g, ' ').trim();
 
+// Gemeinschaftskonto (mit Unterkonten/Pockets): Deine regelmäßigen Überweisungen dorthin (Haushaltsgeld, Sparen Urlaub, …)
+// sind Fixkosten. Verträge, die vom Gemeinschaftskonto abgehen, werden nur informativ gezeigt – sonst zählte dasselbe
+// Geld doppelt (erst als Beitrag, dann als Abbuchung).
+const GEMEINSAM = /gemeinschaftskonto|pocket/i;
+const istGemeinsam = (k) => GEMEINSAM.test(D.konten[k].name);
+
+// Abgänge von eigenen Konten, die auf einem gemeinsamen Konto ankommen (gleicher Betrag, ±4 Tage; bei mehreren
+// Kandidaten zuerst gleicher Verwendungszweck, dann der nächste Tag). Ergebnis: Buchungs-Nr. → Zielkonto
+function beitragsBuchungen() {
+  const nachBetrag = new Map();
+  for (const r of D.rows) if (r.art === 'Umbuchung' && r.c < 0 && !istGemeinsam(r.k)) { if (!nachBetrag.has(-r.c)) nachBetrag.set(-r.c, []); nachBetrag.get(-r.c).push(r); }
+  const ziel = new Map();
+  for (const e of D.rows) {
+    if (e.art !== 'Umbuchung' || e.c <= 0 || !istGemeinsam(e.k)) continue;
+    const se = zweckSignatur(e.z);
+    // Verwendungszweck muss passen (oder auf einer Seite fehlen); ohne Zweck nur bei genau einem Kandidaten
+    let kand = (nachBetrag.get(e.c) || []).filter((r) => !ziel.has(r.i) && Math.abs(tageZwischen(r.d, e.d)) <= 4
+      && (!se || !zweckSignatur(r.z) || zweckSignatur(r.z) === se));
+    if (!se && kand.length !== 1) continue;
+    if (!kand.length) continue;
+    kand.sort((a, b) => (zweckSignatur(b.z) === se) - (zweckSignatur(a.z) === se) || Math.abs(tageZwischen(a.d, e.d)) - Math.abs(tageZwischen(b.d, e.d)));
+    ziel.set(kand[0].i, e.k);
+  }
+  return ziel;
+}
+
 // Zahlungen eines Empfängers in Ströme aufteilen: jede Zahlung geht an den Strom mit dem ähnlichsten letzten Betrag,
 // aber nie an einen Strom, der im selben Zeitraum (< 20 Tage) schon eine Zahlung hat.
 function stroeme(rows, maxAbw) {
@@ -729,8 +755,8 @@ function stroeme(rows, maxAbw) {
 }
 
 // Ist ein Strom ein Vertrag? Dann Vertrag mit Rhythmus und Preisverlauf zurückgeben.
-function alsVertrag(rs) {
-  const vertrag = rs.some((r) => r.v);
+function alsVertrag(rs, beitrag = false) {
+  const vertrag = rs.some((r) => r.v) || beitrag;
   const z = rs[rs.length - 1];
   if (!vertrag && (VARIABEL_KAT.has(z.kat) || VARIABEL_UKAT.has(z.ukat))) return null;
   if (rs.length < (vertrag ? 2 : 3) || -z.c < 100) return null;   // Kleinstbeträge (Zinsabrechnungen u. ä.) sind keine Fixkosten
@@ -780,19 +806,27 @@ function verlaufText(f) {
 function fixkostenErkennen() {
   if (D.fix) return D.fix;
   const out = [], benutzt = new Set();
-  // Schritt 1: Empfänger + Verwendungszweck
+  const beitrag = beitragsBuchungen();
+  // Schritt 1: Empfänger + Verwendungszweck; Beiträge zum Gemeinschaftskonto nach Verwendungszweck
   const gruppen = new Map();
   for (const r of D.rows) {
-    if (r.art !== 'Ausgabe' || !r.g) continue;
-    const key = empfaengerKey(r.g) + '|' + zweckSignatur(r.z);
+    const b = beitrag.has(r.i);
+    if ((r.art !== 'Ausgabe' && !b) || (!r.g && !b)) continue;
+    const key = b ? `gemeinsam|${zweckSignatur(r.z) || beitrag.get(r.i)}` : empfaengerKey(r.g) + '|' + zweckSignatur(r.z);
     if (!gruppen.has(key)) gruppen.set(key, []);
     gruppen.get(key).push(r);
   }
-  for (const rows of gruppen.values()) {
+  for (const [key, rows] of gruppen) {
     if (rows.length < 2) continue;
+    const b = key.startsWith('gemeinsam|');
     for (const s of stroeme(rows, Infinity)) {
-      const f = alsVertrag(s.rows);
-      if (f) { out.push(f); s.rows.forEach((r) => benutzt.add(r.i)); }
+      const f = alsVertrag(s.rows, b);
+      if (!f) continue;
+      if (b) {
+        const zk = D.konten[beitrag.get(s.rows[s.rows.length - 1].i)].name;
+        Object.assign(f, { beitrag: true, name: zk, kat: 'Gemeinschaftskonto', ukat: 'dein Beitrag' });
+      } else f.gemeinsam = istGemeinsam(f.k);
+      out.push(f); s.rows.forEach((r) => benutzt.add(r.i));
     }
   }
   // Schritt 2: übrige Zahlungen nur nach Empfänger und ähnlichem Betrag
@@ -805,7 +839,7 @@ function fixkostenErkennen() {
   }
   for (const rows of rest.values()) {
     if (rows.length < 2) continue;
-    for (const s of stroeme(rows, 0.15)) { const f = alsVertrag(s.rows); if (f) out.push(f); }
+    for (const s of stroeme(rows, 0.15)) { const f = alsVertrag(s.rows); if (f) { f.gemeinsam = istGemeinsam(f.k); out.push(f); } }
   }
   out.sort((a, b) => b.proMonat - a.proMonat);
   return (D.fix = out);
@@ -829,7 +863,9 @@ function ausgabenProMonat12() {
 
 let fixGrafik = null;   // Daten für die Anteilsgrafik (wird nach dem Rendern gezeichnet)
 function tabFixkosten(conds) {
-  const alle = fixkostenGefiltert(conds);
+  const gefiltert = fixkostenGefiltert(conds);
+  const alle = gefiltert.filter((f) => !f.gemeinsam);
+  const vomGemeinsamen = fixSichtbar(gefiltert.filter((f) => f.gemeinsam));
   const aktiv = alle.filter((f) => f.aktiv);
   const nFrueher = alle.filter((f) => !f.aktiv && f.zuletzt >= FRUEHER_AB).length, nAelter = alle.filter((f) => !f.aktiv && f.zuletzt < FRUEHER_AB).length;
   const liste = fixSichtbar(alle);
@@ -849,7 +885,7 @@ function tabFixkosten(conds) {
       <div class="fix-zahl"><span class="l">im Jahr</span><b class="neg">${eur0(-pm * 12)}</b><span class="muted">${NUM.format(aktiv.length)} Verträge und Abos</span></div>
       ${ausg > 0 && !conds.length && !S.kat && !S.konto ? `<div class="fix-zahl"><span class="l">Anteil an deinen Ausgaben</span><b>${NUM.format(Math.round((pm / ausg) * 100))} %</b><span class="muted">Ø Ausgaben der letzten 12 Monate: ${eur0(ausg)} / Monat</span></div>` : ''}
       <div class="seg fix-seg">${seg('laufend', `Laufend (${aktiv.length})`)}${nFrueher ? seg('frueher', `+ frühere seit 2020 (${nFrueher})`) : ''}${nFrueher + nAelter ? seg('alle', `alle (${alle.length})`) : ''}</div>
-      <div class="muted klein">Automatisch erkannt: gleicher Empfänger und Verwendungszweck, regelmäßiger Abstand. Preisänderungen gehören zum selben Vertrag. Stand ${dde(D.bis)}.${zeit}</div>
+      <div class="muted klein">Automatisch erkannt: gleicher Empfänger und Verwendungszweck, regelmäßiger Abstand. Preisänderungen gehören zum selben Vertrag. Deine Überweisungen aufs Gemeinschaftskonto zählen mit, was von dort abgeht, nicht noch einmal. Stand ${dde(D.bis)}.${zeit}</div>
     </div>
     ${fixGrafik ? `<div class="fix-grafik"><div class="chat-chart-t">Anteile nach Kategorie</div><div class="chart" id="chart-fix" style="height:${Math.max(150, kats.length * 26 + 20)}px"><canvas id="c-fix"></canvas></div></div>` : ''}
   </div>`;
@@ -885,6 +921,13 @@ function tabFixkosten(conds) {
   }
   h += `</tbody><tfoot><tr><td>Summe laufend</td><td class="sp-m"></td><td class="sp-m"></td><td class="sp-m"></td><td class="r neg">${eur0(-pm)}</td>
     <td class="r sp-m neg">${eur0(-pm * 12)}</td><td class="r">${pm ? '100 %' : '–'}</td><td class="sp-m"></td></tr></tfoot></table></div>`;
+  if (vomGemeinsamen.length) {
+    const gs = vomGemeinsamen.filter((f) => f.aktiv).reduce((s, f) => s + f.proMonat, 0);
+    h += `<div class="fix-gemeinsam"><div class="fix-gemeinsam-t"><b>Vom Gemeinschaftskonto bezahlt</b> <span class="muted">– nicht mitgezählt, weil ihr sie aus euren Einzahlungen deckt${gs ? ` (laufend ${eur0(-gs)} pro Monat)` : ''}</span></div>
+      <table class="t fix"><tbody>${vomGemeinsamen.map((f) => `<tr class="klick${f.aktiv ? '' : ' beendet'}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}">
+        <td><div class="wer">${esc(f.name)}</div><div class="zweck">${esc(f.ukat)} · ${esc(D.konten[f.k].name)} · ${f.rh.name}${f.aktiv ? '' : ' · beendet'}</div></td>
+        <td class="r" style="width:110px">${eur(-f.betrag)}</td><td class="r muted" style="width:110px">${eur0(-f.proMonat)} / Monat</td></tr>`).join('')}</tbody></table></div>`;
+  }
   return h;
 }
 
@@ -939,16 +982,18 @@ function tabelleExport() {
   }
   if (S.tab === 'fix') {
     const alle = fixkostenGefiltert(parse(S.q));
-    const liste = fixSichtbar(alle).sort((a, b) => a.kat.localeCompare(b.kat, 'de') || (b.aktiv - a.aktiv) || b.proMonat - a.proMonat);
-    const pm = alle.filter((f) => f.aktiv).reduce((s, f) => s + f.proMonat, 0);
+    const liste = fixSichtbar(alle).sort((a, b) => (a.gemeinsam - b.gemeinsam) || a.kat.localeCompare(b.kat, 'de') || (b.aktiv - a.aktiv) || b.proMonat - a.proMonat);
+    const pm = alle.filter((f) => f.aktiv && !f.gemeinsam).reduce((s, f) => s + f.proMonat, 0);
     const spalten = [{ titel: 'Kategorie', typ: 'text', breite: 16 }, { titel: 'Empfänger', typ: 'text', breite: 30 }, { titel: 'Verwendungszweck', typ: 'text', breite: 36 },
       { titel: 'Unterkategorie', typ: 'text', breite: 20 }, { titel: 'Konto', typ: 'text', breite: 20 }, { titel: 'Rhythmus', typ: 'text', breite: 14 }, { titel: 'Betrag', typ: 'euro' },
       { titel: 'pro Monat', typ: 'euro' }, { titel: 'pro Jahr', typ: 'euro' }, { titel: 'Anteil %', typ: 'zahl', breite: 9 }, { titel: 'Preisverlauf', typ: 'text', breite: 26 },
-      { titel: 'seit', typ: 'datum' }, { titel: 'zuletzt', typ: 'datum' }, { titel: 'Zahlungen', typ: 'zahl', breite: 10 }, { titel: 'Status', typ: 'text', breite: 10 }];
+      { titel: 'seit', typ: 'datum' }, { titel: 'zuletzt', typ: 'datum' }, { titel: 'Zahlungen', typ: 'zahl', breite: 10 }, { titel: 'Status', typ: 'text', breite: 10 },
+      { titel: 'Hinweis', typ: 'text', breite: 44 }];
     const r2 = (c) => Math.round(c) / 100;
     const zeilen = liste.map((f) => [f.kat, f.name, f.zweck, f.ukat, D.konten[f.k].name, f.rh.name, r2(-f.betrag), r2(-f.proMonat), r2(-f.proJahr),
-      f.aktiv && pm ? Math.round((f.proMonat / pm) * 1000) / 10 : '', verlaufText(f), f.seit, f.zuletzt, f.n, f.aktiv ? 'läuft' : 'beendet']);
-    zeilen.push(['Summe laufend', '', '', '', '', '', '', r2(-pm), r2(-pm * 12), 100, '', '', '', '', '']);
+      f.aktiv && pm && !f.gemeinsam ? Math.round((f.proMonat / pm) * 1000) / 10 : '', verlaufText(f), f.seit, f.zuletzt, f.n, f.aktiv ? 'läuft' : 'beendet',
+      f.beitrag ? 'dein Beitrag aufs Gemeinschaftskonto' : f.gemeinsam ? 'vom Gemeinschaftskonto bezahlt – nicht in der Summe' : '']);
+    zeilen.push(['Summe laufend', '', '', '', '', '', '', r2(-pm), r2(-pm * 12), 100, '', '', '', '', '', '']);
     return { name: dateiname('Fixkosten'), blatt: 'Fixkosten', spalten, zeilen };
   }
   if (S.tab === 'konten') {

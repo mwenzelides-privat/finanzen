@@ -203,6 +203,9 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1
 .t tr.gruppe td .muted { font-weight: 400; }
 .t tbody tr.gruppe:hover td { background: var(--surface-2); }
 .fixtab .zweck + .zweck { margin-top: 1px; }
+.fix-gemeinsam { border-top: 1px solid var(--border-strong); padding-top: 4px; }
+.fix-gemeinsam-t { padding: 10px 16px 4px; font-size: 13.5px; }
+.fix-gemeinsam .t td { color: var(--text-2); }
 .st-zeile { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .st-label { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; margin-right: 6px; }
 .st-label input { height: 34px; padding: 0 8px; border-radius: 9px; border: 1px solid var(--accent); background: var(--surface); font-weight: 600; }
