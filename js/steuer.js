@@ -140,7 +140,7 @@ function pruefung(r, p) {
 
 // ---------------------------------------------------------------- Zustand
 let D = null, ctx = null;
-let jahr = 0, filter = 'alle', offen = new Set(['wk', 'vorsorge', 'sonder', 'agb', 'haushalt', 'kinder']);
+let jahr = 0, filter = 'zu', offen = new Set(['wk', 'vorsorge', 'sonder', 'agb', 'haushalt', 'kinder']);
 const detailOffen = new Set();
 let entscheidungen = {};          // Schlüssel → { p (Posten-ID) | x (ausgeschlossen), ok (bestätigt), n (Notiz) }
 let geladen = false;
@@ -202,7 +202,7 @@ function einordnen(j) {
 }
 
 const STATUS = {
-  uebernommen: ['aus WISO/Buhl', 'st-ok'], bestaetigt: ['bestätigt', 'st-ok'], vorschlag: ['Vorschlag', 'st-vor'],
+  uebernommen: ['aus WISO/Buhl – noch bestätigen', 'st-buhl'], bestaetigt: ['✓ bestätigt', 'st-ok'], vorschlag: ['Vorschlag', 'st-vor'],
   pruefen: ['prüfen', 'st-pruef'], ausgeschlossen: ['ausgeschlossen', 'st-aus'],
 };
 
@@ -213,7 +213,8 @@ export function steuerZeigen(el, c) {
   if (!jahr) jahr = ctx.einJahr() || Math.min(jahre[0], +D.bis.slice(0, 4) - (D.bis.slice(5, 7) < '12' ? 1 : 0));
   const alle = einordnen(jahr);
   const zahl = (s) => alle.filter((x) => x.status === s).length;
-  const sichtbar = alle.filter((x) => (filter === 'alle' ? x.status !== 'ausgeschlossen' : filter === 'offen' ? ['pruefen', 'vorschlag'].includes(x.status) : x.status === filter));
+  const ZU = ['pruefen', 'vorschlag', 'uebernommen'];
+  const sichtbar = alle.filter((x) => (filter === 'alle' ? x.status !== 'ausgeschlossen' : filter === 'zu' ? ZU.includes(x.status) : x.status === filter));
   const wirksam = alle.filter((x) => x.status !== 'ausgeschlossen');
   const summe = (liste) => liste.reduce((s, x) => s + x.r.c, 0);
 
@@ -227,8 +228,8 @@ export function steuerZeigen(el, c) {
       <button class="btn sm" id="st-sichern" title="Deine Zuordnungen als Datei sichern">Zuordnungen sichern</button>
       <button class="btn sm" id="st-laden" title="Gesicherte Zuordnungen laden">laden</button>
     </div>
-    <div class="seg st-filter">${knopf('alle', `Alle (${wirksam.length})`)}${knopf('offen', `Offen (${zahl('pruefen') + zahl('vorschlag')})`)}${knopf('pruefen', `Prüfen (${zahl('pruefen')})`)}${knopf('vorschlag', `Vorschläge (${zahl('vorschlag')})`)}${knopf('bestaetigt', `Bestätigt (${zahl('bestaetigt')})`)}${knopf('ausgeschlossen', `Ausgeschlossen (${zahl('ausgeschlossen')})`)}</div>
-    <div class="muted klein">Vorgeprüft aus deinen WISO/Buhl-Steuerkategorien und Regeln für nicht markierte Buchungen. Posten ändern, bestätigen (✓) oder ausschließen (✕) – deine Entscheidungen bleiben gespeichert. Orientierung, keine Steuerberatung.</div>
+    <div class="seg st-filter">${knopf('zu', `Zu bearbeiten (${zahl('pruefen') + zahl('vorschlag') + zahl('uebernommen')})`)}${knopf('pruefen', `davon prüfen (${zahl('pruefen')})`)}${knopf('vorschlag', `Vorschläge (${zahl('vorschlag')})`)}${knopf('uebernommen', `aus WISO/Buhl (${zahl('uebernommen')})`)}${knopf('bestaetigt', `✓ Bestätigt (${zahl('bestaetigt')})`)}${knopf('ausgeschlossen', `Ausgeschlossen (${zahl('ausgeschlossen')})`)}${knopf('alle', `Alle (${wirksam.length})`)}</div>
+    <div class="muted klein">„Zu bearbeiten“ zeigt nur, was noch eine Entscheidung braucht. Bestätigte (✓) und ausgeschlossene (✕) Buchungen verschwinden hier und stehen unter „Bestätigt“ bzw. „Ausgeschlossen“. PDF und Excel enthalten alle nicht ausgeschlossenen. Orientierung, keine Steuerberatung.</div>
   </div>`;
 
   // Übersichtskarten je Abschnitt
@@ -245,7 +246,10 @@ export function steuerZeigen(el, c) {
   }
   h += '</div>';
 
-  if (!sichtbar.length) return (el.innerHTML = h + '<div class="leer">Keine Buchungen in dieser Auswahl.</div>'), binden(el);
+  if (!sichtbar.length) {
+    const fertig = filter === 'zu' && wirksam.length;
+    return (el.innerHTML = h + `<div class="leer">${fertig ? `Alles bearbeitet – ${zahl('bestaetigt')} Buchungen bestätigt. Jetzt „PDF für die Steuerberaterin“ oder „Excel“ erstellen.` : 'Keine Buchungen in dieser Auswahl.'}</div>`), binden(el);
+  }
 
   // Liste: Abschnitt → Posten → Buchungen
   h += '<div class="st-liste">';
@@ -324,20 +328,30 @@ function binden(el) {
   });
   const zeile = (x) => x.closest('[data-skey]');
   const buchungVon = (z) => D.rows.find((r) => r.skey === z.dataset.skey);
-  el.querySelectorAll('[data-saktion]').forEach((b) => b.onclick = () => { aktionAusfuehren(buchungVon(zeile(b)), b.dataset.saktion, !!b.dataset.snotizfrage); neu(); });
+  el.querySelectorAll('[data-saktion]').forEach((b) => b.onclick = () => {
+    const r = buchungVon(zeile(b)), v = vorherVon(r.skey);
+    aktionAusfuehren(r, b.dataset.saktion, !!b.dataset.snotizfrage); neu();
+    rueckgaengig(`${b.dataset.saktion === 'x' ? 'Ausgeschlossen' : 'Bestätigt'}: ${kurzName(r)}`, [v]);
+  });
   el.querySelectorAll('[data-sdetail]').forEach((t) => t.onclick = () => { const k = zeile(t).dataset.skey; detailOffen.has(k) ? detailOffen.delete(k) : detailOffen.add(k); neu(); });
   el.querySelectorAll('[data-sdashboard]').forEach((b) => b.onclick = () => ctx.setze({ q: `"${b.dataset.sdashboard}"`, tab: 'buchungen', jahr: '', monat: '' }));
   el.querySelector('#st-pruefen')?.addEventListener('click', () => pruefModus(0));
   const buchung = (z) => D.rows.find((r) => r.skey === z.dataset.skey);
-  el.querySelectorAll('[data-sposten]').forEach((s) => s.onchange = () => { steuerZuordnen(buchung(zeile(s)), s.value); neu(); });
+  el.querySelectorAll('[data-sposten]').forEach((s) => s.onchange = () => {
+    const r = buchung(zeile(s)), v = vorherVon(r.skey);
+    steuerZuordnen(r, s.value); neu();
+    rueckgaengig(s.value === 'x' ? `Ausgeschlossen: ${kurzName(r)}` : `Bestätigt als „${POSTEN_ID.get(s.value).name}“: ${kurzName(r)}`, [v]);
+  });
   el.querySelectorAll('[data-sok]').forEach((b) => b.onclick = () => {
-    const r = buchung(zeile(b)); const e = entscheidungen[r.skey] || {};
+    const r = buchung(zeile(b)); const e = entscheidungen[r.skey] || {}; const v = vorherVon(r.skey);
     entscheidungen[r.skey] = { ...e, p: e.p || automatisch(r)?.p, ok: 1 }; delete entscheidungen[r.skey].x; speichern(); neu();
+    rueckgaengig(`Bestätigt: ${kurzName(r)}`, [v]);
   });
   el.querySelectorAll('[data-sx]').forEach((b) => b.onclick = () => {
-    const r = buchung(zeile(b)); const e = entscheidungen[r.skey] || {};
+    const r = buchung(zeile(b)); const e = entscheidungen[r.skey] || {}; const v = vorherVon(r.skey);
     if (e.x) { delete e.x; entscheidungen[r.skey] = e; } else entscheidungen[r.skey] = { ...e, x: 1 };
     speichern(); neu();
+    rueckgaengig(`${v[1]?.x ? 'Wieder aufgenommen' : 'Ausgeschlossen'}: ${kurzName(r)}`, [v]);
   });
   el.querySelectorAll('[data-snotiz]').forEach((b) => b.onclick = () => {
     const r = buchung(zeile(b)); const e = entscheidungen[r.skey] || {};
@@ -348,9 +362,12 @@ function binden(el) {
     speichern(); neu();
   });
   el.querySelectorAll('[data-salle]').forEach((b) => b.onclick = () => {
+    const vorher = [];
     for (const x of einordnen(jahr)) if (x.p === b.dataset.salle && ['vorschlag', 'uebernommen'].includes(x.status)) {
+      vorher.push(vorherVon(x.r.skey));
       entscheidungen[x.r.skey] = { ...(entscheidungen[x.r.skey] || {}), p: x.p, ok: 1 };
     }
+    setTimeout(() => rueckgaengig(`${vorher.length} Buchungen als „${POSTEN_ID.get(b.dataset.salle).name}“ bestätigt`, vorher), 0);
     speichern(); neu();
   });
   el.querySelector('#st-pdf').onclick = () => pdf();
@@ -388,6 +405,22 @@ function aktionAusfuehren(r, wert, mitNotiz) {
   }
   speichern();
 }
+
+// Kurze Leiste unten: was gerade entschieden wurde, mit „Rückgängig“
+let rueckT;
+function rueckgaengig(text, vorher) {
+  let bar = document.querySelector('#st-rueck');
+  if (!bar) { bar = Object.assign(document.createElement('div'), { id: 'st-rueck', className: 'toast st-rueck' }); document.body.append(bar); }
+  bar.innerHTML = `<span>${esc(text)}</span><button class="link">Rückgängig</button>`;
+  bar.hidden = false;
+  bar.querySelector('button').onclick = () => {
+    for (const [k, v] of vorher) { if (v === undefined) delete entscheidungen[k]; else entscheidungen[k] = v; }
+    speichern(); bar.hidden = true; ctx.neuZeichnen();
+  };
+  clearTimeout(rueckT); rueckT = setTimeout(() => (bar.hidden = true), 7000);
+}
+const vorherVon = (k) => [k, entscheidungen[k] ? { ...entscheidungen[k] } : undefined];
+const kurzName = (r) => (r.g || r.z || '').slice(0, 40);
 
 // ---------------------------------------------------------------- Details einer Buchung
 const empfKey = (g) => norm(g).replace(/\d{4,}/g, '').replace(/\s+/g, ' ').trim();

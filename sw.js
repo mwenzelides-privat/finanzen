@@ -1,6 +1,6 @@
 // Service Worker: App-Dateien offline verfügbar halten. Die Finanzdaten selbst liegen in IndexedDB, nicht hier.
 // Bei jeder Änderung an App-Dateien VERSION erhöhen.
-const VERSION = 'd2.2.0';
+const VERSION = 'd2.3.0';
 const CACHE = 'finanzen-dash-' + VERSION;
 const APP = ['./', 'index.html', 'manifest.webmanifest', 'config.js', 'css/app.css', 'icons/icon.svg', 'icons/icon-192.png',
   'js/app.js', 'js/suche.js', 'js/quelle.js', 'js/export.js', 'js/chat.js', 'js/salden.js', 'js/steuer.js'];

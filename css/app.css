@@ -323,6 +323,9 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; backgrou
 .st-badge { font-size: 11.5px; padding: 1px 8px; border-radius: 99px; white-space: nowrap; }
 .st-ok { background: rgba(26, 158, 110, .14); color: var(--ein-text); }
 .st-vor { background: var(--accent-soft); color: var(--accent); }
+.st-buhl { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border-strong); }
+.st-rueck { display: flex; align-items: center; gap: 14px; }
+.st-rueck .link { color: inherit; font-weight: 700; text-decoration: underline; }
 .st-pruef { background: rgba(224, 96, 46, .14); color: var(--aus-text); }
 .st-aus { background: var(--surface-2); color: var(--muted); }
 .st-knoepfe { display: flex; gap: 2px; align-items: center; }
