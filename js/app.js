@@ -680,111 +680,240 @@ function tabelle(conds) {
     const c = th.dataset.spalte, j = proMonat();
     if (j) setze({ jahr: String(j), monat: S.monat === c ? '' : c }); else setze({ jahr: c });
   });
-  $('#fix-beendet')?.addEventListener('change', (e) => { fixBeendete = e.target.checked; tabelle(conds); });
-  el.querySelectorAll('tr[data-fix]').forEach((tr) => tr.onclick = () => setze({ q: `"${tr.dataset.fix}"`, tab: 'buchungen' }));
+  el.querySelectorAll('[data-fixansicht]').forEach((b) => b.onclick = () => { fixAnsicht = b.dataset.fixansicht; tabelle(conds); });
+  el.querySelectorAll('tr[data-fix]').forEach((tr) => tr.onclick = () => setze({ q: `"${tr.dataset.fix}"${tr.dataset.sig ? ' ' + tr.dataset.sig : ''}`, tab: 'buchungen' }));
+  if (S.tab === 'fix') fixGrafikZeichnen();
   $('#stichtag')?.addEventListener('change', (e) => { const v = e.target.value; if (/^\d{4}-\d{2}-\d{2}$/.test(v)) setze({ stichtag: v }); });
   el.querySelectorAll('[data-st]').forEach((b) => b.onclick = () => setze({ stichtag: b.dataset.st === D.bis && !S.jahr ? '' : b.dataset.st }));
   el.querySelectorAll('tr[data-konto]').forEach((tr) => tr.onclick = () => setze({ konto: S.konto === tr.dataset.konto ? '' : tr.dataset.konto, tab: 'buchungen' }));
 }
 
 // ======================================================================= Fixkosten und Abos
-// Erkennung: gleicher Empfänger, ähnlicher Betrag (±15 %), regelmäßiger Abstand (monatlich … jährlich).
+// Erkennung in zwei Schritten:
+// 1. Je Empfänger + Verwendungszweck (ohne Zahlen, Daten, Monatsnamen) entsteht ein Vertrag. Zwei Zahlungen im selben
+//    Zeitraum (z. B. Kindesunterhalt für zwei Kinder am selben Tag) laufen als getrennte Verträge. Preisänderungen
+//    bleiben im selben Vertrag und werden als Verlauf gezeigt (200 → 600 → 950 €).
+// 2. Was so nicht regelmäßig ist, wird nur nach Empfänger und ähnlichem Betrag (±15 %) geprüft – für Verwendungszwecke,
+//    die sich jedes Mal ändern.
 // „Läuft“ = die letzte Zahlung liegt höchstens anderthalb Rhythmen vor dem Datenstand.
 const RHYTHMEN = [
-  { name: 'monatlich', tage: 30.4, proJahr: 12, min: 3 },
-  { name: 'alle 2 Monate', tage: 61, proJahr: 6, min: 3 },
-  { name: 'vierteljährlich', tage: 91.3, proJahr: 4, min: 3 },
-  { name: 'halbjährlich', tage: 182.6, proJahr: 2, min: 3 },
-  { name: 'jährlich', tage: 365.25, proJahr: 1, min: 3 },
+  { name: 'monatlich', tage: 30.4, proJahr: 12 },
+  { name: 'alle 2 Monate', tage: 61, proJahr: 6 },
+  { name: 'vierteljährlich', tage: 91.3, proJahr: 4 },
+  { name: 'halbjährlich', tage: 182.6, proJahr: 2 },
+  { name: 'jährlich', tage: 365.25, proJahr: 1 },
 ];
 const VARIABEL_KAT = new Set(['Essen & Trinken', 'Lifestyle', 'Drogerie']);
 const VARIABEL_UKAT = new Set(['Bargeld', 'Tanken', 'Parken', 'Taschengeld', 'Futter & Tierbedarf']);
+const MONATSWORTE = /\b(januar|februar|maerz|april|mai|juni|juli|august|september|oktober|november|dezember|jan|feb|mar|apr|jun|jul|aug|sep|sept|okt|nov|dez)\b/g;
 const tageZwischen = (a, b) => (Date.parse(b) - Date.parse(a)) / 864e5;
 const median = (a) => { const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const zweckSignatur = (z) => norm(z).replace(/[^a-z ]+/g, ' ').replace(MONATSWORTE, ' ').replace(/\b[a-z]{1,2}\b/g, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(0, 4).join(' ');
+const empfaengerKey = (g) => norm(g).replace(/\d{5,}/g, '').replace(/\s+/g, ' ').trim();
+
+// Zahlungen eines Empfängers in Ströme aufteilen: jede Zahlung geht an den Strom mit dem ähnlichsten letzten Betrag,
+// aber nie an einen Strom, der im selben Zeitraum (< 20 Tage) schon eine Zahlung hat.
+function stroeme(rows, maxAbw) {
+  const st = [];
+  for (const r of rows) {
+    const a = -r.c;
+    let best = null, bestAbw = Infinity;
+    for (const s of st) {
+      if (tageZwischen(s.last.d, r.d) < 20) continue;
+      const abw = Math.abs(a + s.last.c) / Math.max(100, -s.last.c);
+      if (abw <= maxAbw && abw < bestAbw) { best = s; bestAbw = abw; }
+    }
+    if (best) { best.rows.push(r); best.last = r; } else st.push({ rows: [r], last: r });
+  }
+  return st;
+}
+
+// Ist ein Strom ein Vertrag? Dann Vertrag mit Rhythmus und Preisverlauf zurückgeben.
+function alsVertrag(rs) {
+  const vertrag = rs.some((r) => r.v);
+  const z = rs[rs.length - 1];
+  if (!vertrag && (VARIABEL_KAT.has(z.kat) || VARIABEL_UKAT.has(z.ukat))) return null;
+  if (rs.length < (vertrag ? 2 : 3) || -z.c < 100) return null;   // Kleinstbeträge (Zinsabrechnungen u. ä.) sind keine Fixkosten
+  const abst = [];
+  for (let i = 1; i < rs.length; i++) abst.push(tageZwischen(rs[i - 1].d, rs[i].d));
+  const rh = RHYTHMEN.find((x) => Math.abs(median(abst) - x.tage) <= x.tage * 0.16);
+  if (!rh) return null;
+  if (!vertrag && rh.tage < 90 && rs.length < 4) return null;   // monatlich/zweimonatlich erst ab 4 Zahlungen
+  if (abst.filter((t) => Math.abs(t - rh.tage) <= rh.tage * 0.25).length / abst.length < 0.6) return null;
+  // Beträge sollen überwiegend gleich bleiben (Preisänderungen sind erlaubt, dauerndes Schwanken nicht)
+  const wechsel = [];
+  for (let i = 1; i < rs.length; i++) wechsel.push(Math.abs(rs[i].c - rs[i - 1].c) / Math.max(100, -rs[i - 1].c));
+  if (median(wechsel) > 0.1) return null;
+  // Preisverlauf: neue Stufe bei mehr als 2 % Änderung
+  const stufen = [];
+  for (const r of rs) {
+    const a = -r.c, s = stufen[stufen.length - 1];
+    if (s && Math.abs(a - s.betrag) <= s.betrag * 0.02) { s.bis = r.d; s.n++; } else stufen.push({ betrag: a, von: r.d, bis: r.d, n: 1 });
+  }
+  const erste = rs[0], letzte = rs[rs.length - 1];
+  const aktiv = tageZwischen(letzte.d, D.bis) <= rh.tage * 1.5 + 7 && tageZwischen(D.konten[letzte.k].bis, D.bis) <= 45;
+  // beendete Verträge: letzte regelmäßige Rate statt einer einmaligen Schlusszahlung
+  const regel = [...stufen].reverse().find((x) => x.n > 1);
+  const betrag = !aktiv && regel && stufen[stufen.length - 1].n === 1 ? regel.betrag : -letzte.c;
+  return {
+    name: letzte.g, zweck: letzte.z, sig: zweckSignatur(letzte.z), kat: letzte.kat, ukat: letzte.ukat, k: letzte.k,
+    v: rs.find((r) => r.v)?.v || '', rh, betrag, proMonat: (betrag * rh.proJahr) / 12, proJahr: betrag * rh.proJahr,
+    seit: erste.d, zuletzt: letzte.d, n: rs.length, erster: -erste.c, stufen, aktiv, r: letzte, rows: rs,
+  };
+}
+
+// Preisverlauf als kurzer Text: „200 → 600 → 950 €“, bei vielen kleinen Änderungen „schwankt 18–25 €“
+function verlaufText(f) {
+  // einmalige Ausreißer (Nachzahlung, Erstattung) zwischendurch nicht als Preisstufe zeigen
+  let s = f.stufen.filter((x, i, a) => x.n > 1 || (i === a.length - 1 && f.aktiv));
+  if (!s.length) s = f.stufen.slice(-1);
+  if (s.length === 1) return '';
+  const e = (c) => EUR.format(c / 100).replace(',00', '').replace(/\s*€/, '');
+  if (s.length > 5) {
+    const b = s.map((x) => x.betrag);
+    const steigt = b.every((x, i) => !i || x >= b[i - 1]), faellt = b.every((x, i) => !i || x <= b[i - 1]);
+    return steigt || faellt ? `${e(b[0])} → ${e(b[b.length - 1])} € (${s.length} Stufen)` : `schwankt ${e(Math.min(...b))}–${e(Math.max(...b))} €`;
+  }
+  return s.map((x) => e(x.betrag)).join(' → ') + ' €';
+}
 
 function fixkostenErkennen() {
   if (D.fix) return D.fix;
+  const out = [], benutzt = new Set();
+  // Schritt 1: Empfänger + Verwendungszweck
   const gruppen = new Map();
   for (const r of D.rows) {
     if (r.art !== 'Ausgabe' || !r.g) continue;
-    const key = norm(r.g).replace(/\d{5,}/g, '').replace(/\s+/g, ' ').trim();
-    let g = gruppen.get(key);
-    if (!g) gruppen.set(key, (g = []));
-    g.push(r);
+    const key = empfaengerKey(r.g) + '|' + zweckSignatur(r.z);
+    if (!gruppen.has(key)) gruppen.set(key, []);
+    gruppen.get(key).push(r);
   }
-  const out = [];
   for (const rows of gruppen.values()) {
     if (rows.length < 2) continue;
-    const buendel = [];
-    for (const r of rows) {
-      const a = -r.c;
-      let best = null;
-      for (const b of buendel) {
-        const abw = Math.abs(a - b.letzter);
-        if (abw <= Math.max(100, b.letzter * 0.15) && (!best || abw < Math.abs(a - best.letzter))) best = b;
-      }
-      if (best) { best.rows.push(r); best.letzter = a; } else buendel.push({ rows: [r], letzter: a });
+    for (const s of stroeme(rows, Infinity)) {
+      const f = alsVertrag(s.rows);
+      if (f) { out.push(f); s.rows.forEach((r) => benutzt.add(r.i)); }
     }
-    for (const { rows: rs } of buendel) {
-      const vertrag = rs.some((r) => r.v);
-      // Einkäufe, Restaurants, Bargeld sind höchstens zufällig regelmäßig – außer Finanzguru kennt dafür einen Vertrag
-      const z = rs[rs.length - 1];
-      if (!vertrag && (VARIABEL_KAT.has(z.kat) || VARIABEL_UKAT.has(z.ukat))) continue;
-      if (rs.length < (vertrag ? 2 : 3)) continue;
-      const abst = [];
-      for (let i = 1; i < rs.length; i++) abst.push(tageZwischen(rs[i - 1].d, rs[i].d));
-      const med = median(abst);
-      const rh = RHYTHMEN.find((x) => Math.abs(med - x.tage) <= x.tage * 0.16);
-      if (!rh || rs.length < (vertrag ? 2 : rh.min)) continue;
-      const passend = abst.filter((t) => Math.abs(t - rh.tage) <= rh.tage * 0.25).length / abst.length;
-      if (passend < 0.6) continue;
-      const erste = rs[0], letzte = rs[rs.length - 1];
-      const aktiv = tageZwischen(letzte.d, D.bis) <= rh.tage * 1.5 + 7 && tageZwischen(D.konten[letzte.k].bis, D.bis) <= 45;
-      const betrag = -letzte.c;
-      out.push({
-        name: letzte.g, kat: letzte.kat, ukat: letzte.ukat, k: letzte.k, v: rs.find((r) => r.v)?.v || '', rh, betrag,
-        proMonat: (betrag * rh.proJahr) / 12, proJahr: betrag * rh.proJahr, seit: erste.d, zuletzt: letzte.d, n: rs.length,
-        erster: -erste.c, aktiv, r: letzte,
-      });
-    }
+  }
+  // Schritt 2: übrige Zahlungen nur nach Empfänger und ähnlichem Betrag
+  const rest = new Map();
+  for (const r of D.rows) {
+    if (r.art !== 'Ausgabe' || !r.g || benutzt.has(r.i)) continue;
+    const key = empfaengerKey(r.g);
+    if (!rest.has(key)) rest.set(key, []);
+    rest.get(key).push(r);
+  }
+  for (const rows of rest.values()) {
+    if (rows.length < 2) continue;
+    for (const s of stroeme(rows, 0.15)) { const f = alsVertrag(s.rows); if (f) out.push(f); }
   }
   out.sort((a, b) => b.proMonat - a.proMonat);
   return (D.fix = out);
 }
 
-let fixBeendete = false;
+let fixAnsicht = 'laufend';   // laufend | frueher (beendet seit 2020) | alle
+const FRUEHER_AB = '2020-01-01';
 function fixkostenGefiltert(conds) {
   const t = matcher(conds.filter((c) => c.kind !== 'zeit'));
   const konto = S.konto ? D.kontoIdx.get(S.konto) : -1;
   return fixkostenErkennen().filter((f) => (konto === -1 || f.k === konto) && (!S.kat || f.kat === S.kat) && (!S.ukat || f.ukat === S.ukat)
     && S.art !== 'ein' && t(f.r));
 }
+const fixSichtbar = (alle) => alle.filter((f) => f.aktiv || fixAnsicht === 'alle' || (fixAnsicht === 'frueher' && f.zuletzt >= FRUEHER_AB));
 
+// Durchschnittliche monatliche Ausgaben der letzten 12 Monate (für „Anteil an deinen Ausgaben“)
+function ausgabenProMonat12() {
+  const ab = new Date(Date.parse(D.bis) - 365 * 864e5).toISOString().slice(0, 10);
+  return -D.rows.reduce((s, r) => (r.art === 'Ausgabe' && r.d > ab ? s + r.c : s), 0) / 12;
+}
+
+let fixGrafik = null;   // Daten für die Anteilsgrafik (wird nach dem Rendern gezeichnet)
 function tabFixkosten(conds) {
   const alle = fixkostenGefiltert(conds);
-  const aktiv = alle.filter((f) => f.aktiv), beendet = alle.filter((f) => !f.aktiv);
-  const liste = fixBeendete ? alle : aktiv;
+  const aktiv = alle.filter((f) => f.aktiv);
+  const nFrueher = alle.filter((f) => !f.aktiv && f.zuletzt >= FRUEHER_AB).length, nAelter = alle.filter((f) => !f.aktiv && f.zuletzt < FRUEHER_AB).length;
+  const liste = fixSichtbar(alle);
   const pm = aktiv.reduce((s, f) => s + f.proMonat, 0);
+  const ausg = ausgabenProMonat12();
   const zeit = S.jahr || S.monat || conds.some((c) => c.kind === 'zeit') ? ' Der gewählte Zeitraum spielt hier keine Rolle, es zählt der aktuelle Stand.' : '';
-  let h = `<div class="fix-kopf"><div><b>${eur0(-pm)}</b> pro Monat · <b>${eur0(-pm * 12)}</b> im Jahr · ${NUM.format(aktiv.length)} laufende Zahlungen</div>
-    <div class="muted klein">Automatisch erkannt: gleicher Empfänger, ähnlicher Betrag, regelmäßiger Abstand. Stand ${dde(D.bis)}.${zeit}</div>
-    ${beendet.length ? `<label class="chk"><input type="checkbox" id="fix-beendet"${fixBeendete ? ' checked' : ''}> ${NUM.format(beendet.length)} beendete zeigen</label>` : ''}</div>`;
+  // Kategorien mit Summe und Anteil (nur laufende Verträge)
+  const katSum = new Map();
+  for (const f of aktiv) katSum.set(f.kat, (katSum.get(f.kat) || 0) + f.proMonat);
+  const kats = [...katSum].sort((a, b) => b[1] - a[1]);
+  fixGrafik = kats.length ? { kats, pm } : null;
+  const pct = (v) => (pm ? `${NUM.format(Math.round((v / pm) * 1000) / 10)} %` : '–');
+  const seg = (v, t) => `<button data-fixansicht="${v}" class="${fixAnsicht === v ? 'an' : ''}">${t}</button>`;
+  let h = `<div class="fix-kopf fix-oben">
+    <div class="fix-zahlen">
+      <div class="fix-zahl"><span class="l">Laufende Fixkosten</span><b class="neg">${eur0(-pm)}</b><span class="muted">pro Monat</span></div>
+      <div class="fix-zahl"><span class="l">im Jahr</span><b class="neg">${eur0(-pm * 12)}</b><span class="muted">${NUM.format(aktiv.length)} Verträge und Abos</span></div>
+      ${ausg > 0 && !conds.length && !S.kat && !S.konto ? `<div class="fix-zahl"><span class="l">Anteil an deinen Ausgaben</span><b>${NUM.format(Math.round((pm / ausg) * 100))} %</b><span class="muted">Ø Ausgaben der letzten 12 Monate: ${eur0(ausg)} / Monat</span></div>` : ''}
+      <div class="seg fix-seg">${seg('laufend', `Laufend (${aktiv.length})`)}${nFrueher ? seg('frueher', `+ frühere seit 2020 (${nFrueher})`) : ''}${nFrueher + nAelter ? seg('alle', `alle (${alle.length})`) : ''}</div>
+      <div class="muted klein">Automatisch erkannt: gleicher Empfänger und Verwendungszweck, regelmäßiger Abstand. Preisänderungen gehören zum selben Vertrag. Stand ${dde(D.bis)}.${zeit}</div>
+    </div>
+    ${fixGrafik ? `<div class="fix-grafik"><div class="chat-chart-t">Anteile nach Kategorie</div><div class="chart" id="chart-fix" style="height:${Math.max(150, kats.length * 26 + 20)}px"><canvas id="c-fix"></canvas></div></div>` : ''}
+  </div>`;
   if (!liste.length) return h + '<div class="leer">Keine regelmäßigen Zahlungen gefunden.</div>';
   const hl = highlightWords(conds);
   const re = hl.length ? new RegExp('(' + hl.map(escRe).join('|') + ')', 'gi') : null;
   const mk = (s) => (re ? esc(s).replace(re, '<mark>$1</mark>') : esc(s));
-  h += `<div class="tab-scroll"><table class="t fix"><thead><tr><th>Empfänger</th><th class="sp-m" style="width:118px">Rhythmus</th><th class="r" style="width:108px">Betrag</th><th class="r" style="width:100px">pro Monat</th>
-    <th class="r sp-m" style="width:100px">pro Jahr</th><th class="sp-m" style="width:78px">seit</th><th class="sp-m" style="width:100px">zuletzt</th><th class="r sp-m" style="width:104px" title="Letzter Betrag gegenüber dem ersten">Veränderung</th></tr></thead><tbody>`;
-  for (const f of liste) {
-    const vd = f.erster ? Math.round(((f.betrag - f.erster) / f.erster) * 100) : 0;
-    h += `<tr class="klick${f.aktiv ? '' : ' beendet'}" data-fix="${esc(f.name)}" title="Alle Zahlungen anzeigen">
-      <td><div class="wer">${mk(f.name)}</div><div class="zweck"><span class="nur-m">${f.rh.name} · </span>${esc(f.kat)}${f.ukat ? ' · ' + esc(f.ukat) : ''} · ${esc(D.konten[f.k].name)}${f.v ? ' · ' + esc(f.v) : ''}</div></td>
-      <td class="klein sp-m">${f.rh.name}${f.aktiv ? '' : '<br><small class="muted">beendet</small>'}</td>
-      <td class="r">${eur(-f.betrag)}</td><td class="r neg"><b>${eur0(-f.proMonat)}</b></td><td class="r sp-m">${eur0(-f.proJahr)}</td>
-      <td class="klein sp-m">${dde(f.seit).slice(3)}</td><td class="klein sp-m">${dde(f.zuletzt)}</td>
-      <td class="r klein sp-m ${vd > 0 ? 'neg' : vd < 0 ? 'pos' : 'muted'}">${vd ? (vd > 0 ? '+' : '') + vd + ' %' : '–'}</td></tr>`;
+  h += `<div class="tab-scroll"><table class="t fix fixtab"><thead><tr><th>Empfänger / Verwendungszweck</th><th class="sp-m" style="width:104px">Rhythmus</th>
+    <th class="r sp-m" style="width:96px">Betrag</th><th class="sp-m" style="width:176px" title="Preisänderungen seit Beginn">Verlauf</th>
+    <th class="r" style="width:96px">pro Monat</th><th class="r sp-m" style="width:96px">pro Jahr</th><th class="r" style="width:64px" title="Anteil an den laufenden Fixkosten">Anteil</th>
+    <th class="sp-m" style="width:128px">Zeitraum</th></tr></thead><tbody>`;
+  // nach Kategorie gruppiert, Kategorien nach laufender Summe, beendete Verträge ans Ende ihrer Kategorie
+  const gruppen = new Map();
+  for (const f of liste) { if (!gruppen.has(f.kat)) gruppen.set(f.kat, []); gruppen.get(f.kat).push(f); }
+  const reihenfolge = [...gruppen.keys()].sort((a, b) => (katSum.get(b) || 0) - (katSum.get(a) || 0) || a.localeCompare(b, 'de'));
+  for (const kat of reihenfolge) {
+    const fs = gruppen.get(kat).sort((a, b) => (b.aktiv - a.aktiv) || b.proMonat - a.proMonat || (b.zuletzt < a.zuletzt ? -1 : 1));
+    const ks = katSum.get(kat) || 0, nAktiv = fs.filter((f) => f.aktiv).length;
+    h += `<tr class="gruppe"><td>${esc(kat)} <span class="muted">· ${nAktiv} laufend${fs.length > nAktiv ? `, ${fs.length - nAktiv} früher` : ''}</span></td><td class="sp-m"></td><td class="sp-m"></td><td class="sp-m"></td>
+      <td class="r neg">${ks ? eur0(-ks) : '–'}</td><td class="r sp-m neg">${ks ? eur0(-ks * 12) : '–'}</td><td class="r">${ks ? pct(ks) : '–'}</td><td class="sp-m"></td></tr>`;
+    for (const f of fs) {
+      const vt = verlaufText(f);
+      const vtip = f.stufen.map((x) => `${EUR.format(x.betrag / 100)} ${dde(x.von).slice(3)}–${dde(x.bis).slice(3)}`).join('\n');
+      h += `<tr class="klick${f.aktiv ? '' : ' beendet'}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="Alle Zahlungen dieses Vertrags anzeigen">
+        <td><div class="wer">${mk(f.name)}</div><div class="zweck">${mk(f.zweck || '')}</div>
+          <div class="zweck"><span class="nur-m">${f.rh.name}${vt ? ' · ' + vt : ''} · </span>${esc(f.ukat)} · ${esc(D.konten[f.k].name)}${f.aktiv ? '' : ' · <b>beendet</b>'}</div></td>
+        <td class="klein sp-m">${f.rh.name}</td><td class="r sp-m">${eur(-f.betrag)}</td>
+        <td class="klein sp-m" title="${esc(vtip)}">${vt || '<span class="muted">gleichbleibend</span>'}</td>
+        <td class="r ${f.aktiv ? 'neg' : 'muted'}"><b>${eur0(-f.proMonat)}</b></td><td class="r sp-m ${f.aktiv ? '' : 'muted'}">${eur0(-f.proJahr)}</td>
+        <td class="r klein">${f.aktiv ? pct(f.proMonat) : '–'}</td>
+        <td class="klein sp-m">${dde(f.seit).slice(3)} – ${f.aktiv ? 'heute' : dde(f.zuletzt).slice(3)}</td></tr>`;
+    }
   }
-  return h + '</tbody></table></div>';
+  h += `</tbody><tfoot><tr><td>Summe laufend</td><td class="sp-m"></td><td class="sp-m"></td><td class="sp-m"></td><td class="r neg">${eur0(-pm)}</td>
+    <td class="r sp-m neg">${eur0(-pm * 12)}</td><td class="r">${pm ? '100 %' : '–'}</td><td class="sp-m"></td></tr></tfoot></table></div>`;
+  return h;
+}
+
+// Anteile der Kategorien an den laufenden Fixkosten (Prozent an den Balken)
+function fixGrafikZeichnen() {
+  if (!fixGrafik || !$('#c-fix')) return;
+  const { kats, pm } = fixGrafik;
+  const farbe = css('--aus');
+  const o = basis();
+  o.indexAxis = 'y';
+  o.layout = { padding: { right: 120 } };
+  o.plugins.tooltip.callbacks = { label: (it) => ` ${eur0(-kats[it.dataIndex][1])} pro Monat · ${NUM.format(Math.round(it.raw * 10) / 10)} %` };
+  o.scales = { x: { display: false, beginAtZero: true, max: 100 }, y: { ...achsenStil(), grid: { display: false }, ticks: { color: css('--text-2'), font: { size: 12.5 }, autoSkip: false } } };
+  o.onClick = (_, el) => { if (el.length) setze({ kat: kats[el[0].index][0], ukat: '' }); };
+  o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
+  const labels = {
+    id: 'fixLabels',
+    afterDatasetsDraw(chart) {
+      const { ctx } = chart, meta = chart.getDatasetMeta(0);
+      ctx.save(); ctx.font = '12px ' + css('--font'); ctx.fillStyle = css('--text-2'); ctx.textBaseline = 'middle';
+      meta.data.forEach((bar, i) => ctx.fillText(`${NUM.format(Math.round(chart.data.datasets[0].data[i] * 10) / 10)} % · ${eur0(-kats[i][1])}`, bar.x + 6, bar.y));
+      ctx.restore();
+    },
+  };
+  zeichne('c-fix', {
+    type: 'bar',
+    data: { labels: kats.map(([k]) => k), datasets: [{ data: kats.map(([, v]) => (v / pm) * 100), backgroundColor: alpha(farbe, .85), hoverBackgroundColor: farbe, borderRadius: 4, barThickness: 16 }] },
+    options: o, plugins: [labels],
+  });
 }
 
 // ======================================================================= Herunterladen
@@ -809,14 +938,17 @@ function tabelleExport() {
     return { name: dateiname(p.jahr ? `Kategorien ${p.jahr}` : 'Kategorien'), blatt: 'Kategorien', spalten, zeilen };
   }
   if (S.tab === 'fix') {
-    const liste = fixkostenGefiltert(parse(S.q)).filter((f) => fixBeendete || f.aktiv);
-    const spalten = [{ titel: 'Empfänger', typ: 'text', breite: 32 }, { titel: 'Kategorie', typ: 'text', breite: 16 }, { titel: 'Unterkategorie', typ: 'text', breite: 20 },
-      { titel: 'Konto', typ: 'text', breite: 20 }, { titel: 'Rhythmus', typ: 'text', breite: 14 }, { titel: 'Betrag', typ: 'euro' }, { titel: 'pro Monat', typ: 'euro' },
-      { titel: 'pro Jahr', typ: 'euro' }, { titel: 'seit', typ: 'datum' }, { titel: 'zuletzt', typ: 'datum' }, { titel: 'Zahlungen', typ: 'zahl', breite: 10 },
-      { titel: 'erster Betrag', typ: 'euro' }, { titel: 'Status', typ: 'text', breite: 10 }, { titel: 'Vertrag', typ: 'text', breite: 20 }];
+    const alle = fixkostenGefiltert(parse(S.q));
+    const liste = fixSichtbar(alle).sort((a, b) => a.kat.localeCompare(b.kat, 'de') || (b.aktiv - a.aktiv) || b.proMonat - a.proMonat);
+    const pm = alle.filter((f) => f.aktiv).reduce((s, f) => s + f.proMonat, 0);
+    const spalten = [{ titel: 'Kategorie', typ: 'text', breite: 16 }, { titel: 'Empfänger', typ: 'text', breite: 30 }, { titel: 'Verwendungszweck', typ: 'text', breite: 36 },
+      { titel: 'Unterkategorie', typ: 'text', breite: 20 }, { titel: 'Konto', typ: 'text', breite: 20 }, { titel: 'Rhythmus', typ: 'text', breite: 14 }, { titel: 'Betrag', typ: 'euro' },
+      { titel: 'pro Monat', typ: 'euro' }, { titel: 'pro Jahr', typ: 'euro' }, { titel: 'Anteil %', typ: 'zahl', breite: 9 }, { titel: 'Preisverlauf', typ: 'text', breite: 26 },
+      { titel: 'seit', typ: 'datum' }, { titel: 'zuletzt', typ: 'datum' }, { titel: 'Zahlungen', typ: 'zahl', breite: 10 }, { titel: 'Status', typ: 'text', breite: 10 }];
     const r2 = (c) => Math.round(c) / 100;
-    const zeilen = liste.map((f) => [f.name, f.kat, f.ukat, D.konten[f.k].name, f.rh.name, r2(-f.betrag), r2(-f.proMonat), r2(-f.proJahr), f.seit, f.zuletzt, f.n,
-      r2(-f.erster), f.aktiv ? 'läuft' : 'beendet', f.v]);
+    const zeilen = liste.map((f) => [f.kat, f.name, f.zweck, f.ukat, D.konten[f.k].name, f.rh.name, r2(-f.betrag), r2(-f.proMonat), r2(-f.proJahr),
+      f.aktiv && pm ? Math.round((f.proMonat / pm) * 1000) / 10 : '', verlaufText(f), f.seit, f.zuletzt, f.n, f.aktiv ? 'läuft' : 'beendet']);
+    zeilen.push(['Summe laufend', '', '', '', '', '', '', r2(-pm), r2(-pm * 12), 100, '', '', '', '', '']);
     return { name: dateiname('Fixkosten'), blatt: 'Fixkosten', spalten, zeilen };
   }
   if (S.tab === 'konten') {
