@@ -327,6 +327,28 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; backgrou
 .st-aus { background: var(--surface-2); color: var(--muted); }
 .st-knoepfe { display: flex; gap: 2px; align-items: center; }
 .st-knoepfe select { max-width: 190px; height: 28px; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); font-size: 12.5px; }
+.st-text[data-sdetail] { cursor: pointer; }
+.st-text[data-sdetail]:hover .titel { color: var(--accent); }
+.st-detail { grid-column: 1 / -1; background: var(--surface-2); border-radius: 10px; padding: 10px 14px; margin-top: 2px; }
+.st-felder { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 16px; margin: 0 0 6px; font-size: 13px; }
+.st-felder dt { color: var(--muted); }
+.st-felder dd { margin: 0; word-break: break-word; }
+.st-verlauf { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; }
+.st-vtab { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 4px 0; table-layout: fixed; }
+.st-vtab td { padding: 3px 6px; border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-vtab td:nth-child(1) { width: 82px; } .st-vtab td:nth-child(2) { width: 90px; } .st-vtab td:nth-child(4) { width: 34%; }
+.st-dlg { width: min(760px, calc(100vw - 24px)); max-height: calc(100vh - 40px); padding: 0; display: flex; flex-direction: column; }
+.st-dlg[open] { display: flex; }
+.st-dlg-kopf { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.st-dlg-kopf .klein { flex: 1; }
+.st-dlg-haupt { padding: 14px 18px; overflow-y: auto; }
+.st-dlg-betrag { display: flex; align-items: center; gap: 10px; }
+.st-dlg-betrag .betrag { font-size: 26px; font-weight: 650; }
+.st-dlg-titel { font-size: 17px; font-weight: 600; margin-top: 4px; }
+.st-dlg-zweck { color: var(--text-2); margin: 2px 0 12px; word-break: break-word; }
+.st-dlg-fuss { display: grid; gap: 10px; padding: 12px 18px 16px; border-top: 1px solid var(--border); background: var(--surface-2); }
+.st-dlg-fuss select { height: 34px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); margin-left: 8px; max-width: 100%; }
+.st-dlg-knoepfe { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .st-zuordnen { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; }
 .st-zuordnen select { max-width: 260px; height: 28px; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); }
 @media (max-width: 640px) {

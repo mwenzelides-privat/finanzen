@@ -101,6 +101,7 @@ function pruefung(r, p) {
 // ---------------------------------------------------------------- Zustand
 let D = null, ctx = null;
 let jahr = 0, filter = 'alle', offen = new Set(['wk', 'vorsorge', 'sonder', 'agb', 'haushalt', 'kinder']);
+const detailOffen = new Set();
 let entscheidungen = {};          // Schlüssel → { p (Posten-ID) | x (ausgeschlossen), ok (bestätigt), n (Notiz) }
 let geladen = false;
 const KV = 'steuer-entscheidungen';
@@ -121,17 +122,18 @@ const speichern = () => kvSchreiben(KV, entscheidungen).catch(() => {});
 // Automatische Einordnung einer Buchung (ohne deine Entscheidungen): { p, quelle: 'buhl'|'vorschlag', hinweis }
 function automatisch(r) {
   if (r.art === 'Umbuchung' || r.art === 'Sparen') return null;
-  let p = r.st ? BUHL[r.st] : null, quelle = 'buhl';
+  let p = r.st ? BUHL[r.st] : null, quelle = 'buhl', grund = r.st ? `Steuerkategorie in WISO/Buhl: „${r.st}“` : '';
   if (!p) {
     quelle = 'vorschlag';
     p = FG_VORSCHLAG[r.ukat] || null;
+    grund = p ? `Finanzguru-Kategorie „${r.ukat}“` : '';
     const t = norm(`${r.g} ${r.z}`);
-    if (!p) p = WORT_VORSCHLAG.find(([re]) => re.test(t))?.[1] || null;
+    if (!p) { const w = WORT_VORSCHLAG.find(([re]) => re.test(t)); if (w) { p = w[1]; grund = `Stichwort im Empfänger oder Verwendungszweck (${(t.match(w[0]) || [''])[0]})`; } }
     // Tierarzt, Tierbedarf: nicht absetzbar
     if (p === 'agb-krankheit' && (/tierarzt|tieraerzt|tierklinik|veterinaer/.test(t) || r.kat === 'Haustiere')) p = null;
     if (p && POSTEN_ID.get(p).abschnitt === 'einnahmen' && r.c < 0 && p !== 'ein-steuern') p = null;
   }
-  return p ? { p, quelle } : null;
+  return p ? { p, quelle, grund } : null;
 }
 
 // Alle Buchungen eines Jahres mit Posten, Status und Hinweis
@@ -142,12 +144,13 @@ function einordnen(j) {
     const e = entscheidungen[r.skey];
     const a = automatisch(r);
     if (!a && !e?.p) continue;
-    if (e?.x) { out.push({ r, p: e.p || a?.p, status: 'ausgeschlossen', hinweis: '', notiz: e.n || '' }); continue; }
+    if (e?.x) { out.push({ r, p: e.p || a?.p, status: 'ausgeschlossen', hinweis: '', notiz: e.n || '', grund: 'von dir ausgeschlossen' }); continue; }
     const p = e?.p || a.p;
     const pr = pruefung(r, p);
     let status = e?.ok || e?.p ? 'bestaetigt' : a.quelle === 'buhl' ? 'uebernommen' : 'vorschlag';
     if (status !== 'bestaetigt' && pr?.[0] === 'pruefen') status = 'pruefen';
-    out.push({ r, p, status, hinweis: pr?.[1] || '', notiz: e?.n || '', quelle: a?.quelle || 'manuell' });
+    out.push({ r, p, status, hinweis: pr?.[1] || '', notiz: e?.n || '', quelle: a?.quelle || 'manuell',
+      grund: e?.p && e.p !== a?.p ? `von dir zugeordnet${a ? ` (automatisch wäre: ${POSTEN_ID.get(a.p).name})` : ''}` : a?.grund || 'von dir zugeordnet' });
   }
   return out;
 }
@@ -172,7 +175,8 @@ export function steuerZeigen(el, c) {
   let h = `<div class="st-kopf">
     <div class="st-jahre">${jahre.map((y) => `<button data-sjahr="${y}" class="${y === jahr ? 'an' : ''}">${y}</button>`).join('')}</div>
     <div class="st-aktionen">
-      <button class="btn sm primary" id="st-pdf">PDF für die Steuerberaterin</button>
+      ${zahl('pruefen') + zahl('vorschlag') ? `<button class="btn sm primary" id="st-pruefen">Offene Punkte prüfen (${zahl('pruefen') + zahl('vorschlag')})</button>` : ''}
+      <button class="btn sm${zahl('pruefen') + zahl('vorschlag') ? '' : ' primary'}" id="st-pdf">PDF für die Steuerberaterin</button>
       <button class="btn sm" id="st-xlsx">Excel</button>
       <button class="btn sm" id="st-sichern" title="Deine Zuordnungen als Datei sichern">Zuordnungen sichern</button>
       <button class="btn sm" id="st-laden" title="Gesicherte Zuordnungen laden">laden</button>
@@ -220,13 +224,14 @@ export function steuerZeigen(el, c) {
           const [st, stc] = STATUS[x.status];
           h += `<div class="st-zeile${x.status === 'ausgeschlossen' ? ' aus' : ''}" data-skey="${esc(x.r.skey)}">
             <div class="st-datum">${dde(x.r.d)}</div>
-            <div class="st-text"><div class="titel">${esc(x.r.g || x.r.z || '–')}</div><div class="unter">${esc(x.r.g ? x.r.z : '')}${x.r.st ? ` · Buhl: ${esc(x.r.st)}` : ''} · ${esc(D.konten[x.r.k].name)}</div>
+            <div class="st-text" data-sdetail title="Klicken für alle Details"><div class="titel">${detailOffen.has(x.r.skey) ? '▾' : '▸'} ${esc(x.r.g || x.r.z || '–')}</div><div class="unter">${esc(x.r.g ? x.r.z : '')}${x.r.st ? ` · Buhl: ${esc(x.r.st)}` : ''} · ${esc(D.konten[x.r.k].name)}</div>
               ${x.hinweis ? `<div class="st-hinweis ${x.status === 'pruefen' ? 'st-pruef-t' : 'muted'}">${esc(x.hinweis)}</div>` : ''}
               ${x.notiz ? `<div class="st-notiz">Notiz: ${esc(x.notiz)}</div>` : ''}</div>
             <div class="st-rechts"><div class="betrag ${x.r.c > 0 ? 'pos' : ''}">${eur(x.r.c)}</div><span class="st-badge ${stc}">${st}</span>
               <div class="st-knoepfe"><select data-sposten title="Posten ändern">${postenOptionen(x.status === 'ausgeschlossen' ? 'x' : x.p)}</select>
                 <button class="icon-btn sm" data-sok title="Bestätigen">✓</button><button class="icon-btn sm" data-sx title="Nicht steuerlich relevant">✕</button>
-                <button class="icon-btn sm" data-snotiz title="Notiz">✎</button></div></div></div>`;
+                <button class="icon-btn sm" data-snotiz title="Notiz">✎</button></div></div>
+            ${detailOffen.has(x.r.skey) ? `<div class="st-detail">${detailHtml(x)}</div>` : ''}</div>`;
         }
         h += '</div>';
       }
@@ -272,6 +277,9 @@ function binden(el) {
     el.querySelector(`[data-sauf="${b.dataset.sabschnitt}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
   const zeile = (x) => x.closest('[data-skey]');
+  el.querySelectorAll('[data-sdetail]').forEach((t) => t.onclick = () => { const k = zeile(t).dataset.skey; detailOffen.has(k) ? detailOffen.delete(k) : detailOffen.add(k); neu(); });
+  el.querySelectorAll('[data-sdashboard]').forEach((b) => b.onclick = () => ctx.setze({ q: `"${b.dataset.sdashboard}"`, tab: 'buchungen', jahr: '', monat: '' }));
+  el.querySelector('#st-pruefen')?.addEventListener('click', () => pruefModus(0));
   const buchung = (z) => D.rows.find((r) => r.skey === z.dataset.skey);
   el.querySelectorAll('[data-sposten]').forEach((s) => s.onchange = () => { steuerZuordnen(buchung(zeile(s)), s.value); neu(); });
   el.querySelectorAll('[data-sok]').forEach((b) => b.onclick = () => {
@@ -308,6 +316,118 @@ function binden(el) {
     };
     inp.click();
   };
+}
+
+// ---------------------------------------------------------------- Details einer Buchung
+const empfKey = (g) => norm(g).replace(/\d{4,}/g, '').replace(/\s+/g, ' ').trim();
+
+function detailHtml(x, gross = false) {
+  const r = x.r, p = POSTEN_ID.get(x.p);
+  const felder = [
+    ['Datum', dde(r.d)], ['Betrag', eur(r.c)], ['Konto', D.konten[r.k].name], ['Empfänger / Auftraggeber', r.g || '–'],
+    ['Verwendungszweck', r.z || '–'], ['Kategorie (Finanzguru)', `${r.kat}${r.ukat ? ' · ' + r.ukat : ''}`], ['Art', r.art],
+    ['Steuerkategorie (WISO/Buhl)', r.st || '–'], ['Steuerposten', p ? `${ABSCHNITTE.find((a) => a.id === p.abschnitt).name} → ${p.name}` : '–'],
+    ['Warum so eingeordnet', x.grund || '–'], ...(r.v ? [['Vertrag', r.v]] : []), ...(r.t ? [['Tags', r.t]] : []), ...(r.n ? [['Notiz (Finanzguru)', r.n]] : []),
+  ];
+  let h = `<dl class="st-felder">${felder.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`;
+  if (x.hinweis) h += `<div class="st-hinweis ${x.status === 'pruefen' ? 'st-pruef-t' : 'muted'}">${esc(x.hinweis)}</div>`;
+  // weitere Zahlungen an denselben Empfänger (alle Jahre)
+  const key = empfKey(r.g);
+  if (key) {
+    const weitere = D.rows.filter((q) => q !== r && q.g && empfKey(q.g) === key).sort((a, b) => (a.d < b.d ? 1 : -1));
+    if (weitere.length) {
+      const zeigen = weitere.slice(0, gross ? 12 : 6);
+      const zugeordnet = weitere.filter((q) => steuerPosten(q) && steuerPosten(q) !== 'x').length;
+      h += `<div class="st-verlauf"><div class="klein"><b>Weitere Zahlungen an „${esc(r.g)}“:</b> ${weitere.length}, davon ${zugeordnet} steuerlich zugeordnet</div>
+        <table class="st-vtab">${zeigen.map((q) => { const sp = steuerPosten(q); return `<tr><td>${dde(q.d)}</td><td class="r">${eur(q.c)}</td><td class="z">${esc(q.z)}</td><td class="muted">${sp === 'x' ? 'ausgeschlossen' : sp ? esc(POSTEN_ID.get(sp).name) : '–'}</td></tr>`; }).join('')}</table>
+        <button class="link klein" data-sdashboard="${esc(r.g)}">Alle Buchungen von „${esc(r.g)}“ im Dashboard öffnen</button></div>`;
+    }
+  }
+  return h;
+}
+
+// ---------------------------------------------------------------- Prüfmodus: offene Buchungen nacheinander
+let pruefListe = [], pruefI = 0;
+function pruefModus(start) {
+  pruefListe = einordnen(jahr).filter((x) => ['pruefen', 'vorschlag'].includes(x.status)).map((x) => x.r.skey);
+  pruefI = Math.min(start, pruefListe.length - 1);
+  let dlg = document.querySelector('#st-pruef');
+  if (!dlg) {
+    dlg = Object.assign(document.createElement('dialog'), { id: 'st-pruef', className: 'dlg st-dlg' });
+    document.body.append(dlg);
+    dlg.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === 'Enter') { e.preventDefault(); dlg.querySelector('[data-p="ok"]')?.click(); }
+      else if (e.key === 'x' || e.key === 'X' || e.key === 'Delete') { e.preventDefault(); dlg.querySelector('[data-p="x"]')?.click(); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); dlg.querySelector('[data-p="weiter"]')?.click(); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); dlg.querySelector('[data-p="zurueck"]')?.click(); }
+    });
+    // Esc: selbst schließen und die Liste neu zeichnen (das close-Ereignis kommt nicht in jedem Browser an)
+    dlg.addEventListener('cancel', (e) => { e.preventDefault(); pruefSchliessen(); });
+  }
+  pruefZeigen();
+  if (!dlg.open) dlg.showModal();
+}
+
+function pruefSchliessen() {
+  const dlg = document.querySelector('#st-pruef');
+  if (dlg?.open) dlg.close();
+  ctx.neuZeichnen();
+}
+
+function pruefZeigen() {
+  const dlg = document.querySelector('#st-pruef');
+  const offene = einordnen(jahr);
+  const x = offene.find((y) => y.r.skey === pruefListe[pruefI]);
+  const nochOffen = pruefListe.filter((k) => ['pruefen', 'vorschlag'].includes(offene.find((y) => y.r.skey === k)?.status)).length;
+  if (!x) {
+    dlg.innerHTML = `<div class="st-dlg-haupt"><h2>Fertig</h2><p>Alle offenen Punkte für ${jahr} sind durchgesehen.</p><button class="btn primary" data-p="fertig">Schließen</button></div>`;
+    dlg.querySelector('[data-p="fertig"]').onclick = pruefSchliessen;
+    return;
+  }
+  const [st, stc] = STATUS[x.status];
+  dlg.innerHTML = `<div class="st-dlg-kopf"><b>Prüfung ${pruefI + 1} von ${pruefListe.length}</b><span class="muted klein">${nochOffen} noch offen · Steuerjahr ${jahr}</span>
+      <button class="icon-btn sm" data-p="zu" title="Schließen (Esc)">✕</button></div>
+    <div class="st-dlg-haupt">
+      <div class="st-dlg-betrag"><span class="betrag ${x.r.c > 0 ? 'pos' : ''}">${eur(x.r.c)}</span><span class="st-badge ${stc}">${st}</span></div>
+      <div class="st-dlg-titel">${esc(x.r.g || '–')}</div>
+      <div class="st-dlg-zweck">${esc(x.r.z || '')}</div>
+      ${detailHtml(x, true)}
+      ${x.notiz ? `<div class="st-notiz">Deine Notiz: ${esc(x.notiz)}</div>` : ''}
+    </div>
+    <div class="st-dlg-fuss">
+      <label class="klein">Steuerposten <select data-p="posten">${postenOptionen(x.status === 'ausgeschlossen' ? 'x' : x.p)}</select></label>
+      <div class="st-dlg-knoepfe">
+        <button class="btn" data-p="zurueck" title="← Pfeiltaste">← Zurück</button>
+        <button class="btn" data-p="notiz">Notiz</button>
+        <button class="btn danger" data-p="x" title="Taste X">✕ Nicht relevant</button>
+        <button class="btn primary" data-p="ok" title="Enter">✓ Bestätigen</button>
+        <button class="btn" data-p="weiter" title="→ Pfeiltaste">Überspringen →</button>
+      </div>
+      <div class="muted klein">Tasten: Enter = bestätigen · X = nicht relevant · → überspringen · ← zurück · Esc = schließen</div>
+    </div>`;
+  const r = x.r;
+  const weiter = () => { if (pruefI < pruefListe.length - 1) pruefI++; else pruefListe = []; pruefZeigen(); };
+  dlg.querySelector('[data-p="zu"]').onclick = pruefSchliessen;
+  dlg.querySelector('[data-p="weiter"]').onclick = weiter;
+  dlg.querySelector('[data-p="zurueck"]').onclick = () => { if (pruefI > 0) pruefI--; pruefZeigen(); };
+  dlg.querySelector('[data-p="ok"]').onclick = () => {
+    const wert = dlg.querySelector('[data-p="posten"]').value;
+    if (wert === 'x') entscheidungen[r.skey] = { ...(entscheidungen[r.skey] || {}), x: 1 };
+    else { const e = entscheidungen[r.skey] || {}; entscheidungen[r.skey] = { ...e, p: wert, ok: 1 }; delete entscheidungen[r.skey].x; }
+    speichern(); weiter();
+  };
+  dlg.querySelector('[data-p="x"]').onclick = () => { entscheidungen[r.skey] = { ...(entscheidungen[r.skey] || {}), x: 1 }; speichern(); weiter(); };
+  dlg.querySelector('[data-p="notiz"]').onclick = () => {
+    const e = entscheidungen[r.skey] || {};
+    const t = prompt('Notiz zu dieser Buchung (erscheint im PDF und in Excel):', e.n || '');
+    if (t === null) return;
+    entscheidungen[r.skey] = { ...e, ...(t.trim() ? { n: t.trim() } : {}) };
+    if (!t.trim()) delete entscheidungen[r.skey].n;
+    speichern(); pruefZeigen();
+  };
+  dlg.querySelectorAll('[data-sdashboard]').forEach((b) => b.onclick = () => { if (dlg.open) dlg.close(); ctx.setze({ q: `"${b.dataset.sdashboard}"`, tab: 'buchungen', jahr: '', monat: '' }); });
+  dlg.querySelector('[data-p="ok"]').focus();
 }
 
 // ---------------------------------------------------------------- Ausgabe

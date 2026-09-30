@@ -690,7 +690,7 @@ function tabelle(conds) {
   });
   const el = $('#tab-inhalt');
   if (S.tab === 'steuer') {
-    steuerZeigen(el, { einJahr, toast, neuZeichnen: () => tabelle(conds) });
+    steuerZeigen(el, { einJahr, toast, setze: (p) => setze(p), neuZeichnen: () => tabelle(conds) });
     $('.dl').hidden = true;
     return;
   }
