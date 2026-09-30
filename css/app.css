@@ -208,16 +208,26 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1
 .t tr.gruppe td .muted { font-weight: 400; }
 .t tbody tr.gruppe:hover td { background: var(--surface-2); }
 .fixtab .zweck + .zweck { margin-top: 1px; }
-.fix-ueberblick { display: grid; grid-template-columns: 210px minmax(260px, 420px) minmax(0, 1fr); gap: 28px; align-items: center; padding: 6px 0; }
+.fix-ueberblick { display: grid; grid-template-columns: 200px minmax(330px, 1fr) minmax(0, 1.2fr); gap: 18px 30px; align-items: center; padding: 8px 0 4px; }
+.fix-bezug-zeile { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13px; color: var(--muted); }
+.fix-bezug { width: fit-content; flex-wrap: wrap; }
+.fix-bezug small { color: var(--muted); font-size: 12px; margin-left: 2px; }
+.fix-bezug .an small { color: inherit; opacity: .85; }
+.fix-verlauf { grid-column: 1 / -1; display: grid; gap: 6px; min-width: 0; border-top: 1px solid var(--border); padding-top: 12px; }
+.fix-verlauf-c { position: relative; height: 220px; width: 100%; min-width: 0; overflow: hidden; }
+.fix-leg.frei { cursor: default; }
+.fix-leg.frei:hover { background: none; }
+.fix-leg.frei .punkt { background: var(--grid); border: 1px solid var(--border-strong); }
+.fix-leg.frei .name { color: var(--ein-text); }
 .fix-ring-box { display: grid; gap: 6px; justify-items: center; }
 .fix-grafik-t { font-size: 13px; font-weight: 600; color: var(--text-2); }
 .fix-trend { display: grid; gap: 6px; min-width: 0; align-self: stretch; align-content: start; }
 .fix-trend-c { position: relative; height: 230px; width: 100%; min-width: 0; overflow: hidden; }
-.fix-ring { position: relative; height: 210px; }
+.fix-ring { position: relative; height: 200px; width: 200px; }
 .fix-ring-mitte { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
 .fix-ring-mitte b { font-size: 21px; font-weight: 650; }
 .fix-ring-mitte span { font-size: 12.5px; color: var(--muted); }
-.fix-legende { display: grid; align-content: center; max-width: 560px; }
+.fix-legende { display: grid; align-content: center; min-width: 0; }
 .fix-leg, .fix-kopfzeile { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: none; text-align: left; padding: 7px 6px; border-radius: 8px; font-size: 14.5px; }
 .fix-leg { border-bottom: 1px solid var(--border); border-radius: 0; }
 .fix-leg:last-child { border-bottom: 0; }
@@ -225,10 +235,12 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1
 .punkt { width: 11px; height: 11px; border-radius: 50%; flex: none; }
 .fix-leg .name, .fix-kopfzeile .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fix-leg .betrag, .fix-kopfzeile .betrag { font-weight: 600; white-space: nowrap; }
-.fix-leg .anteil, .fix-kopfzeile .anteil { width: 56px; text-align: right; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.fix-leg .anteil, .fix-kopfzeile .anteil { width: 60px; flex: none; text-align: right; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.fix-leg .anteil.stark { color: var(--text); font-weight: 600; }
+.fix-leg .betrag, .fix-leg-kopf .betrag { width: 76px; flex: none; text-align: right; }
 .fix-leg-kopf { display: flex; gap: 10px; padding: 0 6px 4px 27px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); }
-.fix-leg-kopf span:first-child { flex: 1; }
-.fix-leg-kopf span:last-child { width: 56px; text-align: right; }
+.fix-leg-kopf .name { flex: 1; min-width: 0; }
+.fix-leg-kopf .anteil { width: 60px; flex: none; text-align: right; white-space: nowrap; }
 .fix-leg-fuss { font-size: 12px; color: var(--muted); padding: 8px 6px 0; }
 .fix-liste-kopf { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--muted); padding: 2px 6px 6px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .monate { margin-top: 6px; }
@@ -420,7 +432,7 @@ body.chat-offen .chat-knopf { display: none; }
 
 /* ============ Schmale Bildschirme ============ */
 @media (max-width: 1180px) {
-  .fix-ueberblick { grid-template-columns: 210px minmax(0, 1fr); }
+  .fix-ueberblick { grid-template-columns: 200px minmax(0, 1fr); }
   .fix-trend { grid-column: 1 / -1; }
 }
 @media (max-width: 960px) {
@@ -438,7 +450,10 @@ body.chat-offen .chat-knopf { display: none; }
   .nur-m { display: inline; }
   .fix-ueberblick { grid-template-columns: 1fr; gap: 10px; }
   .fix-trend-c { height: 200px; }
-  .fix-ring { height: 190px; }
+  .fix-ring { height: 190px; width: 190px; }
+  .fix-ring-box { justify-items: center; }
+  .fix-verlauf-c { height: 200px; }
+  .fix-leg .anteil:last-child, .fix-leg-kopf .anteil:last-child { display: none; }
   .fix-zeile { padding-left: 16px; }
   .fix-kopfzeile .anzahl { display: none; }
   .fix-kopfzeile .name { flex: 1; }

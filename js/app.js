@@ -725,6 +725,7 @@ function tabelle(conds) {
     if (j) setze({ jahr: String(j), monat: S.monat === c ? '' : c }); else setze({ jahr: c });
   });
   el.querySelectorAll('[data-fixansicht]').forEach((b) => b.onclick = () => { fixAnsicht = b.dataset.fixansicht; tabelle(conds); });
+  el.querySelectorAll('[data-fixbezug]').forEach((b) => b.onclick = () => { fixBezug = b.dataset.fixbezug; try { localStorage.setItem('fd.fixbezug', fixBezug); } catch {} tabelle(conds); });
   el.querySelectorAll('[data-fix]').forEach((tr) => tr.onclick = () => setze({ q: `"${tr.dataset.fix}"${tr.dataset.sig ? ' ' + tr.dataset.sig : ''}`, tab: 'buchungen' }));
   el.querySelectorAll('.fix-kopfzeile[data-fixgruppe]').forEach((b) => b.onclick = () => fixGruppeUmschalten(b.dataset.fixgruppe));
   el.querySelectorAll('.fix-leg[data-fixgruppe]').forEach((b) => b.onclick = () => fixGruppeUmschalten(b.dataset.fixgruppe, true));
@@ -906,10 +907,31 @@ function fixkostenGefiltert(conds) {
 }
 const fixSichtbar = (alle) => alle.filter((f) => f.aktiv || fixAnsicht === 'alle' || (fixAnsicht === 'frueher' && f.zuletzt >= FRUEHER_AB));
 
-// Durchschnittliche monatliche Ausgaben der letzten 12 Monate (für „Anteil an deinen Ausgaben“)
-function ausgabenProMonat12() {
-  const ab = new Date(Date.parse(D.bis) - 365 * 864e5).toISOString().slice(0, 10);
-  return -D.rows.reduce((s, r) => (r.art === 'Ausgabe' && r.d > ab ? s + r.c : s), 0) / 12;
+// Bezugsgröße für die Prozente: aktuelles Nettogehalt, Ø Gehalt der letzten 12 Monate oder Ø aller Einnahmen.
+// Die 12 Monate enden mit dem letzten Monat, in dem Gehalt eingegangen ist.
+let fixBezug = (() => { try { return localStorage.getItem('fd.fixbezug') || 'schnitt'; } catch { return 'schnitt'; } })();
+function einkommen() {
+  if (D.einkommen) return D.einkommen;
+  const lohn = new Map(), ein = new Map();
+  for (const r of D.rows) {
+    if (r.art !== 'Einnahme' || r.c <= 0) continue;
+    const m = r.d.slice(0, 7);
+    ein.set(m, (ein.get(m) || 0) + r.c);
+    if (r.ukat === 'Lohn / Gehalt') lohn.set(m, (lohn.get(m) || 0) + r.c);
+  }
+  const monTxt = (m) => `${MON[+m.slice(5) - 1]} ${m.slice(0, 4)}`;
+  const letzter = [...lohn.keys()].sort().pop() || [...ein.keys()].sort().pop() || D.bis.slice(0, 7);
+  const m12 = [];
+  let [y, mo] = letzter.split('-').map(Number);
+  for (let i = 0; i < 12; i++) { m12.unshift(`${y}-${String(mo).padStart(2, '0')}`); if (--mo === 0) { mo = 12; y--; } }
+  const summe = (mp) => m12.reduce((t, m) => t + (mp.get(m) || 0), 0);
+  const spanne = `${monTxt(m12[0])} – ${monTxt(letzter)}`;
+  return (D.einkommen = {
+    lohn, ein, letzter,
+    aktuell: { wert: lohn.get(letzter) || 0, knopf: 'aktuelles Gehalt', name: 'Nettogehalt', zeit: `im ${MONAT[+letzter.slice(5) - 1]} ${letzter.slice(0, 4)}`, vom: 'vom aktuellen Gehalt', am: 'am aktuellen Gehalt', spalte: 'vom Gehalt', reihe: 'lohn' },
+    schnitt: { wert: summe(lohn) / 12, knopf: 'Ø Gehalt 12 Monate', name: 'Ø Nettogehalt', zeit: `${spanne}, mit Sonderzahlungen`, vom: 'vom Ø Gehalt', am: 'am Ø Gehalt', spalte: 'vom Gehalt', reihe: 'lohn' },
+    einnahmen: { wert: summe(ein) / 12, knopf: 'Ø alle Einnahmen', name: 'Ø Einnahmen', zeit: `${spanne}, inkl. Zinsen und Erstattungen`, vom: 'von deinen Einnahmen', am: 'an deinen Einnahmen', spalte: 'der Einnahmen', reihe: 'ein' },
+  });
 }
 
 // Fixkosten-Arten: wofür das Geld regelmäßig abgeht (statt der Finanzguru-Kategorie „Kinder“, „Wohnen“ …)
@@ -955,9 +977,12 @@ function tabFixkosten(conds) {
   const nFrueher = alle.filter((f) => !f.aktiv && f.zuletzt >= FRUEHER_AB).length, nAelter = alle.filter((f) => !f.aktiv && f.zuletzt < FRUEHER_AB).length;
   const liste = fixSichtbar(alle);
   const pm = aktiv.reduce((s, f) => s + f.proMonat, 0);
-  const ausg = ausgabenProMonat12();
+  const ek = einkommen();
+  if (!ek[fixBezug]?.wert) fixBezug = ek.schnitt.wert ? 'schnitt' : 'einnahmen';
+  const bz = ek[fixBezug], B = bz.wert;
   const zeit = S.jahr || S.monat || conds.some((c) => c.kind === 'zeit') ? ' Der gewählte Zeitraum spielt hier keine Rolle, es zählt der aktuelle Stand.' : '';
-  const pct = (v) => (!pm ? '–' : v / pm < 0.0005 ? '< 0,1 %' : `${NUM.format(Math.round((v / pm) * 1000) / 10)} %`);
+  const pctVon = (v, g) => (!g ? '–' : v / g < 0.0005 ? '< 0,1 %' : `${NUM.format(Math.round((v / g) * 1000) / 10)} %`);
+  const pct = (v) => pctVon(v, B), pctF = (v) => pctVon(v, pm);   // pct: von der Bezugsgröße; pctF: Anteil an den Fixkosten
   const e2 = (c) => EUR.format(c / 100);
 
   // Gruppen je Art, sortiert nach laufender Summe; Farbe je Art bleibt stabil
@@ -975,22 +1000,27 @@ function tabFixkosten(conds) {
   for (const a of [...arten.map((g) => g.art), ...alle.map(fixArt)]) if (!farbe.has(a)) farbe.set(a, ART_FARBEN[farbe.size % ART_FARBEN.length]);
   arten.forEach((g) => { g.farbe = farbe.get(g.art); });
   const imKreis = arten.filter((g) => g.summe > 0);
-  fixGrafik = imKreis.length ? { arten: imKreis, pm, verlauf: fixVerlauf(alle, farbe) } : null;
+  fixGrafik = imKreis.length ? { arten: imKreis, pm, B, bz, ek, verlauf: fixVerlauf(alle, farbe) } : null;
+  const frei = B - pm;
 
   const seg = (v, t) => `<button data-fixansicht="${v}" class="${fixAnsicht === v ? 'an' : ''}">${t}</button>`;
   let h = `<div class="fix-kopf">
+    <div class="fix-bezug-zeile"><span>Prozente beziehen sich auf</span><div class="seg fix-bezug">${['aktuell', 'schnitt', 'einnahmen'].filter((k) => ek[k].wert).map((k) => `<button data-fixbezug="${k}" class="${fixBezug === k ? 'an' : ''}" title="${esc(ek[k].zeit)}">${esc(ek[k].knopf)} <small>${eur0(ek[k].wert)}</small></button>`).join('')}</div></div>
     <div class="fix-zahlen">
-      <div class="fix-zahl"><span class="l">Laufende Fixkosten</span><b>${eur0(pm)}</b><span class="muted">pro Monat</span></div>
-      <div class="fix-zahl"><span class="l">im Jahr</span><b>${eur0(pm * 12)}</b><span class="muted">${NUM.format(aktiv.length)} regelmäßige Zahlungen</span></div>
-      ${ausg > 0 && !conds.length && !S.kat && !S.konto ? `<div class="fix-zahl"><span class="l">Anteil an deinen Ausgaben</span><b>${NUM.format(Math.round((pm / ausg) * 100))} %</b><span class="muted">Ø der letzten 12 Monate: ${eur0(ausg)} / Monat</span></div>` : ''}
+      <div class="fix-zahl"><span class="l">Laufende Fixkosten</span><b>${eur0(pm)}</b><span class="muted">pro Monat · ${eur0(pm * 12)} im Jahr · ${NUM.format(aktiv.length)} Zahlungen</span></div>
+      <div class="fix-zahl"><span class="l">${esc(bz.name)}</span><b>${eur0(B)}</b><span class="muted">${esc(bz.zeit)}</span></div>
+      <div class="fix-zahl"><span class="l">Fixkostenquote</span><b>${pct(pm)}</b><span class="muted">${esc(bz.vom)} fest verplant</span></div>
+      <div class="fix-zahl"><span class="l">frei verfügbar</span><b class="${frei >= 0 ? 'pos' : 'neg'}">${eur0(frei)}</b><span class="muted">pro Monat nach den Fixkosten</span></div>
     </div>
     ${fixGrafik ? `<div class="fix-ueberblick">
-      <div class="fix-ring-box"><div class="fix-ring"><canvas id="c-fix"></canvas><div class="fix-ring-mitte"><b>${eur0(pm)}</b><span>pro Monat = 100 %</span></div></div>
-        <div class="fix-grafik-t">Anteile an den laufenden Fixkosten</div></div>
-      <div class="fix-legende"><div class="fix-leg-kopf"><span>Art der Fixkosten</span><span>pro Monat</span><span>Anteil</span></div>${imKreis.map((g) => `<button class="fix-leg" data-fixgruppe="${esc(g.art)}"><span class="punkt" style="background:${g.farbe}"></span><span class="name">${esc(g.art)}</span><span class="betrag">${eur0(g.summe)}</span><span class="anteil">${pct(g.summe)}</span></button>`).join('')}
-        <div class="fix-leg-fuss">Anteil = Anteil an deinen laufenden Fixkosten von ${eur0(pm)} pro Monat (= 100 %).</div></div>
-      <div class="fix-trend"><div class="fix-grafik-t">Fixkosten pro Monat im Zeitverlauf</div><div class="fix-trend-c"><canvas id="c-fix-trend"></canvas></div>
-        <div class="fix-leg-fuss">Summe der regelmäßigen Zahlungen, die im jeweiligen Monat liefen (jährliche anteilig), gestapelt nach Art.</div></div>
+      <div class="fix-ring-box"><div class="fix-ring"><canvas id="c-fix"></canvas><div class="fix-ring-mitte"><b>${pct(pm)}</b><span>${esc(bz.vom)}</span></div></div></div>
+      <div class="fix-legende"><div class="fix-leg-kopf"><span class="name">Art der Fixkosten</span><span class="betrag">pro Monat</span><span class="anteil">${esc(bz.spalte)}</span><span class="anteil">der Fixk.</span></div>${imKreis.map((g) => `<button class="fix-leg" data-fixgruppe="${esc(g.art)}"><span class="punkt" style="background:${g.farbe}"></span><span class="name">${esc(g.art)}</span><span class="betrag">${eur0(g.summe)}</span><span class="anteil stark">${pct(g.summe)}</span><span class="anteil">${pctF(g.summe)}</span></button>`).join('')}
+        ${frei > 0 ? `<div class="fix-leg frei"><span class="punkt"></span><span class="name">frei verfügbar</span><span class="betrag">${eur0(frei)}</span><span class="anteil stark">${pct(frei)}</span><span class="anteil"></span></div>` : ''}
+        <div class="fix-leg-fuss">${esc(bz.spalte)} = Anteil ${esc(bz.am)} (${eur0(B)} = 100 %, ${esc(bz.zeit)}). der Fixk. = Anteil an deinen laufenden Fixkosten (${eur0(pm)} = 100 %).</div></div>
+      <div class="fix-trend"><div class="fix-grafik-t">Was ${esc(bz.vom)} übrig bleibt</div><div class="fix-trend-c"><canvas id="c-fix-trend"></canvas></div>
+        <div class="fix-leg-fuss">Jede Stufe zieht eine Art Fixkosten ab; der letzte Balken ist, was dir pro Monat frei bleibt.</div></div>
+      <div class="fix-verlauf"><div class="fix-grafik-t">${bz.reihe === 'lohn' ? 'Nettogehalt' : 'Einnahmen'} und Fixkosten im Verlauf</div><div class="fix-verlauf-c"><canvas id="c-fix-verlauf"></canvas></div>
+        <div class="fix-leg-fuss">Je Monat: ${bz.reihe === 'lohn' ? 'eingegangenes Nettogehalt (Spitzen = Sonderzahlungen)' : 'alle Einnahmen'} und die Summe der laufenden Fixkosten (jährliche anteilig). Die grüne Fläche ist, was nach den Fixkosten bleibt; gestrichelt: ${esc(bz.name)}.</div></div>
     </div>` : ''}
     <div class="fix-leiste"><div class="seg fix-seg">${seg('laufend', `Laufend (${aktiv.length})`)}${nFrueher ? seg('frueher', `+ frühere seit 2020 (${nFrueher})`) : ''}${nFrueher + nAelter ? seg('alle', `alle (${alle.length})`) : ''}</div>
       ${arten.length ? `<button class="link" id="fix-alle-auf">${arten.every((g) => fixOffen.has(g.art)) ? 'Alle zuklappen' : 'Alle aufklappen'}</button>` : ''}</div>
@@ -1001,7 +1031,7 @@ function tabFixkosten(conds) {
   const re = hl.length ? new RegExp('(' + hl.map(escRe).join('|') + ')', 'gi') : null;
   const mk = (s) => (re ? esc(s).replace(re, '<mark>$1</mark>') : esc(s));
   const offen = (a) => fixOffen.has(a) || conds.some((c) => c.kind === 'text');   // bei einer Suche alles offen
-  h += `<div class="fix-liste"><div class="fix-liste-kopf"><span>Beträge pro Monat</span><span>% = Anteil an den laufenden Fixkosten (${eur0(pm)} = 100 %)</span></div>`;
+  h += `<div class="fix-liste"><div class="fix-liste-kopf"><span>Beträge pro Monat</span><span>% = Anteil ${esc(bz.am)} (${eur0(B)} = 100 %)</span></div>`;
   for (const g of arten) {
     const auf = offen(g.art);
     const frueher = g.fs.length - g.laufend;
@@ -1022,7 +1052,7 @@ function tabFixkosten(conds) {
         const vtip = f.stufen.map((x) => `${EUR.format(x.betrag / 100)} ${dde(x.von).slice(3)}–${dde(x.bis).slice(3)}`).join('\n');
         h += `<div class="fix-zeile${f.aktiv ? '' : ' beendet'}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="Alle Zahlungen anzeigen${vtip ? '\n' + esc(vtip) : ''}">
           <div class="text"><div class="titel">${mk(titel)}</div><div class="unter">${teile.map(esc).join(' · ')}</div>
-            ${f.aktiv && pm ? `<div class="anteilsbalken"><i style="width:${Math.max(1, (f.proMonat / pm) * 100)}%;background:${g.farbe}"></i></div>` : ''}</div>
+            ${f.aktiv && B ? `<div class="anteilsbalken"><i style="width:${Math.min(100, Math.max(1, (f.proMonat / B) * 100))}%;background:${g.farbe}"></i></div>` : ''}</div>
           <div class="zahlen"><div class="betrag">${e2(f.betrag)}${f.rh.proJahr !== 12 ? `<small> ${f.rh.name}</small>` : ''}</div>
             <div class="unter">${f.rh.proJahr !== 12 ? `≈ ${eur0(f.proMonat)} / Monat · ` : ''}${f.aktiv ? pct(f.proMonat) : ''}</div></div>
         </div>`;
@@ -1030,7 +1060,7 @@ function tabFixkosten(conds) {
     }
     h += '</div>';
   }
-  h += `<div class="fix-summe"><span>Summe laufend</span><span class="betrag">${eur0(pm)} / Monat</span><span class="muted">${eur0(pm * 12)} im Jahr</span></div></div>`;
+  h += `<div class="fix-summe"><span>Summe laufend</span><span class="betrag">${eur0(pm)} / Monat</span><span class="muted">${eur0(pm * 12)} im Jahr · ${pct(pm)} ${esc(bz.vom)}</span></div></div>`;
   if (vomGemeinsamen.length) {
     const gs = vomGemeinsamen.filter((f) => f.aktiv).reduce((s, f) => s + f.proMonat, 0);
     h += `<div class="fix-gemeinsam"><div class="fix-gemeinsam-t"><b>Vom Gemeinschaftskonto bezahlt</b> <span class="muted">– nicht mitgezählt, weil ihr sie aus euren Einzahlungen deckt${gs ? ` (laufend ${eur0(gs)} pro Monat)` : ''}</span></div>
@@ -1042,41 +1072,104 @@ function tabFixkosten(conds) {
   return h;
 }
 
-// Kreisdiagramm der Fixkosten-Arten; ein Klick auf ein Segment klappt die Gruppe auf
+// Ring (100 % = Bezugsgröße, grau = frei), Wasserfall „was übrig bleibt“ und Verlauf Einkommen/Fixkosten
 function fixGrafikZeichnen() {
   if (!fixGrafik || !$('#c-fix')) return;
-  const { arten, pm, verlauf: vl } = fixGrafik;
-  if (vl && $('#c-fix-trend')) {
+  const { arten, pm, B, bz, ek, verlauf: vl } = fixGrafik;
+  const frei = B - pm, gruen = css('--ein'), rot = css('--aus'), grau = css('--grid');
+  const pz = (v, g) => `${NUM.format(Math.round((v / g) * 1000) / 10)} %`;
+
+  // Wasserfall: Bezugsgröße → je Art abziehen → frei; sehr kleine Arten (< 1,5 %) zusammen als „Übrige“
+  if ($('#c-fix-trend')) {
+    const gross = arten.filter((g) => g.summe >= B * 0.015), klein = arten.filter((g) => g.summe < B * 0.015);
+    const st = [{ l: bz.name, a: 0, b: B, f: css('--muted'), t: eur0(B) }];
+    let stand = B;
+    for (const g of [...gross, ...(klein.length ? [{ art: klein.length === 1 ? klein[0].art : 'Übrige', summe: klein.reduce((t, x) => t + x.summe, 0), farbe: '#8a8880', teile: klein }] : [])]) {
+      st.push({ l: g.art, a: stand - g.summe, b: stand, f: g.farbe, t: `−${NUM.format(Math.round(g.summe / 100))}`, teile: g.teile });
+      stand -= g.summe;
+    }
+    st.push({ l: 'frei verfügbar', a: Math.min(0, stand), b: Math.max(0, stand), f: stand >= 0 ? gruen : rot, t: eur0(stand) });
+    const zeilen = (l) => { const w = l.replace(/\(Gemeinschaftskonto\)/, '(Gem.-Konto)').replace(/(\S{4,})(unterhalt|versicherungen|mitgliedschaften)/gi, '$1- $2').split(' '); const z = []; for (const x of w) { if (z.length && (z[z.length - 1] + ' ' + x).length <= 13) z[z.length - 1] += ' ' + x; else z.push(x); } return z; };
     const o = basis();
-    o.interaction = { mode: 'index', intersect: false };
+    o.layout = { padding: { top: 22 } };
     o.plugins.tooltip.callbacks = {
-      title: (it) => { const [yy, mm] = vl.monate[it[0].dataIndex].split('-'); return `${MONAT[+mm - 1]} ${yy}`; },
-      label: (it) => (it.raw ? ` ${it.dataset.label}: ${EUR0.format(it.raw)}` : null),
-      footer: (it) => `Zusammen: ${EUR0.format(it.reduce((s, x) => s + x.raw, 0))} pro Monat`,
+      title: (it) => st[it[0].dataIndex].l,
+      label: (it) => { const x = st[it.dataIndex]; const v = x.b - x.a; return ` ${EUR0.format(Math.round(v / 100))} pro Monat · ${pz(v, B)} ${bz.vom}`; },
+      afterLabel: (it) => st[it.dataIndex].teile?.map((g) => `   ${g.art}: ${eur0(g.summe)}`) || '',
     };
-    o.plugins.tooltip.filter = (it) => it.raw > 0;
     o.scales = {
-      x: { ...achsenStil(), stacked: true, grid: { display: false }, ticks: { ...achsenStil().ticks, maxRotation: 0, autoSkip: false,
-        callback: (_, i) => { const [yy, mm] = vl.monate[i].split('-'); return mm === '01' ? yy : mm === '07' ? MON[6] : ''; } } },
-      y: { ...achsenStil(), stacked: true, ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 5 } },
+      x: { ...achsenStil(), grid: { display: false }, ticks: { ...achsenStil().ticks, font: { size: 11.5 }, maxRotation: 0, autoSkip: false } },
+      y: { ...achsenStil(), beginAtZero: true, ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 5 } },
     };
     zeichne('c-fix-trend', {
       type: 'bar',
-      data: { labels: vl.monate, datasets: vl.arten.map((a) => ({ label: a.art, data: a.werte.map((c) => Math.round(c) / 100), backgroundColor: a.farbe, borderWidth: 0, barPercentage: 0.9, categoryPercentage: 0.9 })) },
+      data: { labels: st.map((x) => zeilen(x.l)), datasets: [{ data: st.map((x) => [x.a / 100, x.b / 100]), backgroundColor: st.map((x, i) => (i === st.length - 1 ? alpha(x.f, 0.35) : x.f)), borderColor: st.map((x) => x.f), borderWidth: st.map((_, i) => (i === st.length - 1 ? 1.5 : 0)), borderSkipped: false, barPercentage: 0.72, categoryPercentage: 0.9 }] },
+      options: o,
+      plugins: [{
+        id: 'fixWerte',
+        afterDatasetsDraw(ch) {
+          const c = ch.ctx, bars = ch.getDatasetMeta(0).data, y = ch.scales.y;
+          c.save();
+          c.strokeStyle = css('--border-strong'); c.setLineDash([3, 3]); c.lineWidth = 1;
+          for (let i = 0; i < bars.length - 2; i++) {
+            const yy = y.getPixelForValue((i === 0 ? st[0].b : st[i].a) / 100);
+            c.beginPath(); c.moveTo(bars[i].x + bars[i].width / 2, yy); c.lineTo(bars[i + 1].x - bars[i + 1].width / 2, yy); c.stroke();
+          }
+          c.setLineDash([]); c.textAlign = 'center'; c.font = `600 12px ${getComputedStyle(document.body).fontFamily}`;
+          bars.forEach((b, i) => {
+            c.fillStyle = i === bars.length - 1 ? css(stand >= 0 ? '--ein-text' : '--aus-text') : css('--text');
+            c.fillText(st[i].t, b.x, Math.min(b.y, b.base) - 6);
+          });
+          c.restore();
+        },
+      }],
+    });
+  }
+
+  // Verlauf: Einkommen je Monat gegen Fixkosten je Monat, Fläche dazwischen
+  if (vl && $('#c-fix-verlauf')) {
+    const reihe = ek[bz.reihe];
+    const fix = vl.monate.map((_, i) => Math.round(vl.arten.reduce((t, a) => t + a.werte[i], 0)) / 100);
+    const inc = vl.monate.map((m) => (m > ek.letzter ? null : Math.round((reihe.get(m) || 0) / 100)));
+    const o = basis();
+    o.interaction = { mode: 'index', intersect: false };
+    o.plugins.legend = { display: true, position: 'top', align: 'end', labels: { color: css('--text-2'), boxWidth: 12, boxHeight: 3, font: { size: 12 } } };
+    o.plugins.tooltip.callbacks = {
+      title: (it) => { const [yy, mm] = vl.monate[it[0].dataIndex].split('-'); return `${MONAT[+mm - 1]} ${yy}`; },
+      label: (it) => (it.raw == null ? null : ` ${it.dataset.label}: ${EUR0.format(it.raw)}`),
+      footer: (it) => { const i = it[0].dataIndex; return inc[i] == null ? '' : `Bleibt: ${EUR0.format(inc[i] - fix[i])}`; },
+    };
+    o.scales = {
+      x: { ...achsenStil(), grid: { display: false }, ticks: { ...achsenStil().ticks, maxRotation: 0, autoSkip: false,
+        callback: (_, i) => { const [yy, mm] = vl.monate[i].split('-'); return mm === '01' ? yy : mm === '07' ? MON[6] : ''; } } },
+      y: { ...achsenStil(), beginAtZero: true, ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 5 } },
+    };
+    zeichne('c-fix-verlauf', {
+      type: 'line',
+      data: { labels: vl.monate, datasets: [
+        { label: bz.reihe === 'lohn' ? 'Nettogehalt' : 'Einnahmen', data: inc, borderColor: gruen, backgroundColor: alpha(gruen, 0.13), fill: { target: 1, above: alpha(gruen, 0.13), below: alpha(rot, 0.16) }, tension: 0.25, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2, spanGaps: false },
+        { label: 'Fixkosten', data: fix, borderColor: rot, backgroundColor: rot, fill: false, tension: 0.25, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2 },
+        { label: bz.name, data: vl.monate.map(() => Math.round(B / 100)), borderColor: css('--muted'), borderDash: [5, 4], borderWidth: 1, pointRadius: 0, pointHoverRadius: 0, fill: false },
+      ] },
       options: o,
     });
   }
+
   zeichne('c-fix', {
     type: 'doughnut',
-    data: { labels: arten.map((g) => g.art), datasets: [{ data: arten.map((g) => g.summe / 100), backgroundColor: arten.map((g) => g.farbe), borderWidth: 0, spacing: 2, hoverOffset: 6 }] },
+    data: { labels: [...arten.map((g) => g.art), ...(frei > 0 ? ['frei verfügbar'] : [])],
+      datasets: [{ data: [...arten.map((g) => g.summe / 100), ...(frei > 0 ? [frei / 100] : [])], backgroundColor: [...arten.map((g) => g.farbe), ...(frei > 0 ? [grau] : [])], borderWidth: 0, spacing: 2, hoverOffset: 6 }] },
     options: {
       responsive: true, maintainAspectRatio: false, cutout: '68%', animation: { duration: 250 },
       plugins: {
         legend: { display: false },
-        tooltip: { ...basis().plugins.tooltip, callbacks: { label: (it) => ` ${EUR0.format(it.raw)} pro Monat · ${NUM.format(Math.round((it.raw * 100 / (pm / 100)) * 10) / 10)} % der Fixkosten` } },
+        tooltip: { ...basis().plugins.tooltip, callbacks: { label: (it) => {
+          const v = it.raw * 100, istFrei = it.dataIndex >= arten.length;
+          return ` ${EUR0.format(it.raw)} pro Monat · ${pz(v, B)} ${bz.vom}${istFrei ? '' : ` · ${pz(v, pm)} der Fixkosten`}`;
+        } } },
       },
-      onClick: (_, el) => { if (el.length) fixGruppeUmschalten(arten[el[0].index].art, true); },
-      onHover: (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; },
+      onClick: (_, el) => { if (el.length && el[0].index < arten.length) fixGruppeUmschalten(arten[el[0].index].art, true); },
+      onHover: (e, el) => { e.native.target.style.cursor = el.length && el[0].index < arten.length ? 'pointer' : 'default'; },
     },
   });
 }
