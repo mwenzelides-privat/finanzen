@@ -681,7 +681,14 @@ function tabelle(conds) {
     if (j) setze({ jahr: String(j), monat: S.monat === c ? '' : c }); else setze({ jahr: c });
   });
   el.querySelectorAll('[data-fixansicht]').forEach((b) => b.onclick = () => { fixAnsicht = b.dataset.fixansicht; tabelle(conds); });
-  el.querySelectorAll('tr[data-fix]').forEach((tr) => tr.onclick = () => setze({ q: `"${tr.dataset.fix}"${tr.dataset.sig ? ' ' + tr.dataset.sig : ''}`, tab: 'buchungen' }));
+  el.querySelectorAll('[data-fix]').forEach((tr) => tr.onclick = () => setze({ q: `"${tr.dataset.fix}"${tr.dataset.sig ? ' ' + tr.dataset.sig : ''}`, tab: 'buchungen' }));
+  el.querySelectorAll('.fix-kopfzeile[data-fixgruppe]').forEach((b) => b.onclick = () => fixGruppeUmschalten(b.dataset.fixgruppe));
+  el.querySelectorAll('.fix-leg[data-fixgruppe]').forEach((b) => b.onclick = () => fixGruppeUmschalten(b.dataset.fixgruppe, true));
+  $('#fix-alle-auf')?.addEventListener('click', () => {
+    const alleArten = [...el.querySelectorAll('.fix-kopfzeile')].map((b) => b.dataset.fixgruppe);
+    fixOffen = alleArten.every((a) => fixOffen.has(a)) ? new Set() : new Set(alleArten);
+    tabelle(conds);
+  });
   if (S.tab === 'fix') fixGrafikZeichnen();
   $('#stichtag')?.addEventListener('change', (e) => { const v = e.target.value; if (/^\d{4}-\d{2}-\d{2}$/.test(v)) setze({ stichtag: v }); });
   el.querySelectorAll('[data-st]').forEach((b) => b.onclick = () => setze({ stichtag: b.dataset.st === D.bis && !S.jahr ? '' : b.dataset.st }));
@@ -861,7 +868,41 @@ function ausgabenProMonat12() {
   return -D.rows.reduce((s, r) => (r.art === 'Ausgabe' && r.d > ab ? s + r.c : s), 0) / 12;
 }
 
-let fixGrafik = null;   // Daten für die Anteilsgrafik (wird nach dem Rendern gezeichnet)
+// Fixkosten-Arten: wofür das Geld regelmäßig abgeht (statt der Finanzguru-Kategorie „Kinder“, „Wohnen“ …)
+const FIX_ARTEN = [
+  ['Kindesunterhalt', (f) => f.ukat === 'Kindesunterhalt'],
+  ['Miete', (f) => f.ukat === 'Miete'],
+  ['Haushalt (Gemeinschaftskonto)', (f) => f.beitrag],
+  ['Trennungsunterhalt', (f) => f.ukat === 'Trennungsunterhalt'],
+  ['Unterhalt', (f) => /unterhalt/i.test(f.ukat)],
+  ['Versicherungen', (f) => f.kat === 'Versicherungen'],
+  ['Energie', (f) => /strom|gas|wasser|heiz|fernwaerme/i.test(f.ukat)],
+  ['Kredite', (f) => /kredit|darlehen|finanzierung/i.test(f.ukat)],
+  ['Kinder & Betreuung', (f) => f.kat === 'Kinder'],
+  ['Telefon & Internet', (f) => /telefon|internet|mobilfunk|handy/i.test(`${f.ukat} ${f.name}`)],
+  ['Steuern & Gebühren', (f) => /steuer|gebuehr|rundfunk|abgabe/i.test(`${f.ukat} ${f.zweck}`)],
+  ['Abos & Mitgliedschaften', () => true],
+];
+const ART_FARBEN = ['#2a78d6', '#e0602e', '#1a9e6e', '#9085e9', '#eda100', '#e87ba4', '#3fa7b8', '#b0762f', '#6c8f3a', '#8a8880', '#c25b8f'];
+const SCHOENER = { Berufsunfaehigkeitsversicherung: 'Berufsunfähigkeitsversicherung', Rundfunkgebuehren: 'Rundfunkgebühren', Bankgebuehren: 'Bankgebühren', Mobilitaet: 'Mobilität' };
+const schoen = (t) => SCHOENER[t] || t;
+const fixArt = (f) => FIX_ARTEN.find(([, t]) => t(f))[0];
+
+// Bezeichnung einer Zahlung: zuerst wofür (Kind, Versicherungsart, Zweck), der Empfänger steht darunter
+function fixTitel(f, art) {
+  const woerter = (s) => norm(s).replace(/[^a-z ]+/g, ' ').split(/\s+/).filter(Boolean);
+  const ohne = new Set([...woerter(f.beitrag ? f.r.g : f.name), ...(f.beitrag ? [] : woerter(art)), 'dr']);
+  const rest = (f.zweck || '').replace(/[\d/.,:;#()+-]+/g, ' ').split(/\s+/).filter((w) => w.length > 1 && !ohne.has(norm(w))).join(' ').trim();
+  if (art === 'Kindesunterhalt') return rest || f.name;
+  if (f.beitrag) return rest || f.name;
+  if (art === 'Versicherungen') return schoen(f.ukat) || f.name;
+  const steuer = (f.zweck || '').match(/[A-Za-zÄÖÜäöüß-]*steuer/i);
+  if (art === 'Steuern & Gebühren' && steuer) return steuer[0];
+  return f.name;
+}
+
+let fixOffen = new Set();   // aufgeklappte Gruppen
+let fixGrafik = null;       // Daten für das Kreisdiagramm (wird nach dem Rendern gezeichnet)
 function tabFixkosten(conds) {
   const gefiltert = fixkostenGefiltert(conds);
   const alle = gefiltert.filter((f) => !f.gemeinsam);
@@ -872,91 +913,107 @@ function tabFixkosten(conds) {
   const pm = aktiv.reduce((s, f) => s + f.proMonat, 0);
   const ausg = ausgabenProMonat12();
   const zeit = S.jahr || S.monat || conds.some((c) => c.kind === 'zeit') ? ' Der gewählte Zeitraum spielt hier keine Rolle, es zählt der aktuelle Stand.' : '';
-  // Kategorien mit Summe und Anteil (nur laufende Verträge)
-  const katSum = new Map();
-  for (const f of aktiv) katSum.set(f.kat, (katSum.get(f.kat) || 0) + f.proMonat);
-  const kats = [...katSum].sort((a, b) => b[1] - a[1]);
-  fixGrafik = kats.length ? { kats, pm } : null;
-  const pct = (v) => (pm ? `${NUM.format(Math.round((v / pm) * 1000) / 10)} %` : '–');
+  const pct = (v) => (!pm ? '–' : v / pm < 0.0005 ? '< 0,1 %' : `${NUM.format(Math.round((v / pm) * 1000) / 10)} %`);
+  const e2 = (c) => EUR.format(c / 100);
+
+  // Gruppen je Art, sortiert nach laufender Summe; Farbe je Art bleibt stabil
+  const gruppen = new Map();
+  for (const f of liste) {
+    const a = fixArt(f);
+    if (!gruppen.has(a)) gruppen.set(a, { art: a, fs: [], summe: 0, laufend: 0 });
+    const g = gruppen.get(a);
+    g.fs.push(f);
+    if (f.aktiv) { g.summe += f.proMonat; g.laufend++; }
+  }
+  const arten = [...gruppen.values()].sort((a, b) => b.summe - a.summe || a.art.localeCompare(b.art, 'de'));
+  arten.forEach((g, i) => { g.farbe = ART_FARBEN[i % ART_FARBEN.length]; });
+  const imKreis = arten.filter((g) => g.summe > 0);
+  fixGrafik = imKreis.length ? { arten: imKreis, pm } : null;
+
   const seg = (v, t) => `<button data-fixansicht="${v}" class="${fixAnsicht === v ? 'an' : ''}">${t}</button>`;
-  let h = `<div class="fix-kopf fix-oben">
+  let h = `<div class="fix-kopf">
     <div class="fix-zahlen">
-      <div class="fix-zahl"><span class="l">Laufende Fixkosten</span><b class="neg">${eur0(-pm)}</b><span class="muted">pro Monat</span></div>
-      <div class="fix-zahl"><span class="l">im Jahr</span><b class="neg">${eur0(-pm * 12)}</b><span class="muted">${NUM.format(aktiv.length)} Verträge und Abos</span></div>
-      ${ausg > 0 && !conds.length && !S.kat && !S.konto ? `<div class="fix-zahl"><span class="l">Anteil an deinen Ausgaben</span><b>${NUM.format(Math.round((pm / ausg) * 100))} %</b><span class="muted">Ø Ausgaben der letzten 12 Monate: ${eur0(ausg)} / Monat</span></div>` : ''}
-      <div class="seg fix-seg">${seg('laufend', `Laufend (${aktiv.length})`)}${nFrueher ? seg('frueher', `+ frühere seit 2020 (${nFrueher})`) : ''}${nFrueher + nAelter ? seg('alle', `alle (${alle.length})`) : ''}</div>
-      <div class="muted klein">Automatisch erkannt: gleicher Empfänger und Verwendungszweck, regelmäßiger Abstand. Preisänderungen gehören zum selben Vertrag. Deine Überweisungen aufs Gemeinschaftskonto zählen mit, was von dort abgeht, nicht noch einmal. Stand ${dde(D.bis)}.${zeit}</div>
+      <div class="fix-zahl"><span class="l">Laufende Fixkosten</span><b>${eur0(pm)}</b><span class="muted">pro Monat</span></div>
+      <div class="fix-zahl"><span class="l">im Jahr</span><b>${eur0(pm * 12)}</b><span class="muted">${NUM.format(aktiv.length)} regelmäßige Zahlungen</span></div>
+      ${ausg > 0 && !conds.length && !S.kat && !S.konto ? `<div class="fix-zahl"><span class="l">Anteil an deinen Ausgaben</span><b>${NUM.format(Math.round((pm / ausg) * 100))} %</b><span class="muted">Ø der letzten 12 Monate: ${eur0(ausg)} / Monat</span></div>` : ''}
     </div>
-    ${fixGrafik ? `<div class="fix-grafik"><div class="chat-chart-t">Anteile nach Kategorie</div><div class="chart" id="chart-fix" style="height:${Math.max(150, kats.length * 26 + 20)}px"><canvas id="c-fix"></canvas></div></div>` : ''}
+    ${fixGrafik ? `<div class="fix-ueberblick">
+      <div class="fix-ring"><canvas id="c-fix"></canvas><div class="fix-ring-mitte"><b>${eur0(pm)}</b><span>pro Monat</span></div></div>
+      <div class="fix-legende">${imKreis.map((g) => `<button class="fix-leg" data-fixgruppe="${esc(g.art)}"><span class="punkt" style="background:${g.farbe}"></span><span class="name">${esc(g.art)}</span><span class="betrag">${eur0(g.summe)}</span><span class="anteil">${pct(g.summe)}</span></button>`).join('')}</div>
+    </div>` : ''}
+    <div class="fix-leiste"><div class="seg fix-seg">${seg('laufend', `Laufend (${aktiv.length})`)}${nFrueher ? seg('frueher', `+ frühere seit 2020 (${nFrueher})`) : ''}${nFrueher + nAelter ? seg('alle', `alle (${alle.length})`) : ''}</div>
+      ${arten.length ? `<button class="link" id="fix-alle-auf">${arten.every((g) => fixOffen.has(g.art)) ? 'Alle zuklappen' : 'Alle aufklappen'}</button>` : ''}</div>
   </div>`;
   if (!liste.length) return h + '<div class="leer">Keine regelmäßigen Zahlungen gefunden.</div>';
+
   const hl = highlightWords(conds);
   const re = hl.length ? new RegExp('(' + hl.map(escRe).join('|') + ')', 'gi') : null;
   const mk = (s) => (re ? esc(s).replace(re, '<mark>$1</mark>') : esc(s));
-  h += `<div class="tab-scroll"><table class="t fix fixtab"><thead><tr><th>Empfänger / Verwendungszweck</th><th class="sp-m" style="width:104px">Rhythmus</th>
-    <th class="r sp-m" style="width:96px">Betrag</th><th class="sp-m" style="width:176px" title="Preisänderungen seit Beginn">Verlauf</th>
-    <th class="r" style="width:96px">pro Monat</th><th class="r sp-m" style="width:96px">pro Jahr</th><th class="r" style="width:64px" title="Anteil an den laufenden Fixkosten">Anteil</th>
-    <th class="sp-m" style="width:128px">Zeitraum</th></tr></thead><tbody>`;
-  // nach Kategorie gruppiert, Kategorien nach laufender Summe, beendete Verträge ans Ende ihrer Kategorie
-  const gruppen = new Map();
-  for (const f of liste) { if (!gruppen.has(f.kat)) gruppen.set(f.kat, []); gruppen.get(f.kat).push(f); }
-  const reihenfolge = [...gruppen.keys()].sort((a, b) => (katSum.get(b) || 0) - (katSum.get(a) || 0) || a.localeCompare(b, 'de'));
-  for (const kat of reihenfolge) {
-    const fs = gruppen.get(kat).sort((a, b) => (b.aktiv - a.aktiv) || b.proMonat - a.proMonat || (b.zuletzt < a.zuletzt ? -1 : 1));
-    const ks = katSum.get(kat) || 0, nAktiv = fs.filter((f) => f.aktiv).length;
-    h += `<tr class="gruppe"><td>${esc(kat)} <span class="muted">· ${nAktiv} laufend${fs.length > nAktiv ? `, ${fs.length - nAktiv} früher` : ''}</span></td><td class="sp-m"></td><td class="sp-m"></td><td class="sp-m"></td>
-      <td class="r neg">${ks ? eur0(-ks) : '–'}</td><td class="r sp-m neg">${ks ? eur0(-ks * 12) : '–'}</td><td class="r">${ks ? pct(ks) : '–'}</td><td class="sp-m"></td></tr>`;
-    for (const f of fs) {
-      const vt = verlaufText(f);
-      const vtip = f.stufen.map((x) => `${EUR.format(x.betrag / 100)} ${dde(x.von).slice(3)}–${dde(x.bis).slice(3)}`).join('\n');
-      h += `<tr class="klick${f.aktiv ? '' : ' beendet'}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="Alle Zahlungen dieses Vertrags anzeigen">
-        <td><div class="wer">${mk(f.name)}</div><div class="zweck">${mk(f.zweck || '')}</div>
-          <div class="zweck"><span class="nur-m">${f.rh.name}${vt ? ' · ' + vt : ''} · </span>${esc(f.ukat)} · ${esc(D.konten[f.k].name)}${f.aktiv ? '' : ' · <b>beendet</b>'}</div></td>
-        <td class="klein sp-m">${f.rh.name}</td><td class="r sp-m">${eur(-f.betrag)}</td>
-        <td class="klein sp-m" title="${esc(vtip)}">${vt || '<span class="muted">gleichbleibend</span>'}</td>
-        <td class="r ${f.aktiv ? 'neg' : 'muted'}"><b>${eur0(-f.proMonat)}</b></td><td class="r sp-m ${f.aktiv ? '' : 'muted'}">${eur0(-f.proJahr)}</td>
-        <td class="r klein">${f.aktiv ? pct(f.proMonat) : '–'}</td>
-        <td class="klein sp-m">${dde(f.seit).slice(3)} – ${f.aktiv ? 'heute' : dde(f.zuletzt).slice(3)}</td></tr>`;
+  const offen = (a) => fixOffen.has(a) || conds.some((c) => c.kind === 'text');   // bei einer Suche alles offen
+  h += '<div class="fix-liste">';
+  for (const g of arten) {
+    const auf = offen(g.art);
+    const frueher = g.fs.length - g.laufend;
+    h += `<div class="fix-gruppe${auf ? ' offen' : ''}">
+      <button class="fix-kopfzeile" data-fixgruppe="${esc(g.art)}" aria-expanded="${auf}">
+        <svg class="pfeil" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+        <span class="punkt" style="background:${g.farbe}"></span>
+        <span class="name">${esc(g.art)}</span>
+        <span class="anzahl">${g.laufend ? `${g.laufend} ${g.laufend === 1 ? 'Zahlung' : 'Zahlungen'}` : ''}${frueher ? `${g.laufend ? ', ' : ''}${frueher} früher` : ''}</span>
+        <span class="betrag">${g.summe ? eur0(g.summe) : '–'}</span>
+        <span class="anteil">${g.summe ? pct(g.summe) : ''}</span>
+      </button>`;
+    if (auf) {
+      const fs = g.fs.sort((a, b) => (b.aktiv - a.aktiv) || b.proMonat - a.proMonat || (b.zuletzt < a.zuletzt ? -1 : 1));
+      for (const f of fs) {
+        const titel = fixTitel(f, g.art), vt = verlaufText(f);
+        const teile = [titel !== f.name ? `an ${f.name}` : '', f.rh.name, f.aktiv ? `seit ${dde(f.seit).slice(3)}` : `${dde(f.seit).slice(3)} – ${dde(f.zuletzt).slice(3)}, beendet`, vt].filter(Boolean);
+        const vtip = f.stufen.map((x) => `${EUR.format(x.betrag / 100)} ${dde(x.von).slice(3)}–${dde(x.bis).slice(3)}`).join('\n');
+        h += `<div class="fix-zeile${f.aktiv ? '' : ' beendet'}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="Alle Zahlungen anzeigen${vtip ? '\n' + esc(vtip) : ''}">
+          <div class="text"><div class="titel">${mk(titel)}</div><div class="unter">${teile.map(esc).join(' · ')}</div>
+            ${f.aktiv && pm ? `<div class="anteilsbalken"><i style="width:${Math.max(1, (f.proMonat / pm) * 100)}%;background:${g.farbe}"></i></div>` : ''}</div>
+          <div class="zahlen"><div class="betrag">${e2(f.betrag)}${f.rh.proJahr !== 12 ? `<small> ${f.rh.name}</small>` : ''}</div>
+            <div class="unter">${f.rh.proJahr !== 12 ? `≈ ${eur0(f.proMonat)} / Monat · ` : ''}${f.aktiv ? pct(f.proMonat) : ''}</div></div>
+        </div>`;
+      }
     }
+    h += '</div>';
   }
-  h += `</tbody><tfoot><tr><td>Summe laufend</td><td class="sp-m"></td><td class="sp-m"></td><td class="sp-m"></td><td class="r neg">${eur0(-pm)}</td>
-    <td class="r sp-m neg">${eur0(-pm * 12)}</td><td class="r">${pm ? '100 %' : '–'}</td><td class="sp-m"></td></tr></tfoot></table></div>`;
+  h += `<div class="fix-summe"><span>Summe laufend</span><span class="betrag">${eur0(pm)} / Monat</span><span class="muted">${eur0(pm * 12)} im Jahr</span></div></div>`;
   if (vomGemeinsamen.length) {
     const gs = vomGemeinsamen.filter((f) => f.aktiv).reduce((s, f) => s + f.proMonat, 0);
-    h += `<div class="fix-gemeinsam"><div class="fix-gemeinsam-t"><b>Vom Gemeinschaftskonto bezahlt</b> <span class="muted">– nicht mitgezählt, weil ihr sie aus euren Einzahlungen deckt${gs ? ` (laufend ${eur0(-gs)} pro Monat)` : ''}</span></div>
-      <table class="t fix"><tbody>${vomGemeinsamen.map((f) => `<tr class="klick${f.aktiv ? '' : ' beendet'}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}">
-        <td><div class="wer">${esc(f.name)}</div><div class="zweck">${esc(f.ukat)} · ${esc(D.konten[f.k].name)} · ${f.rh.name}${f.aktiv ? '' : ' · beendet'}</div></td>
-        <td class="r" style="width:110px">${eur(-f.betrag)}</td><td class="r muted" style="width:110px">${eur0(-f.proMonat)} / Monat</td></tr>`).join('')}</tbody></table></div>`;
+    h += `<div class="fix-gemeinsam"><div class="fix-gemeinsam-t"><b>Vom Gemeinschaftskonto bezahlt</b> <span class="muted">– nicht mitgezählt, weil ihr sie aus euren Einzahlungen deckt${gs ? ` (laufend ${eur0(gs)} pro Monat)` : ''}</span></div>
+      ${vomGemeinsamen.map((f) => `<div class="fix-zeile${f.aktiv ? '' : ' beendet'}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}">
+        <div class="text"><div class="titel">${esc(f.name)}</div><div class="unter">${esc(schoen(f.ukat))} · ${esc(D.konten[f.k].name)} · ${f.rh.name}${f.aktiv ? '' : ' · beendet'}</div></div>
+        <div class="zahlen"><div class="betrag muted">${e2(f.betrag)}</div></div></div>`).join('')}</div>`;
   }
+  h += `<p class="muted klein fix-fuss">Automatisch erkannt: gleicher Empfänger und Verwendungszweck, regelmäßiger Abstand; Preisänderungen gehören zum selben Vertrag. Deine Überweisungen aufs Gemeinschaftskonto zählen mit, was von dort abgeht, nicht noch einmal. Stand ${dde(D.bis)}.${zeit}</p>`;
   return h;
 }
 
-// Anteile der Kategorien an den laufenden Fixkosten (Prozent an den Balken)
+// Kreisdiagramm der Fixkosten-Arten; ein Klick auf ein Segment klappt die Gruppe auf
 function fixGrafikZeichnen() {
   if (!fixGrafik || !$('#c-fix')) return;
-  const { kats, pm } = fixGrafik;
-  const farbe = css('--aus');
-  const o = basis();
-  o.indexAxis = 'y';
-  o.layout = { padding: { right: 120 } };
-  o.plugins.tooltip.callbacks = { label: (it) => ` ${eur0(-kats[it.dataIndex][1])} pro Monat · ${NUM.format(Math.round(it.raw * 10) / 10)} %` };
-  o.scales = { x: { display: false, beginAtZero: true, max: 100 }, y: { ...achsenStil(), grid: { display: false }, ticks: { color: css('--text-2'), font: { size: 12.5 }, autoSkip: false } } };
-  o.onClick = (_, el) => { if (el.length) setze({ kat: kats[el[0].index][0], ukat: '' }); };
-  o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
-  const labels = {
-    id: 'fixLabels',
-    afterDatasetsDraw(chart) {
-      const { ctx } = chart, meta = chart.getDatasetMeta(0);
-      ctx.save(); ctx.font = '12px ' + css('--font'); ctx.fillStyle = css('--text-2'); ctx.textBaseline = 'middle';
-      meta.data.forEach((bar, i) => ctx.fillText(`${NUM.format(Math.round(chart.data.datasets[0].data[i] * 10) / 10)} % · ${eur0(-kats[i][1])}`, bar.x + 6, bar.y));
-      ctx.restore();
-    },
-  };
+  const { arten, pm } = fixGrafik;
   zeichne('c-fix', {
-    type: 'bar',
-    data: { labels: kats.map(([k]) => k), datasets: [{ data: kats.map(([, v]) => (v / pm) * 100), backgroundColor: alpha(farbe, .85), hoverBackgroundColor: farbe, borderRadius: 4, barThickness: 16 }] },
-    options: o, plugins: [labels],
+    type: 'doughnut',
+    data: { labels: arten.map((g) => g.art), datasets: [{ data: arten.map((g) => g.summe / 100), backgroundColor: arten.map((g) => g.farbe), borderWidth: 0, spacing: 2, hoverOffset: 6 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '68%', animation: { duration: 250 },
+      plugins: {
+        legend: { display: false },
+        tooltip: { ...basis().plugins.tooltip, callbacks: { label: (it) => ` ${EUR0.format(it.raw)} · ${NUM.format(Math.round((it.raw * 100 / (pm / 100)) * 10) / 10)} %` } },
+      },
+      onClick: (_, el) => { if (el.length) fixGruppeUmschalten(arten[el[0].index].art, true); },
+      onHover: (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; },
+    },
   });
+}
+
+function fixGruppeUmschalten(art, nurAuf = false) {
+  if (fixOffen.has(art) && !nurAuf) fixOffen.delete(art); else fixOffen.add(art);
+  tabelle(parse(S.q));
+  document.querySelector(`.fix-kopfzeile[data-fixgruppe="${CSS.escape(art)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 // ======================================================================= Herunterladen
@@ -982,18 +1039,18 @@ function tabelleExport() {
   }
   if (S.tab === 'fix') {
     const alle = fixkostenGefiltert(parse(S.q));
-    const liste = fixSichtbar(alle).sort((a, b) => (a.gemeinsam - b.gemeinsam) || a.kat.localeCompare(b.kat, 'de') || (b.aktiv - a.aktiv) || b.proMonat - a.proMonat);
+    const liste = fixSichtbar(alle).sort((a, b) => (a.gemeinsam - b.gemeinsam) || fixArt(a).localeCompare(fixArt(b), 'de') || (b.aktiv - a.aktiv) || b.proMonat - a.proMonat);
     const pm = alle.filter((f) => f.aktiv && !f.gemeinsam).reduce((s, f) => s + f.proMonat, 0);
-    const spalten = [{ titel: 'Kategorie', typ: 'text', breite: 16 }, { titel: 'Empfänger', typ: 'text', breite: 30 }, { titel: 'Verwendungszweck', typ: 'text', breite: 36 },
+    const spalten = [{ titel: 'Art', typ: 'text', breite: 24 }, { titel: 'Bezeichnung', typ: 'text', breite: 26 }, { titel: 'Empfänger', typ: 'text', breite: 30 }, { titel: 'Verwendungszweck', typ: 'text', breite: 36 },
       { titel: 'Unterkategorie', typ: 'text', breite: 20 }, { titel: 'Konto', typ: 'text', breite: 20 }, { titel: 'Rhythmus', typ: 'text', breite: 14 }, { titel: 'Betrag', typ: 'euro' },
       { titel: 'pro Monat', typ: 'euro' }, { titel: 'pro Jahr', typ: 'euro' }, { titel: 'Anteil %', typ: 'zahl', breite: 9 }, { titel: 'Preisverlauf', typ: 'text', breite: 26 },
       { titel: 'seit', typ: 'datum' }, { titel: 'zuletzt', typ: 'datum' }, { titel: 'Zahlungen', typ: 'zahl', breite: 10 }, { titel: 'Status', typ: 'text', breite: 10 },
       { titel: 'Hinweis', typ: 'text', breite: 44 }];
     const r2 = (c) => Math.round(c) / 100;
-    const zeilen = liste.map((f) => [f.kat, f.name, f.zweck, f.ukat, D.konten[f.k].name, f.rh.name, r2(-f.betrag), r2(-f.proMonat), r2(-f.proJahr),
+    const zeilen = liste.map((f) => [fixArt(f), fixTitel(f, fixArt(f)), f.name, f.zweck, f.ukat, D.konten[f.k].name, f.rh.name, r2(-f.betrag), r2(-f.proMonat), r2(-f.proJahr),
       f.aktiv && pm && !f.gemeinsam ? Math.round((f.proMonat / pm) * 1000) / 10 : '', verlaufText(f), f.seit, f.zuletzt, f.n, f.aktiv ? 'läuft' : 'beendet',
       f.beitrag ? 'dein Beitrag aufs Gemeinschaftskonto' : f.gemeinsam ? 'vom Gemeinschaftskonto bezahlt – nicht in der Summe' : '']);
-    zeilen.push(['Summe laufend', '', '', '', '', '', '', r2(-pm), r2(-pm * 12), 100, '', '', '', '', '', '']);
+    zeilen.push(['Summe laufend', '', '', '', '', '', '', '', r2(-pm), r2(-pm * 12), 100, '', '', '', '', '', '']);
     return { name: dateiname('Fixkosten'), blatt: 'Fixkosten', spalten, zeilen };
   }
   if (S.tab === 'konten') {
