@@ -219,6 +219,12 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1
 .fix-bezug { width: fit-content; flex-wrap: wrap; }
 .fix-bezug small { color: var(--muted); font-size: 12px; margin-left: 2px; }
 .fix-bezug .an small { color: inherit; opacity: .85; }
+.eingang { padding: 16px 16px 8px; border-top: 1px solid var(--border-strong); margin-top: 8px; }
+.eingang h3 { margin: 0 0 4px; font-size: 15.5px; font-weight: 650; }
+.eingang h3 small { font-weight: 400; font-size: 12.5px; margin-left: 6px; }
+.eingang p { margin: 0 0 10px; max-width: 980px; }
+.eingang-t .ell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eingang-t tr.eingang-fehler td { background: rgba(224, 96, 46, .06); }
 .fix-verlauf { grid-column: 1 / -1; display: grid; gap: 6px; min-width: 0; border-top: 1px solid var(--border); padding-top: 12px; }
 .fix-verlauf-c { position: relative; height: 220px; width: 100%; min-width: 0; overflow: hidden; }
 .fix-leg.frei { cursor: default; }

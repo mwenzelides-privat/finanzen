@@ -704,7 +704,41 @@ function tabKonten() {
   h += `</tbody><tfoot><tr><td class="erste">Summe</td><td class="r sp-m">${NUM.format(m.reduce((s, x) => s + x.n, 0))}</td>
     <td class="r pos sp-m">${eur0(m.reduce((s, x) => s + x.ein, 0))}</td><td class="r neg sp-m">${eur0(m.reduce((s, x) => s + x.aus, 0))}</td>
     <td class="r">${eur(saldo)}</td><td class="klein muted sp-m">ohne Depot${ohne ? `, ohne ${m.filter((x) => x.st.c == null).map((x) => esc(x.k.name)).join(', ')}` : ''}</td></tr></tfoot></table></div>${ohneDaten}`;
-  return h;
+  return h + eingangHtml();
+}
+
+// Dateien im Eingang: was erkannt, übernommen und als doppelt erkannt wurde (je Datei zusammengefasst)
+function eingangHtml() {
+  const e = D.j.eingang;
+  const hilfe = `Neue Kontodaten – Finanzguru-Export, WISO/Buhl-Buchungsliste, Umsätze der Bank als CSV oder PDF, andere Excel-/CSV-Tabellen –
+    einfach in Google Drive in <b>10 Finanzen › Eingang</b> legen, auch vom Handy. Der PC prüft alle 30 Minuten, rechnet Doppeltes heraus
+    (auch wenn du denselben Zeitraum mehrmals schickst, z. B. Mitte und Ende des Monats) und aktualisiert die App. Übernommene Dateien wandern nach <i>Eingang › verarbeitet</i>.`;
+  if (!e?.dateien?.length) return `<div class="eingang"><h3>Dateien im Eingang</h3><p class="muted klein">${hilfe}</p></div>`;
+  const je = new Map();
+  for (const b of e.dateien) {
+    if (!je.has(b.datei)) je.set(b.datei, { ...b, konten: new Set(), stati: new Set(), ok: true, gelesen: 0, neu: 0, doppelt: 0, von: b.von, bis: b.bis });
+    const x = je.get(b.datei);
+    if (b.konto) x.konten.add(b.konto);
+    x.stati.add(b.status); x.ok = x.ok && b.ok !== false;
+    x.gelesen += b.gelesen || 0; x.neu += b.neu || 0; x.doppelt += b.doppelt || 0;
+    const iso = (t) => (t ? t.split('.').reverse().join('-') : '');
+    if (b.von && (!x.von || iso(b.von) < iso(x.von))) x.von = b.von;
+    if (b.bis && (!x.bis || iso(b.bis) > iso(x.bis))) x.bis = b.bis;
+  }
+  const liste = [...je.values()].sort((a, b) => (a.ok - b.ok) || (/verarbeitet/.test(a.datei) - /verarbeitet/.test(b.datei)) || a.datei.localeCompare(b.datei, 'de'));
+  const offen = liste.filter((x) => !x.ok).length;
+  const name = (d) => d.replace(/^Eingang[\\/](verarbeitet[\\/])?/, '');
+  const status = (x) => (x.stati.size > 2 ? [...x.stati].filter((t) => !/schon in der Liste/.test(t)).join(' · ') || 'alles schon in der Liste' : [...x.stati].join(' · '));
+  return `<div class="eingang"><h3>Dateien im Eingang <small class="muted">zuletzt verarbeitet ${dde(e.erstellt.slice(0, 10))}, ${e.erstellt.slice(11, 16)} Uhr${offen ? ` · <span class="neg">${offen} nicht übernommen</span>` : ''}</small></h3>
+    <p class="muted klein">${hilfe}</p>
+    <div class="tab-scroll"><table class="t fix eingang-t"><thead><tr><th class="erste">Datei</th><th class="sp-m" style="width:150px">erkannt als</th><th class="sp-m" style="width:170px">Konto</th>
+      <th class="sp-m" style="width:170px">Zeitraum</th><th class="r" style="width:72px" title="Buchungen in der Datei">gelesen</th><th class="r" style="width:60px" title="neu in die Liste übernommen">neu</th>
+      <th class="r sp-m" style="width:72px" title="schon in der Liste – nicht doppelt gezählt">doppelt</th></tr></thead><tbody>
+    ${liste.map((x) => `<tr class="${x.ok ? '' : 'eingang-fehler'}"><td class="erste" title="${esc(x.datei)}"><div class="ell">${esc(name(x.datei))}</div><div class="klein ${x.ok ? 'muted' : 'neg'} ell" title="${esc(status(x))}">${esc(status(x))}</div></td>
+      <td class="sp-m klein">${esc(x.art)}</td><td class="sp-m klein ell" title="${esc([...x.konten].join(', '))}">${esc([...x.konten].join(', ') || '–')}</td>
+      <td class="sp-m klein">${x.von ? `${esc(x.von)} – ${esc(x.bis)}` : '–'}</td><td class="r">${NUM.format(x.gelesen)}</td>
+      <td class="r ${x.neu ? 'pos' : 'muted'}"><b>${NUM.format(x.neu)}</b></td><td class="r sp-m muted">${NUM.format(x.doppelt)}</td></tr>`).join('')}
+    </tbody></table></div></div>`;
 }
 
 function tabelle(conds) {
