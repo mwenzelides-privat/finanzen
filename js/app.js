@@ -418,11 +418,13 @@ function verlauf() {
     else setze({ jahr: String(k) });
   };
   o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
-  zeichne('c-verlauf', { type: 'bar', data: { labels: keys.map(label), datasets: ds }, options: o });
+  o.layout = { padding: { top: 14 } };
+  zeichne('c-verlauf', { type: 'bar', data: { labels: keys.map(label), datasets: ds }, options: o, plugins: [saeulenWerteMit({ groesse: 10 })] });
 }
 
-// Werte an die Balkenenden schreiben (ruhiger als eine Achse)
-const wertLabels = {
+// Werte an die Balkenenden schreiben (ruhiger als eine Achse). Die Formatierung steckt im Plugin selbst – nicht in
+// chart.options, denn dort hinterlegte Funktionen ruft Chart.js mit einem eigenen Kontext auf.
+const wertLabelsMit = (fmt) => ({
   id: 'wertLabels',
   afterDatasetsDraw(chart) {
     const { ctx } = chart, meta = chart.getDatasetMeta(0);
@@ -430,11 +432,42 @@ const wertLabels = {
     ctx.font = '12px ' + css('--font');
     ctx.fillStyle = css('--text-2');
     ctx.textBaseline = 'middle';
-    const fmt = chart.options.plugins?.wertFormat || ((v) => EUR0.format(v));
     meta.data.forEach((bar, i) => ctx.fillText(fmt(chart.data.datasets[0].data[i], i), bar.x + 6, bar.y));
     ctx.restore();
   },
-};
+});
+const wertLabels = wertLabelsMit((v) => EUR0.format(v));
+
+// Werte an senkrechten Säulen, damit man sie ohne Mauszeiger sieht (kurz: „8,4 T“ = 8.400 €)
+const kurzWert = (v) => (Math.abs(v) >= 1000 ? `${(v / 1000).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} T` : NUM.format(Math.round(v)));
+const saeulenWerteMit = (opt) => ({
+  id: 'saeulenWerte',
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart;
+    ctx.save();
+    ctx.font = `600 ${opt.groesse || 10.5}px ${css('--font')}`;
+    ctx.textAlign = 'center';
+    chart.data.datasets.forEach((ds, di) => {
+      const meta = chart.getDatasetMeta(di);
+      if (meta.hidden) return;
+      const linie = meta.type === 'line';
+      if (linie && !opt.linie) return;
+      meta.data.forEach((el, i) => {
+        const v = ds.data[i];
+        if (v == null || (!linie && (!v || el.width < 15))) return;
+        const neg = v < 0;
+        ctx.fillStyle = linie ? ds.borderColor : css('--text-2');
+        ctx.textBaseline = neg && !linie ? 'top' : 'bottom';
+        const y = linie ? el.y - 6 : neg ? Math.max(el.y, el.base) + 3 : Math.min(el.y, el.base) - 3;
+        const text = linie ? opt.linie(v) : (opt.fmt || kurzWert)(v);
+        ctx.lineWidth = 3; ctx.strokeStyle = css('--surface'); ctx.lineJoin = 'round';
+        ctx.strokeText(text, el.x, y);   // heller Rand: Zahlen bleiben auch über Linien lesbar
+        ctx.fillText(text, el.x, y);
+      });
+    });
+    ctx.restore();
+  },
+});
 
 // Mehrere Jahre: je Kategorie ein Balken pro Jahr
 function kategorienVergleich(einMode, unter) {
@@ -497,7 +530,7 @@ function kategorien() {
   const o = basis();
   o.indexAxis = 'y';
   o.layout = { padding: { right: 124 } };
-  o.plugins.wertFormat = (v) => `${EUR0.format(v)} · ${summe ? Math.round((v * 10000) / summe) : 0} %`;
+  const katFmt = (v) => `${EUR0.format(v)} · ${summe ? Math.round((v * 10000) / summe) : 0} %`;
   const vjKat = new Map();
   if (V) for (const r of V.rows) {
     if (r.art === 'Umbuchung' || r.art === 'Sparen') continue;
@@ -524,7 +557,7 @@ function kategorien() {
   zeichne('c-kat', {
     type: 'bar',
     data: { labels: list.map(([k]) => schoen(k)), datasets: [{ data: list.map(([, v]) => v / 100), backgroundColor: list.map(([k]) => alpha(c, k === S.ukat || !S.ukat ? .85 : .35)), hoverBackgroundColor: c, borderRadius: 4, barThickness: 18 }] },
-    options: o, plugins: [wertLabels],
+    options: o, plugins: [wertLabelsMit(katFmt)],
   });
 }
 
@@ -585,7 +618,8 @@ function ergebnis() {
     if (jahr) setze({ jahr: String(jahr), monat: S.monat === String(k) ? '' : String(k) }); else setze({ jahr: String(k) });
   };
   o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
-  zeichne('c-ergebnis', { type: 'bar', data: { labels: keys.map((_, i) => (jahr ? MON[keys[i] - 1] : String(keys[i]))), datasets: ds }, options: o });
+  o.layout = { padding: { top: 14, bottom: 4 } };
+  zeichne('c-ergebnis', { type: 'bar', data: { labels: keys.map((_, i) => (jahr ? MON[keys[i] - 1] : String(keys[i]))), datasets: ds }, options: o, plugins: [saeulenWerteMit({ groesse: 10.5 })] });
 }
 
 // Die zehn größten Empfänger (bzw. Einnahmequellen) im gewählten Zeitraum
@@ -609,7 +643,7 @@ function topEmpfaenger() {
   const o = basis();
   o.indexAxis = 'y';
   o.layout = { padding: { right: 124 } };
-  o.plugins.wertFormat = (v) => `${EUR0.format(v)} · ${gesamt ? Math.round((v * 10000) / gesamt) : 0} %`;
+  const topFmt = (v) => `${EUR0.format(v)} · ${gesamt ? Math.round((v * 10000) / gesamt) : 0} %`;
   o.plugins.tooltip.callbacks = { title: (it) => list[it[0].dataIndex].name, label: (it) => ` ${EUR0.format(it.raw)} · ${NUM.format(list[it.dataIndex].n)} Buchungen · ${gesamt ? Math.round((it.raw * 10000) / gesamt) : 0} % aller ${einMode ? 'Einnahmen' : 'Ausgaben'}` };
   o.scales = {
     x: { display: false, beginAtZero: true },
@@ -617,7 +651,7 @@ function topEmpfaenger() {
   };
   o.onClick = (_, el) => { if (el.length) setze({ q: `"${list[el[0].index].name}"`, tab: 'buchungen' }); };
   o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
-  zeichne('c-top', { type: 'bar', data: { labels: list.map((e) => e.name), datasets: [{ data: list.map((e) => e.c / 100), backgroundColor: alpha(c, .78), hoverBackgroundColor: c, borderRadius: 4, barThickness: 18 }] }, options: o, plugins: [wertLabels] });
+  zeichne('c-top', { type: 'bar', data: { labels: list.map((e) => e.name), datasets: [{ data: list.map((e) => e.c / 100), backgroundColor: alpha(c, .78), hoverBackgroundColor: c, borderRadius: 4, barThickness: 18 }] }, options: o, plugins: [wertLabelsMit(topFmt)] });
 }
 
 // ======================================================================= Durchschnitte und Quoten
@@ -771,9 +805,10 @@ function jahresschnitt() {
   };
   o.onClick = (_, el) => { if (el.length) setze({ jahr: String(jahre[el[0].index]), monat: '' }); };
   o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
-  zeichne('c-jahre', { type: 'bar', data: { labels: jahre.map(String), datasets: [
-    { label: 'Ø Einnahmen', data: w.map((x) => (x.n ? x.ein / x.n / 100 : 0)), backgroundColor: jahre.map((_, i) => alpha(cE, an(i) ? .85 : .3)), hoverBackgroundColor: cE, borderRadius: 4, maxBarThickness: 26, order: 2 },
-    { label: 'Ø Ausgaben', data: w.map((x) => (x.n ? -x.aus / x.n / 100 : 0)), backgroundColor: jahre.map((_, i) => alpha(cA, an(i) ? .85 : .3)), hoverBackgroundColor: cA, borderRadius: 4, maxBarThickness: 26, order: 2 },
+  o.layout = { padding: { top: 16 } };
+  zeichne('c-jahre', { plugins: [saeulenWerteMit({ groesse: 10, linie: (v) => `${NUM.format(Math.round(v))} %` })], type: 'bar', data: { labels: jahre.map(String), datasets: [
+    { label: 'Ø Einnahmen', data: w.map((x) => (x.n ? x.ein / x.n / 100 : 0)), backgroundColor: jahre.map((_, i) => alpha(cE, an(i) ? .9 : .45)), hoverBackgroundColor: cE, borderRadius: 4, maxBarThickness: 26, order: 2 },
+    { label: 'Ø Ausgaben', data: w.map((x) => (x.n ? -x.aus / x.n / 100 : 0)), backgroundColor: jahre.map((_, i) => alpha(cA, an(i) ? .9 : .45)), hoverBackgroundColor: cA, borderRadius: 4, maxBarThickness: 26, order: 2 },
     { type: 'line', label: 'Sparquote', yAxisID: 'q', data: w.map((x) => (x.ein ? Math.round((x.erg / x.ein) * 1000) / 10 : null)), borderColor: cL, backgroundColor: cL, borderWidth: 2, pointRadius: 3, tension: 0.3, order: 1 },
   ] }, options: o });
 }
@@ -1099,7 +1134,7 @@ const TITEL = {
   steuer: () => ['Steuer', 'steuerlich relevante Buchungen je Steuerjahr'],
 };
 function tabelle(conds) {
-  if (S.tab === 'start') return;
+  if (S.tab === 'start' || S.tab === 'kennzahlen') return;
   const el = $('#tab-inhalt');
   const [ti, hi] = (TITEL[S.tab] || TITEL.buchungen)();
   $('#t-tabelle').textContent = ti; $('#h-tabelle').textContent = hi;
@@ -1758,12 +1793,16 @@ function aktualisieren(hist = 'ersetzen') {
   document.querySelectorAll('#tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === t)));
   $('#tab-n').textContent = NUM.format(F.length);
   $('#werkzeug').hidden = t === 'steuer';
-  $('#kpis').hidden = !['start', 'buchungen', 'uebersicht'].includes(t);
+  $('#kpis').hidden = !['start', 'kennzahlen', 'buchungen', 'uebersicht'].includes(t);
   $('#seite-start').hidden = t !== 'start';
-  $('#tabelle-card').hidden = t === 'start';
+  $('#seite-kennzahlen').hidden = t !== 'kennzahlen';
+  $('#tabelle-card').hidden = t === 'start' || t === 'kennzahlen';
   filterZeigen(conds);
-  if (!$('#kpis').hidden) kennzahlen(conds);
-  if (t === 'start') { const x = durchschnitte(); verlauf(); kategorien(); wohinDasGeldGeht(x); jahresschnitt(); ergebnis(); topEmpfaenger(); katSchnitt(x); }
+  // jede Grafik für sich: ein Fehler in einer soll die anderen nicht leer lassen
+  const sicher = (f) => { try { return f(); } catch (e) { console.error(e); return null; } };
+  if (!$('#kpis').hidden) sicher(() => kennzahlen(conds));
+  if (t === 'start') { sicher(verlauf); sicher(kategorien); }
+  else if (t === 'kennzahlen') { const x = sicher(durchschnitte); sicher(() => wohinDasGeldGeht(x)); sicher(jahresschnitt); sicher(ergebnis); sicher(topEmpfaenger); sicher(() => katSchnitt(x)); }
   else tabelle(conds);
 }
 
@@ -1791,7 +1830,7 @@ function hashLesen() {
   if (/^\d{4}-\d{2}-\d{2}$/.test(p.get('stichtag') || '')) S.stichtag = p.get('stichtag');
   if (['aus', 'ein'].includes(p.get('art'))) S.art = p.get('art');
   S.umb = p.get('umb') === '1';
-  if (['buchungen', 'uebersicht', 'konten', 'fix', 'steuer'].includes(p.get('tab'))) S.tab = p.get('tab');
+  if (['kennzahlen', 'buchungen', 'uebersicht', 'konten', 'fix', 'steuer'].includes(p.get('tab'))) S.tab = p.get('tab');
 }
 
 function standZeigen() {

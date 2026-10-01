@@ -697,3 +697,6 @@ main { max-width: 1600px; padding: 18px 20px 48px; }
 @media (max-width: 1280px) { .schnitt { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 12px; } .sk:nth-child(4) { border-left: 0; } }
 @media (max-width: 640px) { .schnitt { grid-template-columns: repeat(2, minmax(0, 1fr)); } .sk:nth-child(odd) { border-left: 0; } .sk:nth-child(4) { border-left: 1px solid var(--border); } .sw { font-size: 19px; } }
 .wohin-skala span { white-space: nowrap; }
+
+@media (max-width: 900px) { .nav button { font-size: 10.5px; padding: 6px 1px; } .nav button svg { width: 20px; height: 20px; } }
+@media (max-width: 380px) { .nav button span:not(.n) { font-size: 9.5px; } }
