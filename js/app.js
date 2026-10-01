@@ -1596,8 +1596,8 @@ function standZeigen() {
   const erstellt = j.erstellt ? `${dde(j.erstellt.slice(0, 10))}, ${j.erstellt.slice(11, 16)} Uhr` : '';
   $('#fuss').textContent = `Daten ${herkunft}, erstellt am ${erstellt}. Neue Kontodaten einfach in Google Drive › 10 Finanzen › Eingang legen – der PC übernimmt sie automatisch; danach hier ↻.`;
   $('#menu-quelle').textContent = `Aktuell: ${NUM.format(D.rows.length)} Buchungen ${herkunft}, erstellt am ${erstellt}.`;
-  $('#btn-neu').hidden = !['drive', 'pc'].includes(quelle.quelle);
-  $('#btn-neu').title = quelle.quelle === 'pc' ? 'Neueste Daten aus der verknüpften Datei laden' : 'Neueste Daten aus Google Drive laden';
+  $('#btn-neu').hidden = false;
+  $('#btn-neu').title = 'Neue Dateien aus dem Eingang (Google Drive › 10 Finanzen › Eingang) einlesen und die neuesten Daten laden';
   if ($('#m-pc-tipp')) $('#m-pc-tipp').hidden = !Q.pcMoeglich() || quelle.quelle === 'pc';
   if (quelle.quelle === 'pc') Q.pcErlaubnis?.().then((z) => {
     const t = { granted: 'Zugriff dauerhaft erlaubt – die App lädt neue Daten beim Öffnen automatisch.', prompt: 'Der Browser fragt beim Öffnen nach Erlaubnis („Bei jedem Besuch zulassen“ wählen).', denied: 'Zugriff wurde verweigert – Datei neu verknüpfen.' }[z];
@@ -1653,6 +1653,96 @@ async function pcHolen(interaktiv) {
     if (e.erlaubnis) { btn.classList.add('hinweis'); btn.title = 'Zugriff auf die Datei erlauben und neueste Daten laden'; erlaubnisBalken(true); }
     else if (interaktiv) toast(e.message);
   } finally { btn.classList.remove('dreht'); }
+}
+
+// ======================================================================= Daten einlesen (Knopf oben)
+// Am PC übernimmt der Einlese-Dienst (einlese_dienst.py, nur auf diesem PC erreichbar) sofort neue Dateien aus dem
+// Eingang; danach lädt die App die neuen Daten. Ohne Dienst (Handy, anderer PC) werden nur die neuesten Daten geladen –
+// den Eingang verarbeitet dann der PC automatisch alle 30 Minuten.
+const DIENST = 'http://127.0.0.1:48233';
+const warte = (ms) => new Promise((r) => setTimeout(r, ms));
+async function dienst(pfad, methode = 'GET') {
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 3000);
+  try {
+    const r = await fetch(DIENST + pfad, { method: methode, headers: { 'X-Finanzen': '1' }, signal: ctl.signal, cache: 'no-store' });
+    if (!r.ok) throw new Error(String(r.status));
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+
+// neueste Daten aus der jeweiligen Quelle laden (ohne eigene Meldungen); true = es gab neue Daten
+async function datenNeuLaden(fragen) {
+  try {
+    if (quelle?.quelle === 'pc') { const neu = await Q.pcLaden(quelle, fragen); erlaubnisBalken(false); if (neu) anzeigen(neu); return !!neu; }
+    if (quelle?.quelle === 'drive') {
+      if (!Q.hatToken()) { if (!fragen) return false; await Q.anmelden(); }
+      const neu = await Q.driveLaden(quelle); if (neu) anzeigen(neu); return !!neu;
+    }
+    if (quelle?.quelle === 'lokal') { const neu = await Q.lokalLaden(); if (neu && neu.text !== quelle.text) { anzeigen(neu); return true; } }
+  } catch (e) { if (e.erlaubnis) erlaubnisBalken(true); else if (fragen) toast(e.message); }
+  return false;
+}
+
+let einlesenLaeuft = false;
+async function einlesen() {
+  if (einlesenLaeuft) return;
+  const btn = $('#btn-neu'), txt = btn.querySelector('span');
+  einlesenLaeuft = true; btn.classList.add('dreht'); btn.disabled = true;
+  try {
+    // Zugriff auf die verknüpfte Datei jetzt erfragen, solange der Klick noch „frisch“ ist
+    if (quelle?.quelle === 'pc') await datenNeuLaden(true);
+    let st = null;
+    try { st = await dienst('/einlesen', 'POST'); } catch { st = null; }
+    if (!st) {
+      if (quelle?.quelle !== 'pc') await datenNeuLaden(true);
+      return einlesenMeldung({ ohneDienst: true });
+    }
+    const start = Date.now(), seit = st.gestartet;
+    txt.textContent = 'Wird eingelesen …';
+    while (st.laeuft && Date.now() - start < 20 * 60e3) {
+      await warte(2500);
+      try { st = await dienst('/status'); } catch { /* weiter warten */ }
+    }
+    const e = st.letztes && (!seit || st.letztes.zeit >= seit.slice(0, 19)) ? st.letztes : null;
+    let neu = await datenNeuLaden(false);
+    // Google Drive braucht nach dem Aufbau etwas, bis die neue Datei hochgeladen ist
+    for (let i = 0; !neu && quelle?.quelle === 'drive' && e?.status === 'aufgebaut' && i < 4; i++) { await warte(8000); neu = await datenNeuLaden(false); }
+    einlesenMeldung({ e, automatisch: st.automatisch });
+  } finally {
+    einlesenLaeuft = false; btn.classList.remove('dreht'); btn.disabled = false; txt.textContent = 'Daten einlesen';
+  }
+}
+
+function einlesenMeldung({ e, ohneDienst, automatisch }) {
+  let dlg = $('#dlg-einlesen');
+  if (!dlg) { dlg = Object.assign(document.createElement('dialog'), { id: 'dlg-einlesen', className: 'dlg' }); document.body.append(dlg); }
+  const stand = D?.j?.erstellt ? `${dde(D.j.erstellt.slice(0, 10))}, ${D.j.erstellt.slice(11, 16)} Uhr` : '';
+  let h;
+  if (ohneDienst) {
+    const pc = matchMedia('(pointer: fine)').matches && !/android|iphone|ipad/i.test(navigator.userAgent);
+    h = `<h2>Neueste Daten geladen</h2><p>Datenstand: <b>${stand}</b>.</p>
+      <p class="muted">Neue Dateien im Eingang (Google Drive › 10 Finanzen › Eingang) übernimmt dein PC automatisch – bei der Anmeldung und alle 30 Minuten, solange er an ist. Am PC geht es mit diesem Knopf auch sofort.</p>
+      ${pc ? '<p class="klein muted">Hinweis: Auf diesem PC antwortet der Einlese-Dienst gerade nicht. Er startet bei der nächsten Windows-Anmeldung automatisch. Fragt der Browser, ob die Seite auf Geräte im lokalen Netzwerk zugreifen darf, bitte „Zulassen“ wählen.</p>' : ''}`;
+  } else if (!e) {
+    h = `<h2>Eingang geprüft</h2><p>${automatisch ? 'Der automatische Durchgang lief gerade und ist fertig.' : 'Fertig.'} Datenstand: <b>${stand}</b>.</p>`;
+  } else if (e.status === 'keine_aenderung') {
+    h = `<h2>Keine neuen Dateien</h2><p>Im Eingang lag nichts Neues – die Daten sind aktuell (Stand <b>${stand}</b>).</p>
+      <p class="muted">Neue Kontodaten einfach in Google Drive › 10 Finanzen › Eingang legen und dann noch einmal „Daten einlesen“.</p>`;
+  } else if (e.status === 'fehler') {
+    h = `<h2>Einlesen hat nicht geklappt</h2><p class="neg">${esc(e.fehler || 'Unbekannter Fehler')}</p><p class="muted">Die bisherigen Daten bleiben unverändert. Der PC versucht es in 30 Minuten noch einmal.</p>`;
+  } else {
+    // neue Buchungen insgesamt = Liste nachher − vorher (die Zahlen je Datei zählen, was nur diese Datei enthält)
+    const neuGes = e.buchungen != null && e.vorher != null ? Math.max(0, e.buchungen - e.vorher) : e.uebernommen.reduce((t, x) => t + (x.neu || 0), 0);
+    h = `<h2>Daten eingelesen</h2>
+      <p>${e.uebernommen.length ? `<b>${NUM.format(e.uebernommen.length)} ${e.uebernommen.length === 1 ? 'Datei' : 'Dateien'}</b> übernommen, <b>${NUM.format(neuGes)} neue Buchungen</b> – Doppeltes herausgerechnet.` : 'Die Daten wurden neu aufgebaut.'}
+        ${e.buchungen ? ` Jetzt ${NUM.format(e.buchungen)} Buchungen insgesamt.` : ''}</p>
+      ${e.uebernommen.length ? `<table class="hilfe-tab">${e.uebernommen.map((x) => `<tr><td>${esc(x.datei)}<div class="klein muted">${esc(x.art)}</div></td><td class="r"><b class="${x.neu ? 'pos' : 'muted'}">${NUM.format(x.neu || 0)} neu</b><div class="klein muted">${NUM.format(x.doppelt || 0)} schon vorhanden</div></td></tr>`).join('')}</table>` : ''}
+      ${e.nicht.length ? `<p class="neg"><b>Nicht übernommen:</b></p><table class="hilfe-tab">${e.nicht.map((x) => `<tr><td>${esc(x.datei)}</td><td class="klein">${esc(x.status)}</td></tr>`).join('')}</table>` : ''}
+      <p class="klein muted">Übernommene Dateien liegen jetzt in Eingang › verarbeitet. Datenstand: ${stand}.</p>`;
+  }
+  dlg.innerHTML = `${h}<form method="dialog" class="dlg-knoepfe">${D ? '<button class="btn" value="details" id="einlesen-details">Alle Dateien im Eingang</button>' : ''}<button class="btn primary" value="ok">OK</button></form>`;
+  dlg.querySelector('#einlesen-details')?.addEventListener('click', () => setTimeout(() => setze({ tab: 'konten' }), 0));
+  if (!dlg.open) dlg.showModal();
 }
 
 async function driveHolen(interaktiv) {
@@ -1738,7 +1828,7 @@ function events() {
   document.querySelectorAll('[data-bild]').forEach((b) => b.onclick = () => bildSpeichern(b.dataset.bild));
 
   $('#btn-menu').onclick = () => $('#dlg-menu').showModal();
-  $('#btn-neu').onclick = () => (quelle?.quelle === 'pc' ? pcHolen(true) : driveHolen(true).catch((e) => toast(e.message)));
+  $('#btn-neu').onclick = () => einlesen();
   const pcKnopf = async (dialog) => {
     try { anzeigen(await Q.pcVerknuepfen()); if (dialog) $('#dlg-menu').close(); toast('Datei verknüpft – die App lädt sie ab jetzt automatisch.'); }
     catch (e) { if (e.name !== 'AbortError') (dialog ? toast : startZeigen)(e.message); }

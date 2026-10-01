@@ -652,3 +652,14 @@ main { max-width: 1600px; padding: 18px 20px 48px; }
   .filter .seg { flex: 1 1 100%; }
   .filter .seg button { flex: 1; }
 }
+
+/* Knopf „Daten einlesen“ */
+.einlesen-knopf { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font-weight: 600; font-size: 13.5px; white-space: nowrap; }
+.einlesen-knopf:hover { border-color: var(--accent); color: var(--accent); }
+.einlesen-knopf svg { width: 17px; height: 17px; }
+.einlesen-knopf.dreht svg { animation: dreh 1s linear infinite; }
+.einlesen-knopf[disabled] { cursor: progress; color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.einlesen-knopf.hinweis { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.dlg-knoepfe { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.hilfe-tab .r { text-align: right; white-space: nowrap; }
+@media (max-width: 640px) { .einlesen-knopf span { display: none; } .einlesen-knopf { padding: 0 9px; } }
