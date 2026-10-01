@@ -21,6 +21,14 @@
 <body>
   <header class="top">
     <div class="brand"><img src="icons/icon.svg" alt="" width="26" height="26"><span>Finanzen</span></div>
+    <nav class="nav" id="tabs" role="tablist" aria-label="Bereiche" hidden>
+      <button role="tab" data-tab="start"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/></svg><span>Übersicht</span></button>
+      <button role="tab" data-tab="buchungen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r=".9"/><circle cx="4" cy="12" r=".9"/><circle cx="4" cy="18" r=".9"/></svg><span>Buchungen</span><span class="n" id="tab-n"></span></button>
+      <button role="tab" data-tab="uebersicht"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9h9"/><path d="M20.5 15.5A9 9 0 1 1 8.5 3.7"/></svg><span>Kategorien</span></button>
+      <button role="tab" data-tab="fix"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 2.5 20.5 6 17 9.5"/><path d="M3.5 11V9.5A3.5 3.5 0 0 1 7 6h13.5"/><path d="M7 21.5 3.5 18 7 14.5"/><path d="M20.5 13v1.5A3.5 3.5 0 0 1 17 18H3.5"/></svg><span>Fixkosten</span></button>
+      <button role="tab" data-tab="konten"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9.5 12 4l9 5.5"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8"/><path d="M3 20.5h18"/></svg><span>Konten</span></button>
+      <button role="tab" data-tab="steuer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2.5h12v19l-3-2-3 2-3-2-3 2z"/><path d="m9 14 6-6"/><circle cx="9.5" cy="8.5" r=".8"/><circle cx="14.5" cy="13.5" r=".8"/></svg><span>Steuer</span></button>
+    </nav>
     <div class="stand" id="stand"></div>
     <button class="icon-btn" id="btn-neu" title="Neueste Daten aus Google Drive laden" hidden>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
@@ -44,6 +52,7 @@
     </section>
 
     <section id="dash" hidden>
+      <div class="werkzeug" id="werkzeug">
       <div class="suche">
         <svg class="lupe" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
         <input id="q" type="search" autocomplete="off" spellcheck="false" enterkeyhint="search"
@@ -53,23 +62,32 @@
       </div>
 
       <div class="filter">
-        <select id="f-jahr" aria-label="Jahr"></select>
-        <select id="f-monat" aria-label="Monat"></select>
+        <div class="auswahl" id="f-jahr-box">
+          <button class="auswahl-knopf" id="f-jahr" aria-haspopup="true" aria-expanded="false" title="Jahr wählen – mehrere anhaken zum Vergleichen">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+            <span id="f-jahr-text">Alle Jahre</span><svg class="pfeil-unten" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+          <div class="auswahl-liste" id="f-jahr-liste" role="dialog" aria-label="Jahre" hidden></div>
+        </div>
         <select id="f-konto" aria-label="Konto"></select>
         <select id="f-kat" aria-label="Kategorie"></select>
         <div class="seg" id="f-art" role="group" aria-label="Art">
           <button data-v="alle">Alle</button><button data-v="aus">Ausgaben</button><button data-v="ein">Einnahmen</button>
         </div>
-        <label class="chk" title="Überträge zwischen deinen eigenen Konten mit anzeigen"><input type="checkbox" id="f-umb"> Umbuchungen</label>
-        <button class="btn sm" id="f-zurueck" title="Letzten Filterschritt rückgängig machen (Alt + ←)" hidden>
+        <label class="schalter" title="Umbuchungen sind Überweisungen zwischen deinen eigenen Konten (z. B. Hauptkonto → Gemeinschaftskonto oder Sparkonto). Sie sind weder Einnahme noch Ausgabe und deshalb normalerweise ausgeblendet. Einschalten, um sie in Liste und Summen zu sehen.">
+          <input type="checkbox" id="f-umb"><span class="spur" aria-hidden="true"></span><span>Umbuchungen zeigen</span>
+          <span class="info" aria-hidden="true">i</span></label>
+        <span class="luecke"></span>
+        <button class="btn sm" id="f-zurueck" title="Eine Ansicht zurück (auch: Zurück-Taste der Maus oder Alt + ←)" hidden>
           <svg viewBox="0 0 24 24" aria-hidden="true" width="15" height="15"><path d="M15 18l-6-6 6-6"/></svg>Zurück</button>
         <button class="link" id="f-reset" hidden>Alles zurücksetzen</button>
       </div>
-      <div class="jahre" id="jahre" role="group" aria-label="Jahr wählen"></div>
+      <div class="jahre monate" id="monate" role="group" aria-label="Monate wählen"></div>
       <div class="chips" id="chips"></div>
+      </div>
 
       <div class="kpis" id="kpis"></div>
 
+      <div class="seite" id="seite-start">
       <div class="grid2">
         <div class="card">
           <div class="card-h"><h2 id="t-verlauf">Verlauf</h2><span class="hint" id="h-verlauf"></span>
@@ -82,16 +100,23 @@
           <div class="chart" id="chart-kat"><canvas id="c-kat"></canvas></div>
         </div>
       </div>
+      <div class="grid2 zwei">
+        <div class="card">
+          <div class="card-h"><h2 id="t-ergebnis">Überschuss / Fehlbetrag</h2><span class="hint" id="h-ergebnis"></span>
+            <button class="icon-btn sm" data-bild="c-ergebnis" title="Grafik als Bild speichern"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg></button></div>
+          <div class="chart"><canvas id="c-ergebnis"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-h"><h2 id="t-top">Größte Empfänger</h2><span class="hint" id="h-top"></span>
+            <button class="icon-btn sm" data-bild="c-top" title="Grafik als Bild speichern"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg></button></div>
+          <div class="chart" id="chart-top"><canvas id="c-top"></canvas></div>
+        </div>
+      </div>
+      </div>
 
-      <div class="card tabelle-card">
+      <div class="card tabelle-card" id="tabelle-card">
         <div class="card-h">
-          <div class="tabs" role="tablist" id="tabs">
-            <button role="tab" data-tab="buchungen">Buchungen</button>
-            <button role="tab" data-tab="uebersicht">Kategorien</button>
-            <button role="tab" data-tab="fix">Fixkosten</button>
-            <button role="tab" data-tab="konten">Konten</button>
-            <button role="tab" data-tab="steuer">Steuer</button>
-          </div>
+          <h2 id="t-tabelle"></h2><span class="hint" id="h-tabelle"></span>
           <div class="dl">
             <button class="btn sm" id="dl-xlsx" title="Diese Tabelle als Excel-Datei herunterladen">Excel</button>
             <button class="btn sm" id="dl-csv" title="Diese Tabelle als CSV herunterladen">CSV</button>
@@ -115,7 +140,8 @@
       <tr><td><code>49,99</code></td><td>genau dieser Betrag</td></tr>
       <tr><td><code>&gt;500</code> <code>&lt;20</code> <code>100-250</code></td><td>Betragsbereich (egal ob Ein- oder Ausgabe)</td></tr>
       <tr><td><code>2024</code> <code>2019-2021</code></td><td>Jahr oder Jahre</td></tr>
-      <tr><td>Jahresknöpfe</td><td>mehrere anklicken = Vergleich · Umschalt + Klick = ganzer Zeitraum</td></tr>
+      <tr><td>Zeitraum-Menü</td><td>mehrere Jahre anhaken = Vergleich</td></tr>
+      <tr><td>Monatsknöpfe</td><td>mehrere anklicken möglich · Umschalt + Klick = ganzer Zeitraum (z. B. Jan–Mär)</td></tr>
       <tr><td><code>03.2025</code> <code>12.03.2025</code></td><td>Monat oder Tag</td></tr>
     </table>
     <p class="muted">Zum Ausprobieren anklicken:</p>

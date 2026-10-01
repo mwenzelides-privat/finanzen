@@ -1,4 +1,4 @@
-// Finanzen – Dashboard: eine Suche, zwei Grafiken, drei Tabellen. Alles reagiert auf Suche und Filter.
+// Finanzen – Dashboard: Übersicht mit Grafiken, Buchungen, Kategorien, Fixkosten, Konten, Steuer. Alles reagiert auf Suche und Filter.
 import { norm, parse, matcher, highlightWords } from './suche.js';
 import * as Q from './quelle.js';
 import { alsExcel, alsCsv, herunterladen } from './export.js';
@@ -22,7 +22,7 @@ const LOKAL = ['localhost', '127.0.0.1'].includes(location.hostname);
 
 let D = null;          // aufbereitete Daten
 let quelle = null;     // gespeicherte Fassung (Text + Herkunft)
-const S0 = { q: '', jahr: '', monat: '', konto: '', kat: '', ukat: '', art: 'alle', umb: false, tab: 'buchungen', sort: 'datum', dir: -1, stichtag: '' };
+const S0 = { q: '', jahr: '', monat: '', konto: '', kat: '', ukat: '', art: 'alle', umb: false, tab: 'start', sort: 'datum', dir: -1, stichtag: '' };
 let S = { ...S0 };
 let F = [];            // gefilterte Buchungen (nach Datum aufsteigend)
 let limit = 150;
@@ -153,24 +153,10 @@ function monatsSpanne(conds) {
 // ======================================================================= Anzeige: Filterleiste
 function selectsFuellen() {
   const opt = (v, t) => `<option value="${esc(v)}">${esc(t)}</option>`;
-  $('#f-jahr').innerHTML = opt('', 'Alle Jahre') + [...D.jahre].reverse().map((y) => opt(y, y)).join('');
-  $('#jahre').innerHTML = `<button data-j="">Alle</button>` + [...D.jahre].reverse().map((y) => `<button data-j="${y}">${y}</button>`).join('');
-  let letzter = 0;
-  $('#jahre').title = 'Klick: Jahr an/aus – mehrere Jahre werden verglichen. Umschalt + Klick: ganzer Zeitraum.';
-  $('#jahre').querySelectorAll('button').forEach((b) => b.onclick = (e) => {
-    const j = +b.dataset.j;
-    if (!j) { letzter = 0; return setze({ jahr: '' }); }
-    let w = jahreWahl();
-    if (e.shiftKey && letzter) { const a = Math.min(j, letzter), z = Math.max(j, letzter); w = D.jahre.filter((y) => y >= a && y <= z); }
-    else w = w.includes(j) ? w.filter((y) => y !== j) : [...w, j];
-    letzter = j;
-    setze({ jahr: w.sort((x, y) => x - y).join(',') });
-  });
-  $('#f-monat').innerHTML = opt('', 'Alle Monate') + MONAT.map((m, i) => opt(i + 1, m)).join('');
-  // Monatsleiste unter den Jahren: Klick = Monat an/aus, Umschalt + Klick = Zeitraum (z. B. Jan–Mär)
-  let mBox = $('#monate');
-  if (!mBox) { mBox = Object.assign(document.createElement('div'), { id: 'monate', className: 'jahre monate' }); mBox.setAttribute('role', 'group'); $('#jahre').after(mBox); }
-  mBox.innerHTML = `<button data-m="">Alle</button>` + MON.map((m, i) => `<button data-m="${i + 1}">${m}</button>`).join('');
+  jahrListeBauen();
+  // Monatsleiste: Klick = Monat an/aus, Umschalt + Klick = Zeitraum (z. B. Jan–Mär)
+  const mBox = $('#monate');
+  mBox.innerHTML = `<button data-m="">Alle Monate</button>` + MON.map((m, i) => `<button data-m="${i + 1}">${m}</button>`).join('');
   mBox.title = 'Klick: Monat an/aus – mehrere möglich. Umschalt + Klick: ganzer Zeitraum.';
   let letzterM = 0;
   mBox.querySelectorAll('button').forEach((b) => b.onclick = (e) => {
@@ -183,30 +169,44 @@ function selectsFuellen() {
     setze({ monat: w.sort((x, y) => x - y).join(',') });
   });
   $('#f-konto').innerHTML = opt('', 'Alle Konten') + D.konten.map((k) => opt(k.name, k.name)).join('');
-  $('#f-kat').innerHTML = opt('', 'Alle Kategorien') + D.kats.map((k) => opt(k, k)).join('');
+  $('#f-kat').innerHTML = opt('', 'Alle Kategorien') + D.kats.map((k) => opt(k, schoen(k))).join('');
+}
+
+// Zeitraum-Menü: Kästchen = Jahr an/aus (mehrere = Vergleich), Jahreszahl = nur dieses Jahr
+function jahrListeBauen() {
+  const n = new Map();
+  for (const r of D.rows) n.set(r.y, (n.get(r.y) || 0) + 1);
+  const liste = $('#f-jahr-liste');
+  liste.innerHTML = `<button class="auswahl-alle" data-jalle>Alle Jahre <small>${NUM.format(D.rows.length)} Buchungen</small></button>
+    <div class="auswahl-jahre">${[...D.jahre].reverse().map((y) => `<div class="auswahl-zeile"><input type="checkbox" id="jchk-${y}" data-jchk="${y}" aria-label="${y} zum Vergleich"><button type="button" data-jnur="${y}" title="Nur ${y} zeigen">${y}</button><small>${NUM.format(n.get(y) || 0)}</small></div>`).join('')}</div>
+    <div class="auswahl-fuss">Kästchen anhaken: mehrere Jahre vergleichen<br>Jahreszahl anklicken: nur dieses Jahr</div>`;
+  liste.querySelector('[data-jalle]').onclick = () => { jahrMenu(false); setze({ jahr: '' }); };
+  liste.querySelectorAll('[data-jnur]').forEach((b) => b.onclick = () => { jahrMenu(false); setze({ jahr: b.dataset.jnur }); });
+  liste.querySelectorAll('[data-jchk]').forEach((c) => c.onchange = () => {
+    setze({ jahr: [...liste.querySelectorAll('[data-jchk]:checked')].map((x) => +x.dataset.jchk).sort((a, b) => a - b).join(',') });
+  });
+}
+function jahrMenu(auf) {
+  const l = $('#f-jahr-liste');
+  auf = auf ?? l.hidden;
+  l.hidden = !auf;
+  $('#f-jahr').setAttribute('aria-expanded', String(auf));
 }
 
 function filterZeigen(conds) {
   const jw = jahreWahl();
-  const fj = $('#f-jahr');
-  fj.querySelector('option[value="__m"]')?.remove();
-  if (jw.length > 1) fj.append(Object.assign(document.createElement('option'), { value: '__m', textContent: `${jw.length} Jahre: ${jw.join(', ')}` }));
+  $('#f-jahr-text').textContent = !jw.length ? 'Alle Jahre' : jw.length === 1 ? String(jw[0]) : jw.length <= 3 ? `${jw.join(', ')} · Vergleich` : `${jw.length} Jahre · Vergleich`;
+  $('#f-jahr').classList.toggle('aktiv', jw.length > 0);
+  $('#f-jahr-liste').querySelectorAll('[data-jchk]').forEach((c) => { c.checked = jw.includes(+c.dataset.jchk); });
+  $('#f-jahr-liste').querySelector('[data-jalle]')?.classList.toggle('an', !jw.length);
   const mw = monateWahl();
-  const fm = $('#f-monat');
-  fm.querySelector('option[value="__m"]')?.remove();
-  if (mw.length > 1) fm.append(Object.assign(document.createElement('option'), { value: '__m', textContent: mw.map((m) => MON[m - 1]).join(', ') }));
   $('#monate')?.querySelectorAll('button').forEach((b) => { const an = b.dataset.m ? mw.includes(+b.dataset.m) : !mw.length; b.classList.toggle('an', an); b.setAttribute('aria-pressed', String(an)); });
-  for (const [id, v] of [['#f-jahr', jw.length > 1 ? '__m' : S.jahr], ['#f-monat', mw.length > 1 ? '__m' : S.monat], ['#f-konto', S.konto], ['#f-kat', S.kat]]) {
+  for (const [id, v] of [['#f-konto', S.konto], ['#f-kat', S.kat]]) {
     const el = $(id); el.value = v; el.classList.toggle('aktiv', !!v);
   }
   document.querySelectorAll('#f-art button').forEach((b) => b.classList.toggle('an', b.dataset.v === S.art));
-  $('#jahre').querySelectorAll('button').forEach((b) => {
-    const an = b.dataset.j ? jw.includes(+b.dataset.j) : !jw.length;
-    b.classList.toggle('an', an);
-    b.setAttribute('aria-pressed', String(an));
-    if (an) { const box = $('#jahre'); box.scrollLeft = Math.max(0, b.offsetLeft - box.offsetLeft - box.clientWidth / 2 + b.offsetWidth / 2); }
-  });
   $('#f-umb').checked = S.umb;
+  $('#f-umb').closest('.schalter').classList.toggle('an', S.umb);
   if ($('#q').value !== S.q) $('#q').value = S.q;
   const chips = conds.map((c, i) => `<button class="chip" data-cond="${i}" title="Aus der Suche entfernen">${esc(c.label)}<span class="x">×</span></button>`);
   if (S.ukat) chips.push(`<button class="chip" data-ukat="1" title="Unterkategorie-Filter entfernen">Unterkategorie <b>${esc(S.ukat)}</b><span class="x">×</span></button>`);
@@ -218,7 +218,7 @@ function filterZeigen(conds) {
   $('#chips').querySelector('[data-ukat]')?.addEventListener('click', () => setze({ ukat: '' }));
   const aktiv = S.q || S.jahr || S.monat || S.konto || S.kat || S.ukat || S.art !== 'alle' || S.umb;
   $('#f-reset').hidden = !aktiv;
-  $('#f-zurueck').hidden = !schritte.length;
+  $('#f-zurueck').hidden = stufe <= 0;
 }
 
 // ======================================================================= Kennzahlen
@@ -265,7 +265,11 @@ function kennzahlen(conds) {
   const quote = ein > 0 && gesamt ? Math.round((erg / ein) * 100) : null;
   const zr = F.length ? `${dde(F[0].d)} – ${dde(F[F.length - 1].d)}` : 'keine Treffer';
   const avg = (c) => (mon > 24 ? eur0((c / mon) * 12) : eur0(c / mon));
-  const kpi = (l, v, c, s, d = '', k = '', tip = '', an = false) => `<button class="kpi${an ? ' an' : ''}${(k === 'ein' || k === 'aus') && S.art !== 'alle' && S.art !== k ? ' neben' : ''}" data-kpi="${k}" title="${tip}"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div>${d}</button>`;
+  const IC = {
+    ein: '<path d="M12 5v14M6 13l6 6 6-6"/>', aus: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+    erg: '<path d="M12 4v16M5 8h14M7 8l-3 7h6zM17 8l-3 7h6z"/>', n: '<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>',
+  };
+  const kpi = (l, v, c, s, d = '', k = '', tip = '', an = false) => `<button class="kpi${an ? ' an' : ''}${(k === 'ein' || k === 'aus') && S.art !== 'alle' && S.art !== k ? ' neben' : ''}" data-kpi="${k}" title="${tip}"><div class="l"><span class="kpi-ic ${k}"><svg viewBox="0 0 24 24" aria-hidden="true">${IC[k] || ''}</svg></span>${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div>${d}</button>`;
   const diffErg = () => {
     if (!V) return '';
     const d = erg - vs.erg;
@@ -381,11 +385,12 @@ function verlauf() {
     if (r.art === 'Einnahme') ein[i] += r.c; else if (r.art === 'Ausgabe') aus[i] -= r.c;
   }
   $('#t-verlauf').textContent = jahr ? `Verlauf ${jahr} nach Monaten` : 'Verlauf nach Jahren';
-  $('#h-verlauf').textContent = jahr && !S.monat ? (einJahr() ? 'Weitere Jahre oben anklicken zum Vergleichen' : 'Monat anklicken zum Filtern') : !jahr ? 'Jahr anklicken zum Filtern' : '';
+  $('#h-verlauf').textContent = jahr && !S.monat ? (einJahr() ? 'Monat anklicken zum Filtern · weitere Jahre im Zeitraum anhaken zum Vergleich' : 'Monat anklicken zum Filtern') : !jahr ? 'Jahr anklicken zum Filtern' : '';
   const cE = css('--ein'), cA = css('--aus');
+  const lauf = keys.map((k) => laeuftNoch(jahr, k));
   const ds = [];
-  if (S.art !== 'aus') ds.push({ label: 'Einnahmen', data: ein.map((c) => c / 100), backgroundColor: alpha(cE, .85), hoverBackgroundColor: cE, borderRadius: 4, maxBarThickness: 34 });
-  if (S.art !== 'ein') ds.push({ label: 'Ausgaben', data: aus.map((c) => c / 100), backgroundColor: alpha(cA, .85), hoverBackgroundColor: cA, borderRadius: 4, maxBarThickness: 34 });
+  if (S.art !== 'aus') ds.push({ label: 'Einnahmen', data: ein.map((c) => c / 100), backgroundColor: lauf.map((l) => alpha(cE, l ? .35 : .85)), hoverBackgroundColor: cE, borderRadius: 4, maxBarThickness: 34 });
+  if (S.art !== 'ein') ds.push({ label: 'Ausgaben', data: aus.map((c) => c / 100), backgroundColor: lauf.map((l) => alpha(cA, l ? .35 : .85)), hoverBackgroundColor: cA, borderRadius: 4, maxBarThickness: 34 });
   // Vorjahr als gestrichelte Linie (bei Monatsansicht)
   if (jahr && jahr - 1 >= D.jahre[0]) {
     const t = pruefer(parse(S.q), false), einVj = S.art === 'ein';
@@ -403,7 +408,7 @@ function verlauf() {
   o.plugins.tooltip.callbacks = {
     title: (it) => (jahr ? `${MONAT[keys[it[0].dataIndex] - 1]} ${jahr}` : String(keys[it[0].dataIndex])),
     label: (it) => ` ${it.dataset.label}: ${EUR0.format(it.raw)}`,
-    footer: (it) => { const i = it[0].dataIndex, e = ein[i] - aus[i]; return S.art === 'alle' ? `${e >= 0 ? 'Überschuss' : 'Fehlbetrag'}: ${eur0(e)}` : ''; },
+    footer: (it) => { const i = it[0].dataIndex, e = ein[i] - aus[i]; return [S.art === 'alle' ? `${e >= 0 ? 'Überschuss' : 'Fehlbetrag'}: ${eur0(e)}` : '', lauf[i] ? laufendText() : ''].filter(Boolean); },
   };
   o.scales = { x: { ...achsenStil(), grid: { display: false } }, y: { ...achsenStil(), ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 6 } } };
   o.onClick = (_, el) => {
@@ -463,7 +468,7 @@ function kategorienVergleich(einMode, unter) {
   o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
   zeichne('c-kat', {
     type: 'bar',
-    data: { labels: list.map(([k]) => k), datasets: jw.map((y, j) => { const f = jahresFarbe(j, jw.length); return { label: String(y), data: list.map(([, v]) => v[j] / 100), backgroundColor: alpha(f, .85), hoverBackgroundColor: f, borderRadius: 3, maxBarThickness: 12 }; }) },
+    data: { labels: list.map(([k]) => schoen(k)), datasets: jw.map((y, j) => { const f = jahresFarbe(j, jw.length); return { label: String(y), data: list.map(([, v]) => v[j] / 100), backgroundColor: alpha(f, .85), hoverBackgroundColor: f, borderRadius: 3, maxBarThickness: 12 }; }) },
     options: o,
   });
 }
@@ -516,9 +521,100 @@ function kategorien() {
   o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
   zeichne('c-kat', {
     type: 'bar',
-    data: { labels: list.map(([k]) => k), datasets: [{ data: list.map(([, v]) => v / 100), backgroundColor: list.map(([k]) => alpha(c, k === S.ukat || !S.ukat ? .85 : .35)), hoverBackgroundColor: c, borderRadius: 4, barThickness: 18 }] },
+    data: { labels: list.map(([k]) => schoen(k)), datasets: [{ data: list.map(([, v]) => v / 100), backgroundColor: list.map(([k]) => alpha(c, k === S.ukat || !S.ukat ? .85 : .35)), hoverBackgroundColor: c, borderRadius: 4, barThickness: 18 }] },
     options: o, plugins: [wertLabels],
   });
+}
+
+// Ist der Monat (bzw. das Jahr) mit dem Datenstand noch nicht abgeschlossen? Dann fehlen oft noch Gehalt oder Abbuchungen.
+const monatsletzter = (iso) => new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7), 0)).toISOString().slice(0, 10);
+function laeuftNoch(jahr, k) {
+  if (jahr) return jahr === +D.bis.slice(0, 4) && k === +D.bis.slice(5, 7) && D.bis !== monatsletzter(D.bis);
+  return k === +D.bis.slice(0, 4) && D.bis.slice(5) !== '12-31';
+}
+const laufendText = () => `noch nicht abgeschlossen – Daten bis ${dde(D.bis).slice(0, 6)}`;
+
+// Überschuss/Fehlbetrag je Monat (bzw. Jahr): immer aus Einnahmen und Ausgaben, auch wenn „nur Ausgaben“ gewählt ist
+function ergebnis() {
+  const jw = jahreWahl(), vgl = vergleichsModus(), jahr = vgl ? 0 : proMonat();
+  let keys, key;
+  if (vgl) { keys = jw; key = (r) => r.y; }
+  else if (jahr) { keys = MON.map((_, i) => i + 1); key = (r) => (r.y === jahr ? r.m : null); }
+  else {
+    const a = FK.length ? FK[0].y : D.jahre[0], b = FK.length ? FK[FK.length - 1].y : a;
+    keys = []; for (let y = a; y <= b; y++) keys.push(y);
+    key = (r) => r.y;
+  }
+  const pos = new Map(keys.map((k, i) => [k, i]));
+  const ein = keys.map(() => 0), aus = keys.map(() => 0);
+  for (const r of FK) {
+    const i = pos.get(key(r));
+    if (i === undefined) continue;
+    if (r.art === 'Einnahme') ein[i] += r.c; else if (r.art === 'Ausgabe') aus[i] += r.c;
+  }
+  const erg = keys.map((_, i) => ein[i] + aus[i]);
+  let letzte = erg.length - 1;
+  while (letzte > 0 && !ein[letzte] && !aus[letzte]) letzte--;
+  let sum = 0;
+  const kum = erg.map((v, i) => { sum += v; return i <= letzte ? sum / 100 : null; });
+  const tl = (i) => (jahr ? `${MONAT[keys[i] - 1]} ${jahr}` : String(keys[i]));
+  $('#t-ergebnis').textContent = `Überschuss / Fehlbetrag ${jahr ? `${jahr} je Monat` : 'je Jahr'}`;
+  $('#h-ergebnis').textContent = vgl ? 'gewählte Jahre' : `Linie: aufsummiert${sum ? ` – ${sum >= 0 ? '+' : ''}${eur0(sum)}` : ''}`;
+  const cE = css('--ein'), cA = css('--aus'), cL = css('--accent');
+  const lauf = keys.map((k) => !vgl && laeuftNoch(jahr, k));
+  const ds = [{ label: jahr ? 'Monatsergebnis' : 'Jahresergebnis', data: erg.map((c) => c / 100), backgroundColor: erg.map((c, i) => alpha(c >= 0 ? cE : cA, lauf[i] ? .3 : .85)),
+    hoverBackgroundColor: erg.map((c) => (c >= 0 ? cE : cA)), borderRadius: 4, maxBarThickness: 34, order: 2 }];
+  if (!vgl && keys.length > 1) ds.push({ type: 'line', label: 'aufsummiert', data: kum, borderColor: cL, backgroundColor: cL, borderWidth: 2, pointRadius: 2.5, pointHoverRadius: 4, tension: 0.3, fill: false, order: 1 });
+  const o = basis();
+  o.interaction = { mode: 'index', intersect: false };
+  o.plugins.legend = { display: ds.length > 1, position: 'top', align: 'end', labels: { color: css('--text-2'), usePointStyle: true, pointStyle: 'rectRounded', boxWidth: 10, font: { size: 12 } } };
+  o.plugins.tooltip.callbacks = {
+    title: (it) => tl(it[0].dataIndex),
+    label: (it) => (it.dataset.type === 'line' ? ` aufsummiert: ${EUR0.format(it.raw)}` : ` ${it.raw >= 0 ? 'Überschuss' : 'Fehlbetrag'}: ${EUR0.format(it.raw)}`),
+    afterBody: (it) => { const i = it[0].dataIndex; return [`Einnahmen ${eur0(ein[i])}`, `Ausgaben ${eur0(aus[i])}`, ...(ein[i] > 0 ? [`${erg[i] >= 0 ? 'übrig' : 'mehr ausgegeben'}: ${Math.abs(Math.round((erg[i] / ein[i]) * 100))} % der Einnahmen`] : []), ...(lauf[i] ? [laufendText()] : [])]; },
+  };
+  o.scales = {
+    x: { ...achsenStil(), grid: { display: false } },
+    y: { ...achsenStil(), grid: { color: (c) => (c.tick.value === 0 ? css('--border-strong') : css('--grid')) }, ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 6 } },
+  };
+  o.onClick = (_, el) => {
+    if (!el.length) return;
+    const k = keys[el[0].index];
+    if (jahr) setze({ jahr: String(jahr), monat: S.monat === String(k) ? '' : String(k) }); else setze({ jahr: String(k) });
+  };
+  o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
+  zeichne('c-ergebnis', { type: 'bar', data: { labels: keys.map((_, i) => (jahr ? MON[keys[i] - 1] : String(keys[i]))), datasets: ds }, options: o });
+}
+
+// Die zehn größten Empfänger (bzw. Einnahmequellen) im gewählten Zeitraum
+function topEmpfaenger() {
+  const einMode = S.art === 'ein';
+  const m = new Map();
+  for (const r of F) {
+    if (einMode ? r.art !== 'Einnahme' : r.art !== 'Ausgabe') continue;
+    const name = r.g || '(ohne Empfänger)', k = norm(name);
+    let e = m.get(k);
+    if (!e) m.set(k, (e = { name, c: 0, n: 0 }));
+    e.c += einMode ? r.c : -r.c; e.n++;
+  }
+  const list = [...m.values()].filter((e) => e.c > 0).sort((a, b) => b.c - a.c).slice(0, 10);
+  const gesamt = [...m.values()].reduce((t, e) => t + Math.max(0, e.c), 0);
+  $('#t-top').textContent = einMode ? 'Größte Einnahmequellen' : 'Größte Empfänger';
+  $('#h-top').textContent = list.length ? 'anklicken: alle Buchungen' : '';
+  $('#chart-top').style.height = `${Math.max(180, list.length * 28 + 30)}px`;
+  if (!list.length) { charts['c-top']?.destroy(); delete charts['c-top']; return; }
+  const c = css('--accent');
+  const o = basis();
+  o.indexAxis = 'y';
+  o.layout = { padding: { right: 86 } };
+  o.plugins.tooltip.callbacks = { title: (it) => list[it[0].dataIndex].name, label: (it) => ` ${EUR0.format(it.raw)} · ${NUM.format(list[it.dataIndex].n)} Buchungen · ${gesamt ? Math.round((it.raw * 10000) / gesamt) : 0} % aller ${einMode ? 'Einnahmen' : 'Ausgaben'}` };
+  o.scales = {
+    x: { display: false, beginAtZero: true },
+    y: { ...achsenStil(), grid: { display: false }, ticks: { color: css('--text-2'), font: { size: 12.5 }, autoSkip: false, callback(v) { const t = this.getLabelForValue(v); return t.length > 24 ? t.slice(0, 23) + '…' : t; } } },
+  };
+  o.onClick = (_, el) => { if (el.length) setze({ q: `"${list[el[0].index].name}"`, tab: 'buchungen' }); };
+  o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
+  zeichne('c-top', { type: 'bar', data: { labels: list.map((e) => e.name), datasets: [{ data: list.map((e) => e.c / 100), backgroundColor: alpha(c, .78), hoverBackgroundColor: c, borderRadius: 4, barThickness: 18 }] }, options: o, plugins: [wertLabels] });
 }
 
 // ======================================================================= Tabellen
@@ -544,7 +640,7 @@ function tabBuchungen(conds) {
     const auf = offen.has(r.i);
     h += `<tr class="klick${auf ? ' offen' : ''}" data-i="${r.i}"><td class="datum">${dde(r.d)}</td>
       <td><div class="wer">${mk(r.g || r.z || '–')}</div>${r.g && r.z ? `<div class="zweck">${mk(r.z)}</div>` : ''}</td>
-      <td class="kat kat-sp">${esc(r.kat)}<small>${esc(r.ukat)}</small></td><td class="konto konto-sp">${esc(kn(r))}</td>
+      <td class="kat kat-sp">${esc(schoen(r.kat))}<small>${esc(schoen(r.ukat))}</small></td><td class="konto konto-sp">${esc(kn(r))}</td>
       <td class="r betrag ${cls(r.c)}">${eur(r.c)}</td></tr>`;
     if (auf) {
       const dd = [['Verwendungszweck', r.z], ['Kategorie', `${r.kat}${r.ukat ? ' · ' + r.ukat : ''}`], ['Konto', kn(r)], ['Art', r.art],
@@ -641,7 +737,7 @@ function tabUebersicht() {
     ${p.diff ? `<th class="r vj" ${ew} title="Veränderung ${p.cols[p.diff[1]]} gegenüber ${p.cols[p.diff[0]]}">± ${String(p.cols[p.diff[0]]).slice(2)}→${String(p.cols[p.diff[1]]).slice(2)}</th>` : ''}
     ${p.vj && !schmal ? `<th class="r vj" ${ew} title="Gleicher Zeitraum ein Jahr früher">${esc(V.label)}</th><th class="r" ${ew} title="Veränderung gegenüber ${esc(V.label)}">± Vorj.</th>` : ''}</tr></thead><tbody>`;
   for (const r of p.rows) {
-    h += `<tr class="klick" data-zeile="${esc(r.key)}"><td class="erste" title="${esc(r.key)}">${esc(r.key)}</td>${r.v.map((c) => z(c)).join('')}
+    h += `<tr class="klick" data-zeile="${esc(r.key)}"><td class="erste" title="${esc(schoen(r.key))}">${esc(schoen(r.key))}</td>${r.v.map((c) => z(c)).join('')}
       ${ohneSumme ? '' : z(r.sum, 'fett')}${avg(r.sum)}${dz(r.v)}${vjZellen(r.sum, p.vj?.get(r.key) || 0)}</tr>`;
   }
   h += `</tbody><tfoot><tr><td class="erste">Ergebnis</td>${p.sums.map((c) => z(c)).join('')}${ohneSumme ? '' : z(p.total)}${avg(p.total)}${dz(p.sums)}${vjZellen(p.total, p.vjTotal)}</tr></tfoot></table></div>`;
@@ -676,17 +772,28 @@ function tabKonten() {
   const m = alle.filter((x) => x.st.status !== 'unbekannt');
   const vj = +D.bis.slice(0, 4) - 1;
   const monatsende = (() => { const d = new Date(Date.UTC(+D.bis.slice(0, 4), +D.bis.slice(5, 7) - 1, 0)); return d.toISOString().slice(0, 10); })();
-  const schnell = [[D.bis, 'Aktuell'], [monatsende, 'Ende Vormonat'], [`${vj}-12-31`, `31.12.${vj}`], [`${vj - 1}-12-31`, `31.12.${vj - 1}`]];
-  let h = `<div class="fix-kopf stichtag-kopf"><div class="st-zeile"><label class="st-label">Kontostände am
-      <input type="date" id="stichtag" value="${tag}" min="${D.von}" max="${D.bis}"></label>
-      ${schnell.map(([d, t]) => `<button class="btn sm${d === tag ? ' an' : ''}" data-st="${d}">${t}</button>`).join('')}</div>
-    <div class="muted klein">Stand am Ende des Tages, vom Bank-Kontostand zurückgerechnet.${S.stichtag ? '' : S.jahr ? ' Automatisch: Ende des gewählten Zeitraums.' : ''}
-      Einnahmen und Ausgaben beziehen sich auf die gewählten Filter.</div></div>`;
-  const ohneDaten = unbekannt.length ? `<div class="muted klein st-hinweis">Für diesen Tag noch ohne Daten: ${unbekannt.map((x) => `${esc(x.k.name)} (ab ${dde(x.k.von)})`).join(', ')}.</div>` : '';
-  if (!m.length) return h + '<div class="leer">Am Stichtag gab es keine passenden Konten.</div>' + ohneDaten;
+  const schnell = [[D.bis, `Aktuell · ${dde(D.bis).slice(0, 6)}`], [monatsende, 'Ende Vormonat'], [`${vj}-12-31`, `31.12.${vj}`], [`${vj - 1}-12-31`, `31.12.${vj - 1}`]];
   const bekannt = m.filter((x) => x.st.c != null);
   const saldo = bekannt.reduce((s, x) => s + x.st.c, 0);
   const ohne = m.length - bekannt.length;
+  let h = `<div class="konten-kopf"><div class="stichtag"><label for="stichtag">Kontostände am</label>
+      <input type="date" id="stichtag" value="${tag}" min="${D.von}" max="${D.bis}">
+      <div class="seg">${schnell.map(([d, t]) => `<button class="${d === tag ? 'an' : ''}" data-st="${d}">${t}</button>`).join('')}</div></div>
+    <div class="muted klein">Stand am Ende des Tages, vom Bank-Kontostand zurückgerechnet.${S.stichtag ? '' : S.jahr ? ' Ohne eigene Wahl: Ende des gewählten Zeitraums.' : ''}
+      Buchungen, Einnahmen und Ausgaben in der Tabelle folgen den Filtern oben.</div></div>`;
+  const ohneDaten = unbekannt.length ? `<div class="muted klein st-hinweis">Für diesen Tag noch ohne Daten: ${unbekannt.map((x) => `${esc(x.k.name)} (ab ${dde(x.k.von)})`).join(', ')}.</div>` : '';
+  if (!m.length) { kontenGrafik = null; return h + '<div class="leer">Am Stichtag gab es keine passenden Konten.</div>' + ohneDaten + eingangHtml(); }
+  // Verteilung: die größten Guthaben, Rest zusammengefasst (gleiche Farben in Ring und Legende)
+  let vert = bekannt.filter((x) => x.st.c > 0).sort((a, b) => b.st.c - a.st.c).map((x) => ({ name: x.k.name, c: x.st.c }));
+  if (vert.length > 7) vert = [...vert.slice(0, 6), { name: `Übrige (${vert.length - 6})`, c: vert.slice(6).reduce((t, x) => t + x.c, 0) }];
+  const vSumme = vert.reduce((t, x) => t + x.c, 0);
+  kontenGrafik = { tag, vert };
+  h += `<div class="konten-grafiken">
+      <div class="kg"><div class="fix-grafik-t">Summe der Kontostände je Monatsende <span class="muted">· Punkt anklicken = Stichtag</span></div><div class="kg-c"><canvas id="c-konten-verlauf"></canvas></div></div>
+      <div class="kg kg-vert"><div class="fix-grafik-t">Verteilung der Guthaben am ${dde(tag)}</div>
+        <div class="kg-vert-inhalt"><div class="kg-ring"><canvas id="c-konten-vert"></canvas><div class="fix-ring-mitte"><b>${eur0(vSumme)}</b><span>Guthaben</span></div></div>
+          <div class="kg-leg">${vert.map((x, i) => `<button class="kg-leg-z" ${x.name.startsWith('Übrige') ? 'disabled' : `data-konto="${esc(x.name)}"`} title="${esc(x.name)}"><span class="punkt" style="background:${ART_FARBEN[i % ART_FARBEN.length]}"></span><span class="name">${esc(x.name)}</span><span class="betrag">${eur0(x.c)}</span><span class="anteil">${vSumme ? Math.round((x.c * 100) / vSumme) : 0} %</span></button>`).join('')}</div></div></div>
+    </div>`;
   h += `<div class="tab-scroll"><table class="t fix"><thead><tr><th class="erste">Konto</th><th class="r sp-m" style="width:95px">Buchungen</th><th class="r sp-m" style="width:118px">Einnahmen</th><th class="r sp-m" style="width:118px">Ausgaben</th>
     <th class="r" style="width:150px">Stand ${dde(tag)}</th><th class="sp-m" style="width:230px">Daten</th></tr></thead><tbody>`;
   for (const x of m) {
@@ -707,13 +814,50 @@ function tabKonten() {
   return h + eingangHtml();
 }
 
+// Grafiken im Reiter Konten: Summe der Kontostände je Monatsende (36 Monate) und Verteilung am Stichtag
+let kontenGrafik = null;
+function kontenGrafikZeichnen() {
+  if (!kontenGrafik || !$('#c-konten-verlauf')) return;
+  const nur = S.konto ? D.kontoIdx.get(S.konto) : -1;
+  const tage = [];
+  let [y, mo] = D.bis.slice(0, 7).split('-').map(Number);
+  for (let i = 0; i < 36; i++) {
+    const d = new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10);
+    tage.unshift(d > D.bis ? D.bis : d);
+    if (--mo === 0) { mo = 12; y--; }
+  }
+  const werte = tage.map((d) => kontostaende(D, d).filter((x) => (nur === -1 || x.i === nur) && x.c != null && x.status !== 'unbekannt').reduce((t, x) => t + x.c, 0) / 100);
+  const c = css('--accent');
+  const o = basis();
+  o.interaction = { mode: 'index', intersect: false };
+  o.plugins.tooltip.callbacks = { title: (it) => `Stand ${dde(tage[it[0].dataIndex])}`, label: (it) => ` ${nur === -1 ? 'Summe aller Konten' : S.konto}: ${EUR0.format(it.raw)}` };
+  o.scales = {
+    x: { ...achsenStil(), grid: { display: false }, ticks: { ...achsenStil().ticks, maxRotation: 0, autoSkip: false, callback: (_, i) => { const m = tage[i].slice(5, 7); return m === '01' ? tage[i].slice(0, 4) : m === '07' ? MON[6] : ''; } } },
+    y: { ...achsenStil(), ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 5 } },
+  };
+  o.onClick = (_, el) => { if (el.length) setze({ stichtag: tage[el[0].index] }); };
+  o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
+  zeichne('c-konten-verlauf', { type: 'line', data: { labels: tage, datasets: [{ data: werte, borderColor: c, backgroundColor: alpha(c, .12), fill: 'origin', tension: 0.25, borderWidth: 2,
+    pointRadius: tage.map((d) => (d === kontenGrafik.tag ? 5 : 0)), pointBackgroundColor: c, pointHoverRadius: 5 }] }, options: o });
+  const l = kontenGrafik.vert;
+  const summe = l.reduce((t, x) => t + x.c, 0);
+  zeichne('c-konten-vert', {
+    type: 'doughnut',
+    data: { labels: l.map((x) => x.name), datasets: [{ data: l.map((x) => x.c / 100), backgroundColor: l.map((_, i) => ART_FARBEN[i % ART_FARBEN.length]), borderWidth: 0, spacing: 2, hoverOffset: 6 }] },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '68%', animation: { duration: 250 },
+      plugins: { legend: { display: false }, tooltip: { ...basis().plugins.tooltip, callbacks: { label: (it) => ` ${it.label}: ${EUR0.format(it.raw)} · ${summe ? Math.round((it.raw * 10000) / summe) : 0} %` } } },
+      onClick: (_, el) => { if (el.length && !l[el[0].index].name.startsWith('Übrige')) setze({ konto: l[el[0].index].name, tab: 'buchungen' }); },
+      onHover: (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; } },
+  });
+}
+
 // Dateien im Eingang: was erkannt, übernommen und als doppelt erkannt wurde (je Datei zusammengefasst)
 function eingangHtml() {
   const e = D.j.eingang;
   const hilfe = `Neue Kontodaten – Finanzguru-Export, WISO/Buhl-Buchungsliste, Umsätze der Bank als CSV oder PDF, andere Excel-/CSV-Tabellen –
     einfach in Google Drive in <b>10 Finanzen › Eingang</b> legen, auch vom Handy. Der PC prüft alle 30 Minuten, rechnet Doppeltes heraus
     (auch wenn du denselben Zeitraum mehrmals schickst, z. B. Mitte und Ende des Monats) und aktualisiert die App. Übernommene Dateien wandern nach <i>Eingang › verarbeitet</i>.`;
-  if (!e?.dateien?.length) return `<div class="eingang"><h3>Dateien im Eingang</h3><p class="muted klein">${hilfe}</p></div>`;
+  if (!e?.dateien?.length) return `<details class="eingang"><summary><b>Dateien im Eingang</b> <span class="muted">· so kommen neue Daten in die App</span></summary><p class="muted klein">${hilfe}</p></details>`;
   const je = new Map();
   for (const b of e.dateien) {
     if (!je.has(b.datei)) je.set(b.datei, { ...b, konten: new Set(), stati: new Set(), ok: true, gelesen: 0, neu: 0, doppelt: 0, von: b.von, bis: b.bis });
@@ -729,7 +873,7 @@ function eingangHtml() {
   const offen = liste.filter((x) => !x.ok).length;
   const name = (d) => d.replace(/^Eingang[\\/](verarbeitet[\\/])?/, '');
   const status = (x) => (x.stati.size > 2 ? [...x.stati].filter((t) => !/schon in der Liste/.test(t)).join(' · ') || 'alles schon in der Liste' : [...x.stati].join(' · '));
-  return `<div class="eingang"><h3>Dateien im Eingang <small class="muted">zuletzt verarbeitet ${dde(e.erstellt.slice(0, 10))}, ${e.erstellt.slice(11, 16)} Uhr${offen ? ` · <span class="neg">${offen} nicht übernommen</span>` : ''}</small></h3>
+  return `<details class="eingang"${offen ? ' open' : ''}><summary><b>Dateien im Eingang</b> <span class="muted">· ${liste.length} Dateien · zuletzt verarbeitet ${dde(e.erstellt.slice(0, 10))}, ${e.erstellt.slice(11, 16)} Uhr</span>${offen ? ` · <span class="neg">${offen} nicht übernommen</span>` : ''}</summary>
     <p class="muted klein">${hilfe}</p>
     <div class="tab-scroll"><table class="t fix eingang-t"><thead><tr><th class="erste">Datei</th><th class="sp-m" style="width:150px">erkannt als</th><th class="sp-m" style="width:170px">Konto</th>
       <th class="sp-m" style="width:170px">Zeitraum</th><th class="r" style="width:72px" title="Buchungen in der Datei">gelesen</th><th class="r" style="width:60px" title="neu in die Liste übernommen">neu</th>
@@ -738,15 +882,21 @@ function eingangHtml() {
       <td class="sp-m klein">${esc(x.art)}</td><td class="sp-m klein ell" title="${esc([...x.konten].join(', '))}">${esc([...x.konten].join(', ') || '–')}</td>
       <td class="sp-m klein">${x.von ? `${esc(x.von)} – ${esc(x.bis)}` : '–'}</td><td class="r">${NUM.format(x.gelesen)}</td>
       <td class="r ${x.neu ? 'pos' : 'muted'}"><b>${NUM.format(x.neu)}</b></td><td class="r sp-m muted">${NUM.format(x.doppelt)}</td></tr>`).join('')}
-    </tbody></table></div></div>`;
+    </tbody></table></div></details>`;
 }
 
+const TITEL = {
+  buchungen: () => ['Buchungen', `${NUM.format(F.length)} Treffer · Zeile anklicken für Details · Spaltenkopf: sortieren`],
+  uebersicht: () => ['Kategorien', 'Zeile anklicken: Unterkategorien · Spaltenkopf: Monat bzw. Jahr filtern'],
+  fix: () => ['Fixkosten und Abos', 'regelmäßige Zahlungen, automatisch erkannt'],
+  konten: () => ['Konten', 'Zeile anklicken: Buchungen des Kontos'],
+  steuer: () => ['Steuer', 'steuerlich relevante Buchungen je Steuerjahr'],
+};
 function tabelle(conds) {
-  document.querySelectorAll('#tabs button').forEach((b) => {
-    b.setAttribute('aria-selected', String(b.dataset.tab === S.tab));
-    if (b.dataset.tab === 'buchungen') b.innerHTML = `Buchungen<span class="n">${NUM.format(F.length)}</span>`;
-  });
+  if (S.tab === 'start') return;
   const el = $('#tab-inhalt');
+  const [ti, hi] = (TITEL[S.tab] || TITEL.buchungen)();
+  $('#t-tabelle').textContent = ti; $('#h-tabelle').textContent = hi;
   if (S.tab === 'steuer') {
     steuerZeigen(el, { einJahr, toast, setze: (p) => setze(p), neuZeichnen: () => tabelle(conds) });
     $('.dl').hidden = true;
@@ -787,9 +937,10 @@ function tabelle(conds) {
     tabelle(conds);
   });
   if (S.tab === 'fix') fixGrafikZeichnen();
+  if (S.tab === 'konten') kontenGrafikZeichnen();
   $('#stichtag')?.addEventListener('change', (e) => { const v = e.target.value; if (/^\d{4}-\d{2}-\d{2}$/.test(v)) setze({ stichtag: v }); });
   el.querySelectorAll('[data-st]').forEach((b) => b.onclick = () => setze({ stichtag: b.dataset.st === D.bis && !S.jahr ? '' : b.dataset.st }));
-  el.querySelectorAll('tr[data-konto]').forEach((tr) => tr.onclick = () => setze({ konto: S.konto === tr.dataset.konto ? '' : tr.dataset.konto, tab: 'buchungen' }));
+  el.querySelectorAll('tr[data-konto], .kg-leg-z[data-konto]').forEach((tr) => tr.onclick = () => setze({ konto: S.konto === tr.dataset.konto ? '' : tr.dataset.konto, tab: 'buchungen' }));
 }
 
 // ======================================================================= Fixkosten und Abos
@@ -1002,7 +1153,12 @@ const FIX_ARTEN = [
   ['Abos & Mitgliedschaften', () => true],
 ];
 const ART_FARBEN = ['#2a78d6', '#e0602e', '#1a9e6e', '#9085e9', '#eda100', '#e87ba4', '#3fa7b8', '#b0762f', '#6c8f3a', '#8a8880', '#c25b8f'];
-const SCHOENER = { Berufsunfaehigkeitsversicherung: 'Berufsunfähigkeitsversicherung', Rundfunkgebuehren: 'Rundfunkgebühren', Bankgebuehren: 'Bankgebühren', Mobilitaet: 'Mobilität' };
+const SCHOENER = {
+  Mobilitaet: 'Mobilität', 'Aerztliche Behandlung': 'Ärztliche Behandlung', Bankgebuehren: 'Bankgebühren', Berufsunfaehigkeitsversicherung: 'Berufsunfähigkeitsversicherung',
+  'Buecher & Zeitungen': 'Bücher & Zeitungen', Getraenkehandel: 'Getränkehandel', 'In-App-Kaeufe': 'In-App-Käufe', Kapitalertraege: 'Kapitalerträge',
+  'Reiseruecktritts-Versicherung': 'Reiserücktritts-Versicherung', Rundfunkgebuehren: 'Rundfunkgebühren', 'Schule & Foerderung': 'Schule & Förderung',
+  'Tieraerztliche Behandlung': 'Tierärztliche Behandlung',
+};
 const schoen = (t) => SCHOENER[t] || t;
 const fixArt = (f) => FIX_ARTEN.find(([, t]) => t(f))[0];
 
@@ -1323,7 +1479,7 @@ function bildSpeichern(id) {
   const ctx = out.getContext('2d');
   ctx.fillStyle = css('--surface'); ctx.fillRect(0, 0, out.width, out.height);
   ctx.drawImage(canvas, 0, 0);
-  const titel = (id === 'c-verlauf' ? $('#t-verlauf') : $('#t-kat')).textContent;
+  const titel = $({ 'c-verlauf': '#t-verlauf', 'c-kat': '#t-kat', 'c-ergebnis': '#t-ergebnis', 'c-top': '#t-top' }[id] || '#t-verlauf').textContent;
   out.toBlob((b) => herunterladen(b, dateiname(titel) + '.png'));
 }
 
@@ -1365,57 +1521,60 @@ function vorschlagNehmen(i) {
 }
 
 // ======================================================================= Ablauf
-// „Zurück“: frühere Filterzustände; beim Tippen zählt ein ganzes Suchwort als ein Schritt
-const schritte = [];
+// Jede Änderung von Filter oder Bereich ist ein Schritt im Browser-Verlauf: Die Zurück-Taste der Maus, Alt + ← und der
+// Knopf „Zurück“ führen zur vorherigen Ansicht. Beim Tippen zählt ein ganzes Suchwort als ein Schritt.
 let tippt = false;
+let stufe = 0;   // eigene Schritte im Browser-Verlauf
 const ZUSTAND = ['q', 'jahr', 'monat', 'konto', 'kat', 'ukat', 'art', 'umb', 'tab', 'stichtag'];
 const zustand = (x) => JSON.stringify(ZUSTAND.map((k) => x[k]));
 
 function setze(p, { tippen = false } = {}) {
-  const vorher = { ...S };
+  const vorher = zustand(S), tabVorher = S.tab;
   Object.assign(S, p);
   if ('kat' in p && !('ukat' in p)) S.ukat = '';
-  if (zustand(S) !== zustand(vorher) && !(tippen && tippt)) {
-    schritte.push({ s: vorher, tab: 'tab' in p && p.tab !== vorher.tab });
-    if (schritte.length > 60) schritte.shift();
-  }
+  const neu = zustand(S) !== vorher && !(tippen && tippt);
   tippt = tippen;
   limit = 150; offen.clear();
-  aktualisieren();
+  aktualisieren(neu ? 'neu' : 'ersetzen');
+  if (S.tab !== tabVorher) window.scrollTo({ top: 0 });
 }
 
 function zurueck() {
-  const x = schritte.pop();
-  if (!x) return;
-  S = { ...x.s, tab: x.tab ? x.s.tab : S.tab, sort: S.sort, dir: S.dir };
-  tippt = false; limit = 150; offen.clear();
-  aktualisieren();
+  if (stufe > 0) history.back();
 }
 
-function aktualisieren() {
+function aktualisieren(hist = 'ersetzen') {
   if (!D) return;
   const conds = filtern();
-  hashSchreiben();
+  hashSchreiben(hist);
+  const t = S.tab;
+  $('#tabs').hidden = false;
+  document.querySelectorAll('#tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === t)));
+  $('#tab-n').textContent = NUM.format(F.length);
+  $('#werkzeug').hidden = t === 'steuer';
+  $('#kpis').hidden = !['start', 'buchungen', 'uebersicht'].includes(t);
+  $('#seite-start').hidden = t !== 'start';
+  $('#tabelle-card').hidden = t === 'start';
   filterZeigen(conds);
-  kennzahlen(conds);
-  verlauf();
-  kategorien();
-  tabelle(conds);
+  if (!$('#kpis').hidden) kennzahlen(conds);
+  if (t === 'start') { verlauf(); kategorien(); ergebnis(); topEmpfaenger(); }
+  else tabelle(conds);
 }
 
-function hashSchreiben() {
+function hashSchreiben(hist = 'ersetzen') {
   const p = new URLSearchParams();
   for (const k of ['q', 'jahr', 'monat', 'konto', 'kat', 'ukat', 'stichtag']) if (S[k]) p.set(k, S[k]);
   if (S.art !== 'alle') p.set('art', S.art);
   if (S.umb) p.set('umb', '1');
-  if (S.tab !== 'buchungen') p.set('tab', S.tab);
-  const h = p.toString();
-  history.replaceState(null, '', h ? '#' + h : location.pathname + location.search);
+  if (S.tab !== 'start') p.set('tab', S.tab);
+  const h = p.toString(), url = h ? '#' + h : location.pathname + location.search;
+  if (hist === 'neu') { stufe++; history.pushState({ fd: stufe }, '', url); }
+  else if (hist === 'ersetzen') history.replaceState({ fd: stufe }, '', url);
 }
 let ersterStart = true;
 function hashLesen() {
   const p = new URLSearchParams(location.hash.slice(1));
-  S = { ...S0 };
+  S = { ...S0, sort: S.sort, dir: S.dir };
   // Grundeinstellung beim Öffnen ohne Auswahl in der Adresse: das aktuelle Jahr (ohne Daten dafür: das letzte Jahr mit Daten)
   if (ersterStart && D && ![...p.keys()].length) {
     const jetzt = new Date().getFullYear();
@@ -1426,7 +1585,7 @@ function hashLesen() {
   if (/^\d{4}-\d{2}-\d{2}$/.test(p.get('stichtag') || '')) S.stichtag = p.get('stichtag');
   if (['aus', 'ein'].includes(p.get('art'))) S.art = p.get('art');
   S.umb = p.get('umb') === '1';
-  if (['uebersicht', 'konten', 'fix', 'steuer'].includes(p.get('tab'))) S.tab = p.get('tab');
+  if (['buchungen', 'uebersicht', 'konten', 'fix', 'steuer'].includes(p.get('tab'))) S.tab = p.get('tab');
 }
 
 function standZeigen() {
@@ -1435,7 +1594,7 @@ function standZeigen() {
   const mail = Q.kontoEmail?.();
   const herkunft = { drive: `aus Google Drive${mail ? ` (${mail})` : ''}`, pc: `aus der verknüpften Datei ${quelle.name} auf diesem PC`, datei: `aus der Datei ${quelle.name}`, lokal: 'lokale Testdaten' }[quelle.quelle] || '';
   const erstellt = j.erstellt ? `${dde(j.erstellt.slice(0, 10))}, ${j.erstellt.slice(11, 16)} Uhr` : '';
-  $('#fuss').textContent = `Daten ${herkunft}, erstellt am ${erstellt}. Neue Daten: in „10 Finanzen“ aktualisieren.py starten, dann hier ↻.`;
+  $('#fuss').textContent = `Daten ${herkunft}, erstellt am ${erstellt}. Neue Kontodaten einfach in Google Drive › 10 Finanzen › Eingang legen – der PC übernimmt sie automatisch; danach hier ↻.`;
   $('#menu-quelle').textContent = `Aktuell: ${NUM.format(D.rows.length)} Buchungen ${herkunft}, erstellt am ${erstellt}.`;
   $('#btn-neu').hidden = !['drive', 'pc'].includes(quelle.quelle);
   $('#btn-neu').title = quelle.quelle === 'pc' ? 'Neueste Daten aus der verknüpften Datei laden' : 'Neueste Daten aus Google Drive laden';
@@ -1537,7 +1696,7 @@ function themeSetzen(t) {
   try { cur = localStorage.getItem('fd.theme') || 'light'; } catch {}
   if (cur === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = cur;
   document.querySelectorAll('#m-theme button').forEach((b) => b.classList.toggle('an', b.dataset.v === cur));
-  if (D) { verlauf(); kategorien(); }
+  if (D) aktualisieren('keins');
 }
 
 function events() {
@@ -1558,23 +1717,22 @@ function events() {
   $('#q').addEventListener('blur', () => setTimeout(vorschlaegeZu, 120));
   $('#q').addEventListener('search', () => { if (!$('#q').value) setze({ q: '' }); });
   document.addEventListener('keydown', (e) => {
-    if (e.altKey && e.key === 'ArrowLeft' && schritte.length) { e.preventDefault(); zurueck(); return; }
+    if (e.key === 'Escape' && !$('#f-jahr-liste').hidden) { jahrMenu(false); $('#f-jahr').focus(); return; }
     if ((e.key === '/' || (e.key === 'k' && (e.ctrlKey || e.metaKey))) && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
       e.preventDefault(); $('#q').focus(); $('#q').select();
     }
   });
   $('#q-hilfe').onclick = () => $('#dlg-hilfe').showModal();
   $('#beispiele').querySelectorAll('button').forEach((b) => b.onclick = () => { $('#dlg-hilfe').close(); setze({ q: b.textContent }); });
-  $('#f-jahr').onchange = (e) => { if (e.target.value !== '__m') setze({ jahr: e.target.value }); };
-  $('#f-monat').onchange = (e) => { if (e.target.value !== '__m') setze({ monat: e.target.value }); };
+  $('#f-jahr').onclick = () => jahrMenu();
+  document.addEventListener('click', (e) => { if (!$('#f-jahr-box').contains(e.target)) jahrMenu(false); });
   $('#f-konto').onchange = (e) => setze({ konto: e.target.value });
   $('#f-kat').onchange = (e) => setze({ kat: e.target.value, ukat: '' });
   $('#f-umb').onchange = (e) => setze({ umb: e.target.checked });
   document.querySelectorAll('#f-art button').forEach((b) => b.onclick = () => setze({ art: b.dataset.v }));
   $('#f-reset').onclick = () => setze({ ...S0, tab: S.tab, sort: S.sort, dir: S.dir });
   $('#f-zurueck').onclick = zurueck;
-  if (!document.querySelector('#tabs [data-tab="steuer"]')) $('#tabs').insertAdjacentHTML('beforeend', '<button role="tab" data-tab="steuer">Steuer</button>');
-  document.querySelectorAll('#tabs button').forEach((b) => b.onclick = () => { S.tab = b.dataset.tab; hashSchreiben(); tabelle(parse(S.q)); });
+  document.querySelectorAll('#tabs button').forEach((b) => b.onclick = () => setze({ tab: b.dataset.tab }));
   $('#dl-xlsx').onclick = () => exportieren('xlsx');
   $('#dl-csv').onclick = () => exportieren('csv');
   document.querySelectorAll('[data-bild]').forEach((b) => b.onclick = () => bildSpeichern(b.dataset.bild));
@@ -1601,6 +1759,7 @@ function events() {
     D = null; quelle = null;
     $('#dlg-menu').close();
     history.replaceState(null, '', location.pathname);
+    $('#tabs').hidden = true;
     startZeigen();
   };
   $('#start-drive').onclick = async () => {
@@ -1608,7 +1767,14 @@ function events() {
     catch (e) { startZeigen(e.message); }
   };
   $('#start-datei').onclick = async () => { try { anzeigen(await Q.dateiWaehlen()); } catch (e) { startZeigen(e.message); } };
-  window.addEventListener('hashchange', () => { if (D) { hashLesen(); aktualisieren(); } });
+  // Zurück/Vor (Maustasten, Alt + ←/→, Browser-Knöpfe) und von Hand geänderte Adresse
+  window.addEventListener('popstate', (e) => {
+    if (!D) return;
+    stufe = e.state?.fd ?? 0;
+    hashLesen();
+    limit = 150; offen.clear(); jahrMenu(false);
+    aktualisieren('keins');
+  });
   let breiteT, breiteAlt = 0;
   new ResizeObserver(() => {
     clearTimeout(breiteT);
