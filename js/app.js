@@ -430,7 +430,8 @@ const wertLabels = {
     ctx.font = '12px ' + css('--font');
     ctx.fillStyle = css('--text-2');
     ctx.textBaseline = 'middle';
-    meta.data.forEach((bar, i) => ctx.fillText(EUR0.format(chart.data.datasets[0].data[i]), bar.x + 6, bar.y));
+    const fmt = chart.options.plugins?.wertFormat || ((v) => EUR0.format(v));
+    meta.data.forEach((bar, i) => ctx.fillText(fmt(chart.data.datasets[0].data[i], i), bar.x + 6, bar.y));
     ctx.restore();
   },
 };
@@ -495,7 +496,8 @@ function kategorien() {
   const c = css(einMode ? '--ein' : '--aus');
   const o = basis();
   o.indexAxis = 'y';
-  o.layout = { padding: { right: 86 } };
+  o.layout = { padding: { right: 124 } };
+  o.plugins.wertFormat = (v) => `${EUR0.format(v)} · ${summe ? Math.round((v * 10000) / summe) : 0} %`;
   const vjKat = new Map();
   if (V) for (const r of V.rows) {
     if (r.art === 'Umbuchung' || r.art === 'Sparen') continue;
@@ -606,7 +608,8 @@ function topEmpfaenger() {
   const c = css('--accent');
   const o = basis();
   o.indexAxis = 'y';
-  o.layout = { padding: { right: 86 } };
+  o.layout = { padding: { right: 124 } };
+  o.plugins.wertFormat = (v) => `${EUR0.format(v)} · ${gesamt ? Math.round((v * 10000) / gesamt) : 0} %`;
   o.plugins.tooltip.callbacks = { title: (it) => list[it[0].dataIndex].name, label: (it) => ` ${EUR0.format(it.raw)} · ${NUM.format(list[it.dataIndex].n)} Buchungen · ${gesamt ? Math.round((it.raw * 10000) / gesamt) : 0} % aller ${einMode ? 'Einnahmen' : 'Ausgaben'}` };
   o.scales = {
     x: { display: false, beginAtZero: true },
@@ -615,6 +618,209 @@ function topEmpfaenger() {
   o.onClick = (_, el) => { if (el.length) setze({ q: `"${list[el[0].index].name}"`, tab: 'buchungen' }); };
   o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
   zeichne('c-top', { type: 'bar', data: { labels: list.map((e) => e.name), datasets: [{ data: list.map((e) => e.c / 100), backgroundColor: alpha(c, .78), hoverBackgroundColor: c, borderRadius: 4, barThickness: 18 }] }, options: o, plugins: [wertLabels] });
+}
+
+// ======================================================================= Durchschnitte und Quoten
+// Grundlage sind nur abgeschlossene Monate: Der laufende Monat (Gehalt oft noch nicht da) würde jeden Durchschnitt verfälschen.
+const mkey = (y, m) => `${y}-${String(m).padStart(2, '0')}`;
+const tageImMonat = (k) => new Date(Date.UTC(+k.slice(0, 4), +k.slice(5, 7), 0)).getUTCDate();
+function zeitraumMonate(jahre) {
+  const mw = monateWahl();
+  const k = S.konto ? D.konten[D.kontoIdx.get(S.konto)] : null;
+  const lo = (k?.von || D.von).slice(0, 7), hi = (k?.bis || D.bis).slice(0, 7);
+  const laufend = D.bis !== monatsletzter(D.bis) ? D.bis.slice(0, 7) : '';
+  const out = [];
+  let [y, m] = lo.split('-').map(Number);
+  for (let key = mkey(y, m); key <= hi; key = mkey(y, m)) {
+    if ((!jahre.length || jahre.includes(y)) && (!mw.length || mw.includes(m)) && key !== laufend) out.push(key);
+    if (++m > 12) { m = 1; y++; }
+  }
+  return out;
+}
+// Buchungen, die zu einem erkannten Fixkosten-Vertrag gehören (ohne die Beiträge aufs Gemeinschaftskonto: das sind Umbuchungen)
+function fixIds() {
+  if (!D.fixIds) D.fixIds = new Set(fixkostenErkennen().filter((f) => !f.beitrag).flatMap((f) => f.rows.map((r) => r.i)));
+  return D.fixIds;
+}
+// Summen über bestimmte Monate; t = Prüffunktion (Konto, Kategorie, Suche, Umbuchungen – ohne Jahr und ohne „nur Ausgaben“)
+function schnittWerte(monate, t) {
+  const set = new Set(monate), fx = fixIds();
+  let ein = 0, aus = 0, fix = 0, spar = 0;
+  for (const r of D.rows) {
+    if (!set.has(r.d.slice(0, 7)) || !t(r)) continue;
+    if (r.art === 'Einnahme') ein += r.c;
+    else if (r.art === 'Ausgabe') { aus += r.c; if (fx.has(r.i)) fix += r.c; }
+    else if (r.art === 'Sparen') spar += r.c;
+  }
+  return { n: monate.length, tage: monate.reduce((s, k) => s + tageImMonat(k), 0), ein, aus, erg: ein + aus, fix, spar, monate };
+}
+const monatsText = (ms) => {
+  if (!ms.length) return '';
+  const t = (k) => `${MON[+k.slice(5, 7) - 1]} ${k.slice(0, 4)}`;
+  return ms.length === 1 ? t(ms[0]) : `${t(ms[0])} – ${t(ms[ms.length - 1])}`;
+};
+// Vergleichszeiträume: Vorjahr (dieselben Monate ein Jahr früher) und Schnitt der drei Vorjahre – nur bei einem Jahr
+function vergleichsMonate(monate, versatz) {
+  const v = monate.map((k) => mkey(+k.slice(0, 4) - versatz, +k.slice(5, 7))).filter((k) => k >= D.von.slice(0, 7));
+  return v.length === monate.length ? v : [];
+}
+
+function durchschnitte() {
+  const jw = jahreWahl();
+  const conds = parse(S.q);
+  const t = pruefer(conds, false, false);
+  const monate = zeitraumMonate(jw);
+  const box = $('#schnitt');
+  if (!monate.length) { box.innerHTML = '<div class="leer">Noch kein abgeschlossener Monat im gewählten Zeitraum.</div>'; $('#h-schnitt').textContent = ''; return null; }
+  const a = schnittWerte(monate, t);
+  const einJ = new Set(monate.map((k) => k.slice(0, 4))).size === 1;
+  const vjM = einJ ? vergleichsMonate(monate, 1) : [];
+  const v1 = vjM.length ? schnittWerte(vjM, t) : null;
+  const v3m = einJ ? [1, 2, 3].map((x) => vergleichsMonate(monate, x)) : [];
+  const v3 = v3m.length && v3m.every((m) => m.length) ? schnittWerte(v3m.flat(), t) : null;
+  // ohne einzelnes Jahr: Vergleich mit den letzten 12 abgeschlossenen Monaten
+  const l12m = einJ ? [] : zeitraumMonate([]).slice(-12);
+  const l12 = l12m.length ? schnittWerte(l12m, t) : null;
+  const laufend = D.bis !== monatsletzter(D.bis);
+  $('#h-schnitt').textContent = `Ø aus ${a.n} abgeschlossenen ${a.n === 1 ? 'Monat' : 'Monaten'} (${monatsText(monate)})${laufend ? ` · ${MON[+D.bis.slice(5, 7) - 1]} läuft noch und zählt nicht mit` : ''}`;
+  const pm = (x, f) => (x && x.n ? f(x) / x.n : null);
+  const proz = (z, n) => (n ? (z / n) * 100 : null);
+  const pf = (v) => (v == null ? '–' : `${NUM.format(Math.round(v))} %`);
+  const diff = (jetzt, vorher, mehrGut, inProzentpunkten) => {
+    if (jetzt == null || vorher == null) return '';
+    if (inProzentpunkten === 'eur') { const d = jetzt - vorher; return Math.abs(d) >= 100 ? `<span class="${(d > 0) === mehrGut ? 'pos' : 'neg'}">${d > 0 ? '▲ +' : '▼ −'}${eur0(Math.abs(d))}</span>` : '<span class="muted">=</span>'; }
+    if (inProzentpunkten) { const d = Math.round(jetzt - vorher); return d ? `<span class="${(d > 0) === mehrGut ? 'pos' : 'neg'}">${d > 0 ? '▲' : '▼'} ${Math.abs(d)} Pkt.</span>` : '<span class="muted">=</span>'; }
+    if (!vorher) return '';
+    const d = Math.round(((Math.abs(jetzt) - Math.abs(vorher)) / Math.abs(vorher)) * 100);
+    return d ? `<span class="${(d > 0) === mehrGut ? 'pos' : 'neg'}">${d > 0 ? '▲' : '▼'} ${Math.abs(d)} %</span>` : '<span class="muted">=</span>';
+  };
+  const vgl = (f, mehrGut, fmt, pp = false) => {
+    const jetzt = f(a);
+    const zeilen = [];
+    if (v1) zeilen.push(`<span class="muted">Vorjahr</span> ${fmt(f(v1))} ${diff(jetzt, f(v1), mehrGut, pp)}`);
+    if (v3) zeilen.push(`<span class="muted">Ø 3 Vorjahre</span> ${fmt(f(v3))}`);
+    if (l12) zeilen.push(`<span class="muted">letzte 12 Mon.</span> ${fmt(f(l12))} ${diff(jetzt, f(l12), mehrGut, pp)}`);
+    return zeilen.map((z) => `<div class="sv">${z}</div>`).join('');
+  };
+  const e0 = (c) => (c == null ? '–' : eur0(c));
+  const ea = (c) => (c == null ? '–' : eur0(Math.abs(c)));   // Ausgaben als Betrag ohne Minus
+  const kachel = (titel, wert, cls_, unter, vergleich, tip) => `<div class="sk" title="${esc(tip)}"><div class="sl">${titel}</div><div class="sw ${cls_}">${wert}</div>${unter ? `<div class="su">${unter}</div>` : ''}${vergleich}</div>`;
+  const quote = (x) => proz(x.erg, x.ein), fixq = (x) => proz(-x.fix, -x.aus);
+  box.innerHTML = [
+    kachel('Ø Einnahmen / Monat', e0(pm(a, (x) => x.ein)), 'pos', '', vgl((x) => pm(x, (y) => y.ein), true, e0), 'Einnahmen geteilt durch die Zahl der abgeschlossenen Monate'),
+    kachel('Ø Ausgaben / Monat', ea(pm(a, (x) => x.aus)), 'neg', '', vgl((x) => pm(x, (y) => y.aus), false, ea), 'Ausgaben (ohne Umbuchungen und Sparen) je Monat'),
+    kachel('Ø Überschuss / Monat', e0(pm(a, (x) => x.erg)), cls(a.erg), a.erg < 0 ? 'Fehlbetrag – mehr ausgegeben als eingenommen' : 'bleibt im Schnitt jeden Monat übrig', vgl((x) => pm(x, (y) => y.erg), true, e0, 'eur'), 'Einnahmen minus Ausgaben je Monat'),
+    kachel('Sparquote', pf(quote(a)), cls(a.erg), 'Anteil der Einnahmen, der übrig bleibt', vgl(quote, true, pf, true), 'Überschuss geteilt durch Einnahmen. Faustregel: mindestens 20 %.'),
+    kachel('Ø Ausgaben / Tag', ea(a.tage ? a.aus / a.tage : null), 'neg', `aus ${NUM.format(a.tage)} Tagen`, vgl((x) => (x.tage ? x.aus / x.tage : null), false, ea), 'Ausgaben geteilt durch die Kalendertage der abgeschlossenen Monate'),
+    kachel('Fixkosten-Anteil', pf(fixq(a)), '', `der Ausgaben · Ø ${e0(pm(a, (x) => -x.fix))} / Monat${a.ein ? ` · ${pf(proz(-a.fix, a.ein))} der Einnahmen` : ''}`, vgl(fixq, false, pf, true),
+      'Regelmäßige Zahlungen (Miete, Unterhalt, Versicherungen, Verträge, Abos) als Anteil an allen Ausgaben im Zeitraum. Deine Überweisungen aufs Gemeinschaftskonto sind Umbuchungen – was von dort ausgegeben wird, zählt hier als Ausgabe.'),
+  ].join('');
+  return { a, v1, monate, t };
+}
+
+// Einnahmen = 100 %: Fixkosten, variable Ausgaben und was übrig bleibt – mit der Faustregel 50-30-20
+function wohinDasGeldGeht(x) {
+  const box = $('#wohin');
+  if (!x || !x.a.ein) { box.innerHTML = '<div class="leer">Keine Einnahmen im gewählten Zeitraum – für diese Aufteilung bitte ohne Filter „nur Ausgaben“ bzw. mit Einnahmen wählen.</div>'; $('#h-wohin').textContent = ''; return; }
+  const { a } = x;
+  const ein = a.ein, fix = -a.fix, varia = -(a.aus - a.fix), rest = a.erg;
+  const p = (c) => (c / ein) * 100;
+  const teile = [
+    { n: 'Fixkosten', c: fix, farbe: '#2a78d6', ziel: 50, hin: 'höchstens 50 %', ok: p(fix) <= 50, info: 'Miete, Unterhalt, Versicherungen, Verträge, Abos' },
+    { n: 'Variable Ausgaben', c: varia, farbe: '#e0602e', ziel: 30, hin: 'höchstens 30 %', ok: p(varia) <= 30, info: 'Einkäufe, Freizeit, Mobilität, Sonstiges' },
+    { n: rest >= 0 ? 'Übrig (Überschuss)' : 'Fehlbetrag', c: Math.abs(rest), farbe: rest >= 0 ? '#1a9e6e' : '#b3401a', ziel: 20, hin: 'mindestens 20 %', ok: p(rest) >= 20, info: rest >= 0 ? 'zum Sparen oder als Reserve' : 'mehr ausgegeben als eingenommen' },
+  ];
+  const breite = Math.max(100, p(fix + varia) + (rest > 0 ? p(rest) : 0));
+  $('#h-wohin').textContent = `Einnahmen = 100 % (Ø ${eur0(ein / a.n)} / Monat)`;
+  box.innerHTML = `
+    <div class="wohin-balken">${teile.filter((t) => t.c > 0 && !(t.n === 'Fehlbetrag')).map((t) => `<i style="width:${(p(t.c) / breite) * 100}%;background:${t.farbe}" title="${esc(t.n)}: ${NUM.format(Math.round(p(t.c)))} %"></i>`).join('')}
+      ${rest < 0 ? `<span class="wohin-linie" style="left:${(100 / breite) * 100}%" title="100 % der Einnahmen"></span>` : ''}</div>
+    <div class="wohin-skala"><span>0 %</span>${[50, 80, 100].map((v) => { const x = (v / breite) * 100; return `<span style="${x > 94 ? 'right:0;transform:none' : `left:${x}%`}">${v} %</span>`; }).join('')}</div>
+    <table class="wohin-tab"><thead><tr><th></th><th class="r">Ø / Monat</th><th class="r">Anteil</th><th>Faustregel 50-30-20</th></tr></thead><tbody>
+    ${teile.map((t) => `<tr><td><span class="punkt" style="background:${t.farbe}"></span><b>${esc(t.n)}</b><div class="klein muted">${esc(t.info)}</div></td>
+      <td class="r">${eur0(t.c / a.n)}</td><td class="r"><b>${NUM.format(Math.round(p(t.c)))} %</b></td>
+      <td class="${t.ok ? 'pos' : 'neg'}">${t.ok ? '✓' : '✗'} ${esc(t.hin)}</td></tr>`).join('')}
+    </tbody></table>
+    ${a.spar < 0 ? `<p class="klein muted">Zusätzlich auf Spar- und Depotkonten außerhalb der Liste überwiesen: Ø ${eur0(-a.spar / a.n)} / Monat (${NUM.format(Math.round(p(-a.spar)))} % der Einnahmen).</p>` : ''}
+    <p class="klein muted">Faustregel: höchstens 50 % für feste Kosten, 30 % für Wünsche und Alltag, mindestens 20 % zum Sparen. Grundlage: ${a.n} abgeschlossene Monate.</p>`;
+}
+
+// Ø Einnahmen und Ausgaben je Monat für jedes Jahr, dazu die Sparquote
+function jahresschnitt() {
+  const conds = parse(S.q);
+  const t = pruefer(conds, false, false);
+  const alle = zeitraumMonate([]);
+  const jahre = [...new Set(alle.map((k) => +k.slice(0, 4)))].slice(-10);
+  const w = jahre.map((y) => schnittWerte(alle.filter((k) => +k.slice(0, 4) === y), t));
+  const jw = jahreWahl();
+  const cE = css('--ein'), cA = css('--aus'), cL = css('--accent');
+  const an = (i) => !jw.length || jw.includes(jahre[i]);
+  $('#h-jahre').textContent = 'Säule anklicken: Jahr wählen · Linie: Sparquote';
+  const o = basis();
+  o.interaction = { mode: 'index', intersect: false };
+  o.plugins.legend = { display: true, position: 'top', align: 'end', labels: { color: css('--text-2'), usePointStyle: true, pointStyle: 'rectRounded', boxWidth: 10, font: { size: 12 } } };
+  o.plugins.tooltip.callbacks = {
+    title: (it) => `${jahre[it[0].dataIndex]} – Ø je Monat (${w[it[0].dataIndex].n} Monate)`,
+    label: (it) => (it.dataset.yAxisID === 'q' ? ` Sparquote: ${it.raw == null ? '–' : NUM.format(Math.round(it.raw)) + ' %'}` : ` ${it.dataset.label}: ${EUR0.format(it.raw)}`),
+    afterBody: (it) => { const x = w[it[0].dataIndex]; return x.n ? [`Überschuss Ø ${eur0(x.erg / x.n)} / Monat`] : []; },
+  };
+  o.scales = {
+    x: { ...achsenStil(), grid: { display: false } },
+    y: { ...achsenStil(), beginAtZero: true, ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 5 } },
+    q: { position: 'right', grid: { display: false }, border: { display: false }, ticks: { color: cL, font: { size: 11 }, callback: (v) => `${v} %`, maxTicksLimit: 5 } },
+  };
+  o.onClick = (_, el) => { if (el.length) setze({ jahr: String(jahre[el[0].index]), monat: '' }); };
+  o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
+  zeichne('c-jahre', { type: 'bar', data: { labels: jahre.map(String), datasets: [
+    { label: 'Ø Einnahmen', data: w.map((x) => (x.n ? x.ein / x.n / 100 : 0)), backgroundColor: jahre.map((_, i) => alpha(cE, an(i) ? .85 : .3)), hoverBackgroundColor: cE, borderRadius: 4, maxBarThickness: 26, order: 2 },
+    { label: 'Ø Ausgaben', data: w.map((x) => (x.n ? -x.aus / x.n / 100 : 0)), backgroundColor: jahre.map((_, i) => alpha(cA, an(i) ? .85 : .3)), hoverBackgroundColor: cA, borderRadius: 4, maxBarThickness: 26, order: 2 },
+    { type: 'line', label: 'Sparquote', yAxisID: 'q', data: w.map((x) => (x.ein ? Math.round((x.erg / x.ein) * 1000) / 10 : null)), borderColor: cL, backgroundColor: cL, borderWidth: 2, pointRadius: 3, tension: 0.3, order: 1 },
+  ] }, options: o });
+}
+
+// Tabelle: je Kategorie Ø pro Monat, Anteil, Summe und Vergleich mit dem Vorjahr
+function katSchnitt(x) {
+  const box = $('#kat-schnitt');
+  if (!x) { box.innerHTML = ''; return; }
+  const einMode = S.art === 'ein' || S.kat === 'Einnahmen', unter = !!S.kat;
+  const sammeln = (monate) => {
+    const set = new Set(monate), m = new Map();
+    for (const r of D.rows) {
+      if (!set.has(r.d.slice(0, 7)) || !x.t(r) || (einMode ? r.art !== 'Einnahme' : r.art !== 'Ausgabe')) continue;
+      const k = unter ? r.ukat || '(ohne Unterkategorie)' : r.kat;
+      m.set(k, (m.get(k) || 0) + (einMode ? r.c : -r.c));
+    }
+    return m;
+  };
+  const jetzt = sammeln(x.monate), vor = x.v1 ? sammeln(x.v1.monate) : null;
+  const n = x.monate.length, nv = x.v1?.n || 0;
+  const liste = [...jetzt].filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]);
+  const summe = liste.reduce((s, [, c]) => s + c, 0);
+  $('#t-katschnitt').textContent = `${unter ? `${schoen(S.kat)}: Unterkategorien` : 'Kategorien'} – Anteil und Durchschnitt`;
+  $('#h-katschnitt').textContent = `${einMode ? 'Einnahmen' : 'Ausgaben'} · Ø aus ${n} abgeschlossenen Monaten · Zeile anklicken: ${unter ? 'Unterkategorie' : 'Kategorie'} filtern`;
+  if (!liste.length) { box.innerHTML = '<div class="leer">Keine Buchungen im gewählten Zeitraum.</div>'; return; }
+  const max = liste[0][1];
+  if (vor) vor.set('__summe__', [...vor.values()].filter((c) => c > 0).reduce((s, c) => s + c, 0));
+  const veraend = (k, c) => {
+    if (!vor) return '';
+    const alt = (vor.get(k) || 0) / nv, neu = c / n;
+    if (!alt) return '<td class="r muted sp-m">neu</td>';
+    const d = Math.round(((neu - alt) / alt) * 100);
+    const gut = einMode ? d > 0 : d < 0;
+    return `<td class="r sp-m ${d ? (gut ? 'pos' : 'neg') : 'muted'}">${d > 0 ? '+' : ''}${d} %</td>`;
+  };
+  box.innerHTML = `<div class="tab-scroll"><table class="t fix kat-schnitt-t"><thead><tr><th class="erste">${unter ? 'Unterkategorie' : 'Kategorie'}</th>
+    <th class="r" style="width:120px">Ø / Monat</th><th style="width:30%">Anteil</th><th class="r sp-m" style="width:120px">Summe</th>
+    ${vor ? `<th class="r sp-m" style="width:120px" title="dieselben Monate ein Jahr früher">Ø Vorjahr</th><th class="r sp-m" style="width:100px">Veränderung</th>` : ''}</tr></thead><tbody>
+    ${liste.map(([k, c]) => `<tr class="klick" data-kschnitt="${esc(k)}"><td class="erste" title="${esc(schoen(k))}">${esc(schoen(k))}</td><td class="r"><b>${eur0(c / n)}</b></td>
+      <td><div class="anteil-zelle"><span class="anteil-balken"><i style="width:${(c / max) * 100}%;background:${css(einMode ? '--ein' : '--aus')}"></i></span><span>${NUM.format(Math.round((c / summe) * 1000) / 10)} %</span></div></td>
+      <td class="r sp-m">${eur0(c)}</td>${vor ? `<td class="r sp-m muted">${eur0((vor.get(k) || 0) / nv)}</td>${veraend(k, c)}` : ''}</tr>`).join('')}
+    </tbody><tfoot><tr><td class="erste">Summe</td><td class="r">${eur0(summe / n)}</td><td>100 %</td><td class="r sp-m">${eur0(summe)}</td>
+    ${vor ? (() => { const altS = vor.get('__summe__'); return `<td class="r sp-m muted">${eur0(altS / nv)}</td>${veraend('__summe__', summe).replace('neu', '–')}`; })() : ''}</tr></tfoot></table></div>`;
+  box.querySelectorAll('[data-kschnitt]').forEach((tr) => tr.onclick = () => {
+    const k = tr.dataset.kschnitt;
+    if (!unter) setze({ kat: k, ukat: '' }); else if (k !== '(ohne Unterkategorie)') setze({ ukat: S.ukat === k ? '' : k });
+  });
 }
 
 // ======================================================================= Tabellen
@@ -1479,7 +1685,7 @@ function bildSpeichern(id) {
   const ctx = out.getContext('2d');
   ctx.fillStyle = css('--surface'); ctx.fillRect(0, 0, out.width, out.height);
   ctx.drawImage(canvas, 0, 0);
-  const titel = $({ 'c-verlauf': '#t-verlauf', 'c-kat': '#t-kat', 'c-ergebnis': '#t-ergebnis', 'c-top': '#t-top' }[id] || '#t-verlauf').textContent;
+  const titel = $({ 'c-verlauf': '#t-verlauf', 'c-kat': '#t-kat', 'c-ergebnis': '#t-ergebnis', 'c-top': '#t-top', 'c-jahre': '#t-jahre' }[id] || '#t-verlauf').textContent;
   out.toBlob((b) => herunterladen(b, dateiname(titel) + '.png'));
 }
 
@@ -1557,7 +1763,7 @@ function aktualisieren(hist = 'ersetzen') {
   $('#tabelle-card').hidden = t === 'start';
   filterZeigen(conds);
   if (!$('#kpis').hidden) kennzahlen(conds);
-  if (t === 'start') { verlauf(); kategorien(); ergebnis(); topEmpfaenger(); }
+  if (t === 'start') { const x = durchschnitte(); verlauf(); kategorien(); wohinDasGeldGeht(x); jahresschnitt(); ergebnis(); topEmpfaenger(); katSchnitt(x); }
   else tabelle(conds);
 }
 

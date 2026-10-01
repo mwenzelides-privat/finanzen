@@ -663,3 +663,37 @@ main { max-width: 1600px; padding: 18px 20px 48px; }
 .dlg-knoepfe { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .hilfe-tab .r { text-align: right; white-space: nowrap; }
 @media (max-width: 640px) { .einlesen-knopf span { display: none; } .einlesen-knopf { padding: 0 9px; } }
+
+/* Durchschnitt und Quoten */
+.schnitt-card { margin-top: 14px; }
+.schnitt { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; padding: 10px 6px 14px; }
+.sk { padding: 6px 14px; border-left: 1px solid var(--border); min-width: 0; }
+.sk:first-child { border-left: 0; }
+.sl { font-size: 12.5px; color: var(--muted); font-weight: 560; }
+.sw { font-size: 22px; font-weight: 650; letter-spacing: -.01em; margin: 2px 0 1px; white-space: nowrap; }
+.su { font-size: 12px; color: var(--text-2); margin-bottom: 4px; line-height: 1.35; }
+.sv { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.55; }
+/* Wohin das Geld geht */
+.wohin { padding: 14px 18px 12px; }
+.wohin-balken { position: relative; display: flex; height: 26px; border-radius: 8px; overflow: hidden; background: var(--surface-2); }
+.wohin-balken i { display: block; height: 100%; }
+.wohin-balken i + i { border-left: 2px solid var(--surface); }
+.wohin-linie { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--aus-text); }
+.wohin-skala { position: relative; height: 18px; margin: 4px 0 10px; font-size: 11.5px; color: var(--muted); }
+.wohin-skala span { position: absolute; transform: translateX(-50%); }
+.wohin-skala span:first-child { transform: none; left: 0; }
+.wohin-tab { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.wohin-tab th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 4px 6px; border-bottom: 1px solid var(--border); }
+.wohin-tab td { padding: 7px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.wohin-tab .r { text-align: right; white-space: nowrap; }
+.wohin-tab .punkt { display: inline-block; margin-right: 7px; vertical-align: middle; }
+.wohin p { margin: 8px 0 0; }
+/* Kategorien: Anteil und Durchschnitt */
+.kat-schnitt-card { margin-top: 14px; }
+.anteil-zelle { display: flex; align-items: center; gap: 10px; }
+.anteil-zelle > span:last-child { width: 50px; text-align: right; color: var(--text-2); font-size: 13px; flex: none; }
+.anteil-balken { flex: 1; height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.anteil-balken i { display: block; height: 100%; border-radius: 4px; opacity: .85; }
+@media (max-width: 1280px) { .schnitt { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 12px; } .sk:nth-child(4) { border-left: 0; } }
+@media (max-width: 640px) { .schnitt { grid-template-columns: repeat(2, minmax(0, 1fr)); } .sk:nth-child(odd) { border-left: 0; } .sk:nth-child(4) { border-left: 1px solid var(--border); } .sw { font-size: 19px; } }
+.wohin-skala span { white-space: nowrap; }
