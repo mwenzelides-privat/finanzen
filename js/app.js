@@ -76,7 +76,8 @@ function pruefer(conds, mitJahr = true, mitArt = true) {
   const test = matcher(mitJahr ? conds : conds.filter((c) => c.kind !== 'zeit'));
   const jahre = mitJahr ? jahreWahl() : [], monate = monateWahl();
   const konto = S.konto ? D.kontoIdx.get(S.konto) ?? -2 : -1;
-  return (r) => (S.umb || r.art !== 'Umbuchung')
+  const kindGewaehlt = konto >= 0 && D.konten[konto]?.kind;
+  return (r) => (S.umb || r.art !== 'Umbuchung') && (r.art !== 'Kinderkonto' || kindGewaehlt)
     && (!jahre.length || jahre.includes(r.y)) && (!monate.length || monate.includes(r.m)) && (konto === -1 || r.k === konto)
     && (!S.kat || r.kat === S.kat) && (!S.ukat || r.ukat === S.ukat)
     && (!mitArt || S.art === 'alle' || (S.art === 'aus' ? r.art === 'Ausgabe' : r.art === 'Einnahme'))
@@ -168,7 +169,9 @@ function selectsFuellen() {
     letzterM = m;
     setze({ monat: w.sort((x, y) => x - y).join(',') });
   });
-  $('#f-konto').innerHTML = opt('', 'Alle Konten') + D.konten.map((k) => opt(k.name, k.name)).join('');
+  const eigene = D.konten.filter((k) => !k.kind), kinder = D.konten.filter((k) => k.kind);
+  $('#f-konto').innerHTML = opt('', 'Alle Konten') + eigene.map((k) => opt(k.name, k.name)).join('')
+    + (kinder.length ? `<optgroup label="Konten der Kinder – zählen nicht mit">${kinder.map((k) => opt(k.name, k.name)).join('')}</optgroup>` : '');
   $('#f-kat').innerHTML = opt('', 'Alle Kategorien') + D.kats.map((k) => opt(k, schoen(k))).join('');
 }
 
@@ -1003,7 +1006,20 @@ function kontenDaten() {
   for (const r of F) { const x = m[r.k]; x.n++; if (r.art === 'Einnahme') x.ein += r.c; else if (r.art === 'Ausgabe') x.aus += r.c; }
   const konto = S.konto ? D.kontoIdx.get(S.konto) : -1;
   // Alle Konten, die es am Stichtag gab; ein geschlossenes Konto ohne Geld und ohne Buchungen im Filter fällt weg
-  return m.filter((x, i) => (konto === -1 || i === konto) && !['nicht_eroeffnet', 'geschlossen'].includes(x.st.status));
+  return m.filter((x, i) => (konto === -1 ? !x.k.kind : i === konto) && !['nicht_eroeffnet', 'geschlossen'].includes(x.st.status));
+}
+
+// Konten der Kinder: nur zur Information, zählen in keiner Summe
+function kinderKontenHtml(tag) {
+  if (S.konto) return '';
+  const stand = kontostaende(D, tag);
+  const k = stand.filter((x) => x.k.kind && !['nicht_eroeffnet', 'geschlossen'].includes(x.status));
+  if (!k.length) return '';
+  return `<details class="eingang kinder-konten"><summary><b>Konten der Kinder</b> <span class="muted">· ${k.length} Konten · zählen nicht zu deinen Finanzen (nicht in Summen, Durchschnitten und Grafiken)</span></summary>
+    <p class="muted klein">Was du den Kindern überweist (Taschengeld, „Sparen Leo/Mara“, Geschenke), ist bei dir eine Ausgabe in der Kategorie Kinder; Erstattungen von Auslagen sind Einnahmen; Darlehen bleiben neutral. Zeile anklicken: Buchungen des Kontos.</p>
+    <div class="tab-scroll"><table class="t fix"><thead><tr><th class="erste">Konto</th><th class="r" style="width:150px">Stand ${dde(tag)}</th><th class="sp-m" style="width:230px">Daten</th></tr></thead><tbody>
+    ${k.map((x) => `<tr class="klick" data-konto="${esc(x.k.name)}"><td class="erste">${esc(x.k.name)}</td><td class="r">${x.c == null ? '<span class="muted">unbekannt</span>' : eur(x.c)}</td><td class="klein sp-m">ab ${dde(x.k.von)}</td></tr>`).join('')}
+    </tbody></table></div></details>`;
 }
 
 function tabKonten() {
@@ -1052,7 +1068,7 @@ function tabKonten() {
   h += `</tbody><tfoot><tr><td class="erste">Summe</td><td class="r sp-m">${NUM.format(m.reduce((s, x) => s + x.n, 0))}</td>
     <td class="r pos sp-m">${eur0(m.reduce((s, x) => s + x.ein, 0))}</td><td class="r neg sp-m">${eur0(m.reduce((s, x) => s + x.aus, 0))}</td>
     <td class="r">${eur(saldo)}</td><td class="klein muted sp-m">ohne Depot${ohne ? `, ohne ${m.filter((x) => x.st.c == null).map((x) => esc(x.k.name)).join(', ')}` : ''}</td></tr></tfoot></table></div>${ohneDaten}`;
-  return h + eingangHtml();
+  return h + kinderKontenHtml(tag) + eingangHtml();
 }
 
 // Grafiken im Reiter Konten: Summe der Kontostände je Monatsende (36 Monate) und Verteilung am Stichtag
@@ -1067,7 +1083,7 @@ function kontenGrafikZeichnen() {
     tage.unshift(d > D.bis ? D.bis : d);
     if (--mo === 0) { mo = 12; y--; }
   }
-  const werte = tage.map((d) => kontostaende(D, d).filter((x) => (nur === -1 || x.i === nur) && x.c != null && x.status !== 'unbekannt').reduce((t, x) => t + x.c, 0) / 100);
+  const werte = tage.map((d) => kontostaende(D, d).filter((x) => (nur === -1 ? !x.k.kind : x.i === nur) && x.c != null && x.status !== 'unbekannt').reduce((t, x) => t + x.c, 0) / 100);
   const c = css('--accent');
   const o = basis();
   o.interaction = { mode: 'index', intersect: false };
@@ -1127,7 +1143,7 @@ function eingangHtml() {
 }
 
 const TITEL = {
-  buchungen: () => ['Buchungen', `${NUM.format(F.length)} Treffer · Zeile anklicken für Details · Spaltenkopf: sortieren`],
+  buchungen: () => ['Buchungen', `${S.konto && D.konten[D.kontoIdx.get(S.konto)]?.kind ? 'Konto eines Kindes – zählt nicht zu deinen Finanzen (Summen 0 €) · ' : ''}${NUM.format(F.length)} Treffer · Zeile anklicken für Details · Spaltenkopf: sortieren`],
   uebersicht: () => ['Kategorien', 'Zeile anklicken: Unterkategorien · Spaltenkopf: Monat bzw. Jahr filtern'],
   fix: () => ['Fixkosten und Abos', 'regelmäßige Zahlungen, automatisch erkannt'],
   konten: () => ['Konten', 'Zeile anklicken: Buchungen des Kontos'],

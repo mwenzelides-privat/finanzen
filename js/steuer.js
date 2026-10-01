@@ -161,7 +161,7 @@ const speichern = () => kvSchreiben(KV, entscheidungen).catch(() => {});
 
 // Automatische Einordnung einer Buchung (ohne deine Entscheidungen): { p, quelle: 'buhl'|'vorschlag', hinweis }
 function automatisch(r) {
-  if (r.art === 'Umbuchung' || r.art === 'Sparen') return null;
+  if (r.art === 'Umbuchung' || r.art === 'Sparen' || r.art === 'Kinderkonto') return null;
   let p = r.st ? BUHL[r.st] : null, quelle = 'buhl', grund = r.st ? `Steuerkategorie in WISO/Buhl: „${r.st}“` : '';
   if (!p) {
     quelle = 'vorschlag';
