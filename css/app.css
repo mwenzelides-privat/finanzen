@@ -1234,3 +1234,71 @@ button.ue-kz:hover { background: var(--surface-2); }
 }
 @media (max-height: 720px) { .uem { grid-template-rows: auto auto minmax(0, 1.9fr) minmax(0, 1fr); } .uem-schnell { display: none; } .ue-kopf .muted { display: none; } }
 @media (max-width: 1100px) { .uem-schnell { display: none; } }
+
+/* Fixkosten vom Gehalt (Startseite) */
+.uem-kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.uem-fg { position: relative; display: flex; height: 8px; border-radius: 4px; background: var(--surface-2); margin: 3px 0 2px; }
+.uem-fg > i { display: block; height: 100%; }
+.uem-fg > i:first-child { border-radius: 4px 0 0 4px; }
+.uem-fg > i:last-of-type { border-radius: 0 4px 4px 0; }
+.uem-fg > i + i { border-left: 1.5px solid var(--surface); }
+.uem-fg-fix { background: #b8461b; }
+.uem-fg-leben { background: var(--aus); opacity: .55; }
+.uem-fg-rest { background: var(--ein); }
+.uem-fg-minus { position: absolute; top: 0; bottom: 0; border-radius: 0 4px 4px 0; background: repeating-linear-gradient(135deg, rgba(224, 96, 46, .9) 0 3px, rgba(224, 96, 46, .25) 3px 6px); }
+.uem-fg-100, .uem-fg-50 { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--text); border-radius: 1px; }
+.uem-fg-50 { background: var(--muted); width: 1.5px; }
+.uem-v-bar i.fix { background: #b8461b; opacity: .9; }
+@media (max-width: 1280px) { .uem-kpis { gap: 8px; } .uem-kpis .ue-kpi { padding: 8px 10px; } .uem-kpis .ue-kpi-l { font-size: 11.5px; } }
+@media (max-width: 900px), (max-height: 500px) { .uem-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Fixkosten: Wann abgebucht wird */
+.ab-satz { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--text-2); }
+.ab-satz b { color: var(--text); }
+.ab-kurve { position: relative; height: 110px; margin: 18px 4px 0; border-left: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); }
+.ab-kurve svg { position: absolute; inset: 0; width: 100%; height: 100%; stroke: none; overflow: visible; }
+.ab-fl { fill: rgba(184, 70, 27, .14); stroke: none; }
+.ab-li { fill: none; stroke: #b8461b; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.ab-marke { position: absolute; top: -16px; transform: translateX(4px); font-size: 11.5px; color: var(--text-2); white-space: nowrap; }
+.ab-marke b { color: #b8461b; }
+.ab-gehalt, .ab-heute { position: absolute; top: -6px; bottom: 0; width: 0; border-left: 2px dashed var(--ein); }
+.ab-gehalt span, .ab-heute span { position: absolute; bottom: 4px; right: 5px; font-size: 11px; font-weight: 650; color: var(--ein-text); white-space: nowrap; background: var(--surface); padding: 0 3px; border-radius: 4px; }
+.ab-heute { border-left: 1px dotted var(--text-2); }
+.ab-heute span { color: var(--text-2); font-weight: 500; right: auto; left: 4px; top: 10px; bottom: auto; }
+.ab-summe { position: absolute; right: 0; top: 2px; font-size: 11.5px; font-weight: 650; color: #b8461b; background: var(--surface); padding: 0 2px; }
+.ab-achse { position: relative; height: 16px; margin: 3px 4px 4px; font-size: 11px; color: var(--muted); }
+.ab-achse span { position: absolute; transform: translateX(-50%); }
+.ab-achse span:first-child { transform: none; }
+.ab-achse span:last-child { transform: translateX(-100%); }
+.ab-liste { display: grid; border-top: 1px solid var(--border); }
+.ab-tag { display: grid; grid-template-columns: 34px minmax(0, 1fr) 76px; gap: 10px; align-items: start; padding: 7px 2px; border-bottom: 1px solid var(--border); }
+.ab-d { font-weight: 700; font-size: 13.5px; color: var(--text); padding-top: 2px; }
+.ab-vs { display: flex; flex-wrap: wrap; gap: 5px; }
+.ab-v { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 2px 9px; font-size: 12.5px; color: var(--text-2); white-space: nowrap; }
+.ab-v:hover { border-color: var(--accent); color: var(--text); }
+.ab-v b { color: var(--text); font-weight: 650; margin-left: 2px; }
+.ab-v.ok { background: var(--surface-2); }
+.ab-v i { font-style: normal; color: var(--ein-text); margin-right: 4px; font-weight: 700; }
+.ab-s { text-align: right; font-weight: 700; white-space: nowrap; padding-top: 2px; }
+.ab-gtag { background: rgba(26, 158, 110, .07); }
+.ab-g { font-size: 13px; font-weight: 600; color: var(--ein-text); padding-top: 2px; }
+.ab-bezahlt .ab-d, .ab-bezahlt .ab-s { color: var(--muted); }
+
+/* Monatsstrahl */
+.ab-band { position: relative; height: 150px; margin: 10px 6px 0; }
+.ab-linie { position: absolute; left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px; background: var(--border-strong); border-radius: 1px; }
+.ab-zone { position: absolute; top: 50%; height: 6px; margin-top: -3px; background: rgba(184, 70, 27, .35); border-radius: 3px; }
+.ab-k { position: absolute; transform: translateX(-50%); border-radius: 50%; }
+.ab-k.aus { top: 50%; margin-top: 3px; background: rgba(184, 70, 27, .82); }
+.ab-k.ein { bottom: 50%; margin-bottom: 3px; background: rgba(26, 158, 110, .85); }
+.ab-kl { position: absolute; transform: translateX(-50%); font-size: 11.5px; white-space: nowrap; color: var(--text-2); }
+.ab-kl b { color: var(--text); }
+.ab-kl.aus { color: #b8461b; }
+.ab-kl.ein { color: var(--ein-text); font-weight: 600; }
+.ab-band .ab-heute { top: 4px; bottom: 4px; border-left: 1px dotted var(--text-2); }
+.ab-band .ab-heute span { top: 0; left: 4px; bottom: auto; right: auto; }
+.ab-seite { position: absolute; left: 0; font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.ab-seite.oben { top: 0; } .ab-seite.unten { bottom: 0; }
+.ab-band ~ .ab-achse { margin-top: 0; }
+.ab-band { height: 160px; }
+.ab-band .ab-heute span { top: 2px; }
