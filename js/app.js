@@ -19,6 +19,9 @@ const MONAT = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'Au
 const dde = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`;
 const cls = (c) => (c < 0 ? 'neg' : c > 0 ? 'pos' : '');
 const LOKAL = ['localhost', '127.0.0.1'].includes(location.hostname);
+// Konten, die nicht zu deinen Finanzen zählen: die der Kinder und die gemeinsamen mit Kathrin (dort zählen nur deine Einzahlungen)
+const fremd = (k) => !!(k?.kind || k?.gemeinsam);
+const FREMD_ART = new Set(['Kinderkonto', 'Gemeinschaftskonto']);
 
 let D = null;          // aufbereitete Daten
 let quelle = null;     // gespeicherte Fassung (Text + Herkunft)
@@ -76,8 +79,8 @@ function pruefer(conds, mitJahr = true, mitArt = true) {
   const test = matcher(mitJahr ? conds : conds.filter((c) => c.kind !== 'zeit'));
   const jahre = mitJahr ? jahreWahl() : [], monate = monateWahl();
   const konto = S.konto ? D.kontoIdx.get(S.konto) ?? -2 : -1;
-  const kindGewaehlt = konto >= 0 && D.konten[konto]?.kind;
-  return (r) => (S.umb || r.art !== 'Umbuchung') && (r.art !== 'Kinderkonto' || kindGewaehlt)
+  const fremdGewaehlt = konto >= 0 && fremd(D.konten[konto]);
+  return (r) => (S.umb || r.art !== 'Umbuchung') && (!FREMD_ART.has(r.art) || fremdGewaehlt)
     && (!jahre.length || jahre.includes(r.y)) && (!monate.length || monate.includes(r.m)) && (konto === -1 || r.k === konto)
     && (!S.kat || r.kat === S.kat) && (!S.ukat || r.ukat === S.ukat)
     && (!mitArt || S.art === 'alle' || (S.art === 'aus' ? r.art === 'Ausgabe' : r.art === 'Einnahme'))
@@ -169,8 +172,9 @@ function selectsFuellen() {
     letzterM = m;
     setze({ monat: w.sort((x, y) => x - y).join(',') });
   });
-  const eigene = D.konten.filter((k) => !k.kind), kinder = D.konten.filter((k) => k.kind);
+  const eigene = D.konten.filter((k) => !fremd(k)), kinder = D.konten.filter((k) => k.kind), gemeinsam = D.konten.filter((k) => k.gemeinsam);
   $('#f-konto').innerHTML = opt('', 'Alle Konten') + eigene.map((k) => opt(k.name, k.name)).join('')
+    + (gemeinsam.length ? `<optgroup label="Gemeinsam mit Kathrin – zählen nicht mit">${gemeinsam.map((k) => opt(k.name, k.name)).join('')}</optgroup>` : '')
     + (kinder.length ? `<optgroup label="Konten der Kinder – zählen nicht mit">${kinder.map((k) => opt(k.name, k.name)).join('')}</optgroup>` : '');
   $('#f-kat').innerHTML = opt('', 'Alle Kategorien') + D.kats.map((k) => opt(k, schoen(k))).join('');
 }
@@ -518,7 +522,7 @@ function ueSummen(von, bis) {
 }
 
 // Summe aller eigenen Konten an einem Tag (wie im Reiter Konten: ohne Depot und ohne die Konten der Kinder)
-const kontenSumme = (tag) => (tag < D.von ? null : kontostaende(D, tag).filter((x) => !x.k.kind && x.c != null && x.status !== 'unbekannt').reduce((t, x) => t + x.c, 0));
+const kontenSumme = (tag) => (tag < D.von ? null : kontostaende(D, tag).filter((x) => !fremd(x.k) && x.c != null && x.status !== 'unbekannt').reduce((t, x) => t + x.c, 0));
 
 // Übersicht: Ansicht „Monate“ (aktueller Stand) oder „Jahr“ (Jahr bzw. letzte 12 Monate)
 function uebersicht() {
@@ -792,8 +796,8 @@ function ueMonatsDaten() {
   const typ = { ein: med((x) => x.ein), var: med((x) => x.var), lohn: med((x) => x.lohn), spar: med((x) => x.spar) };
   const schnitt = { ein: avg((x) => x.ein), aus: avg((x) => x.aus), kat: new Map() };
   for (const k of ref) for (const [kat, v] of w(k).kat) schnitt.kat.set(kat, (schnitt.kat.get(kat) || 0) + v / ref.length);
-  // feste Abbuchungen (nur echte Ausgaben – Beiträge zum Gemeinschaftskonto sind Umbuchungen)
-  const vertraege = fixkostenErkennen().filter((f) => f.aktiv && !f.gemeinsam && !f.beitrag);
+  // feste Abbuchungen, auch deine festen Einzahlungen aufs Gemeinschaftskonto (Verträge, die von dort abgehen, nicht)
+  const vertraege = fixkostenErkennen().filter((f) => f.aktiv && !f.gemeinsam);
   const fest = (von, bis) => vertraege.reduce((t, f) => t + faellig(f, von, bis), 0);
   const gt = gehaltstag();
   // die sieben Monate
@@ -858,7 +862,7 @@ function ueKacheln(M) {
       lauf ? `<span class="muted">Tag ${jetzt.tag} von ${jetzt.tage} · erwartet ≈ ${eur0(jetzt.aus)}</span>` : '', tempo),
     kachel('monat', 'erg', `Erwartet Ende ${monatJ}`, `≈ ${vz(jetzt.erg)}`, jetzt.erg >= 0 ? 'pos' : 'neg', `<span class="muted">Konten ≈ ${jetzt.stand == null ? '–' : eur0(jetzt.stand)} am Monatsende</span>`),
     kachel('prognose', 'konto', `Prognose Ende ${monatE}`, ende.stand == null ? '–' : `≈ ${eur0(ende.stand)}`, ende.stand < 0 ? 'neg' : '',
-      heute != null && ende.stand != null ? `<span class="ue-d ${ende.stand - heute >= 0 ? 'gut' : 'schlecht'}">${vz(ende.stand - heute)}</span> <span class="muted">ggü. heute auf den Konten</span>` : ''),
+      jetzt.stand != null && ende.stand != null ? `<span class="ue-d ${ende.stand - jetzt.stand >= 0 ? 'gut' : 'schlecht'}">${vz(ende.stand - jetzt.stand)}</span> <span class="muted">ggü. Ende ${monatJ} (≈ ${vz((ende.stand - jetzt.stand) / 3)} pro Monat)</span>` : ''),
     kachel('schnitt', 'fix', 'Ø pro Monat (12 Monate)', vz(sErg), sErg >= 0 ? 'pos' : 'neg',
       `<span class="muted">${eur0(sE)} rein · ${eur0(sA)} raus · Fixkosten ${eur0(pm)}</span> <span class="ue-d ${pm <= B * 0.5 ? 'gut' : 'schlecht'}">(${B ? Math.round((pm / B) * 100) : '–'} %)</span>`),
   ].join('');
@@ -1053,9 +1057,9 @@ function zeitraumMonate(jahre) {
   }
   return out;
 }
-// Buchungen, die zu einem erkannten Fixkosten-Vertrag gehören (ohne die Beiträge aufs Gemeinschaftskonto: das sind Umbuchungen)
+// Buchungen, die zu einem erkannten Fixkosten-Vertrag gehören (auch deine festen Einzahlungen aufs Gemeinschaftskonto)
 function fixIds() {
-  if (!D.fixIds) D.fixIds = new Set(fixkostenErkennen().filter((f) => !f.beitrag).flatMap((f) => f.rows.map((r) => r.i)));
+  if (!D.fixIds) D.fixIds = new Set(fixkostenErkennen().filter((f) => !f.gemeinsam).flatMap((f) => f.rows.map((r) => r.i)));
   return D.fixIds;
 }
 // Summen über bestimmte Monate; t = Prüffunktion (Konto, Kategorie, Suche, Umbuchungen – ohne Jahr und ohne „nur Ausgaben“)
@@ -1410,7 +1414,20 @@ function kontenDaten() {
   for (const r of F) { const x = m[r.k]; x.n++; if (r.art === 'Einnahme') x.ein += r.c; else if (r.art === 'Ausgabe') x.aus += r.c; }
   const konto = S.konto ? D.kontoIdx.get(S.konto) : -1;
   // Alle Konten, die es am Stichtag gab; ein geschlossenes Konto ohne Geld und ohne Buchungen im Filter fällt weg
-  return m.filter((x, i) => (konto === -1 ? !x.k.kind : i === konto) && !['nicht_eroeffnet', 'geschlossen'].includes(x.st.status));
+  return m.filter((x, i) => (konto === -1 ? !fremd(x.k) : i === konto) && !['nicht_eroeffnet', 'geschlossen'].includes(x.st.status));
+}
+
+// Gemeinsame Konten mit Kathrin: nur zur Information – bei dir zählen nur deine Einzahlungen
+function gemeinsamKontenHtml(tag) {
+  if (S.konto) return '';
+  const k = kontostaende(D, tag).filter((x) => x.k.gemeinsam && !['nicht_eroeffnet', 'geschlossen'].includes(x.status));
+  if (!k.length) return '';
+  const summe = k.reduce((t, x) => t + (x.c || 0), 0);
+  return `<details class="eingang kinder-konten"><summary><b>Gemeinsame Konten mit Kathrin</b> <span class="muted">· ${k.length} Konten · zusammen ${eur(summe)} · zählen nicht zu deinen Finanzen</span></summary>
+    <p class="muted klein">Bei dir zählen nur deine Einzahlungen dorthin – als Ausgabe in der Kategorie „Gemeinschaftskonto“. Was von dort bezahlt wird (Einkäufe, akf Bank …) und was Kathrin einzahlt, steht nicht in deinen Summen. Zeile anklicken: Buchungen des Kontos.</p>
+    <div class="tab-scroll"><table class="t fix"><thead><tr><th class="erste">Konto</th><th class="r" style="width:150px">Stand ${dde(tag)}</th><th class="sp-m" style="width:230px">Daten</th></tr></thead><tbody>
+    ${k.map((x) => `<tr class="klick" data-konto="${esc(x.k.name)}"><td class="erste">${esc(x.k.name)}</td><td class="r">${x.c == null ? '<span class="muted">unbekannt</span>' : eur(x.c)}</td><td class="klein sp-m">ab ${dde(x.k.von)}</td></tr>`).join('')}
+    </tbody></table></div></details>`;
 }
 
 // Konten der Kinder: nur zur Information, zählen in keiner Summe
@@ -1450,12 +1467,12 @@ function tabKonten() {
   const vSumme = vert.reduce((t, x) => t + x.c, 0);
   kontenGrafik = { tag, vert };
   const nurK = S.konto ? D.kontoIdx.get(S.konto) : -1;
-  const summeAm = (d) => (d < D.von ? null : kontostaende(D, d).filter((x) => (nurK === -1 ? !x.k.kind : x.i === nurK) && x.c != null && x.status !== 'unbekannt').reduce((t, x) => t + x.c, 0));
+  const summeAm = (d) => (d < D.von ? null : kontostaende(D, d).filter((x) => (nurK === -1 ? !fremd(x.k) : x.i === nurK) && x.c != null && x.status !== 'unbekannt').reduce((t, x) => t + x.c, 0));
   const jb = `${+tag.slice(0, 4) - 1}-12-31`, vor = `${+tag.slice(0, 4) - 1}${tag.slice(4)}`;
   const delta = (d, t) => { const v = summeAm(d); if (v == null) return ''; const x = saldo - v; return `<div class="kh-d"><span class="muted">${t}</span> <b class="${cls(x)}">${x >= 0 ? '+' : '−'}${eur0(Math.abs(x))}</b></div>`; };
   h += `<div class="konten-held"><div class="kh-haupt"><span class="muted">${nurK === -1 ? 'Auf deinen Konten' : esc(S.konto)} am ${dde(tag)}</span><b class="${saldo < 0 ? 'neg' : ''}">${eur0(saldo)}</b></div>
     ${tag.slice(5) !== '12-31' ? delta(jb, `seit 31.12.${jb.slice(0, 4)}`) : ''}${delta(vor, `ggü. ${dde(vor)}`)}
-    <div class="kh-d muted klein">ohne Depot${nurK === -1 ? ', ohne die Konten der Kinder' : ''}</div></div>`;
+    <div class="kh-d muted klein">ohne Depot${nurK === -1 ? ', ohne die gemeinsamen Konten und die Konten der Kinder' : ''}</div></div>`;
   h += `<div class="konten-grafiken">
       <div class="kg"><div class="fix-grafik-t">Summe der Kontostände je Monatsende <span class="muted">· Punkt anklicken = Stichtag</span></div><div class="kg-c"><canvas id="c-konten-verlauf"></canvas></div></div>
       <div class="kg kg-vert"><div class="fix-grafik-t">Verteilung der Guthaben am ${dde(tag)}</div>
@@ -1479,7 +1496,7 @@ function tabKonten() {
   h += `</tbody><tfoot><tr><td class="erste">Summe</td><td class="r sp-m">${NUM.format(m.reduce((s, x) => s + x.n, 0))}</td>
     <td class="r pos sp-m">${eur0(m.reduce((s, x) => s + x.ein, 0))}</td><td class="r neg sp-m">${eur0(m.reduce((s, x) => s + x.aus, 0))}</td>
     <td class="r">${eur(saldo)}</td><td class="klein muted sp-m">ohne Depot${ohne ? `, ohne ${m.filter((x) => x.st.c == null).map((x) => esc(x.k.name)).join(', ')}` : ''}</td></tr></tfoot></table></div>${ohneDaten}`;
-  return h + kinderKontenHtml(tag) + eingangHtml();
+  return h + gemeinsamKontenHtml(tag) + kinderKontenHtml(tag) + eingangHtml();
 }
 
 // Grafiken im Reiter Konten: Summe der Kontostände je Monatsende (36 Monate) und Verteilung am Stichtag
@@ -1494,7 +1511,7 @@ function kontenGrafikZeichnen() {
     tage.unshift(d > D.bis ? D.bis : d);
     if (--mo === 0) { mo = 12; y--; }
   }
-  const werte = tage.map((d) => kontostaende(D, d).filter((x) => (nur === -1 ? !x.k.kind : x.i === nur) && x.c != null && x.status !== 'unbekannt').reduce((t, x) => t + x.c, 0) / 100);
+  const werte = tage.map((d) => kontostaende(D, d).filter((x) => (nur === -1 ? !fremd(x.k) : x.i === nur) && x.c != null && x.status !== 'unbekannt').reduce((t, x) => t + x.c, 0) / 100);
   const c = css('--accent');
   const o = basis();
   o.interaction = { mode: 'index', intersect: false };
@@ -1554,7 +1571,7 @@ function eingangHtml() {
 }
 
 const TITEL = {
-  buchungen: () => ['Buchungen', `${S.konto && D.konten[D.kontoIdx.get(S.konto)]?.kind ? 'Konto eines Kindes – zählt nicht zu deinen Finanzen (Summen 0 €) · ' : ''}${NUM.format(F.length)} Treffer · Zeile anklicken für Details · Spaltenkopf: sortieren`],
+  buchungen: () => ['Buchungen', `${S.konto && D.konten[D.kontoIdx.get(S.konto)]?.kind ? 'Konto eines Kindes – zählt nicht zu deinen Finanzen (Summen 0 €) · ' : S.konto && D.konten[D.kontoIdx.get(S.konto)]?.gemeinsam ? 'Gemeinsames Konto – zählt nicht zu deinen Finanzen, nur deine Einzahlungen (Summen 0 €) · ' : ''}${NUM.format(F.length)} Treffer · Zeile anklicken für Details · Spaltenkopf: sortieren`],
   uebersicht: () => ['Kategorien', 'Zeile anklicken: Unterkategorien · Spaltenkopf: Monat bzw. Jahr filtern'],
   fix: () => ['Fixkosten und Abos', 'regelmäßige Zahlungen, automatisch erkannt'],
   konten: () => ['Konten', 'Zeile anklicken: Buchungen des Kontos'],
@@ -1656,22 +1673,14 @@ const empfaengerKey = (g) => norm(g).replace(/\d{5,}/g, '').replace(/\s+/g, ' ')
 const GEMEINSAM = /gemeinschaftskonto|pocket/i;
 const istGemeinsam = (k) => GEMEINSAM.test(D.konten[k].name);
 
-// Abgänge von eigenen Konten, die auf einem gemeinsamen Konto ankommen (gleicher Betrag, ±4 Tage; bei mehreren
-// Kandidaten zuerst gleicher Verwendungszweck, dann der nächste Tag). Ergebnis: Buchungs-Nr. → Zielkonto
+// Deine Einzahlungen auf die gemeinsamen Konten (Ausgaben der Kategorie „Gemeinschaftskonto“; Unterkategorie =
+// Zielkonto). Ergebnis: Buchungs-Nr. → Zielkonto
 function beitragsBuchungen() {
-  const nachBetrag = new Map();
-  for (const r of D.rows) if (r.art === 'Umbuchung' && r.c < 0 && !istGemeinsam(r.k)) { if (!nachBetrag.has(-r.c)) nachBetrag.set(-r.c, []); nachBetrag.get(-r.c).push(r); }
   const ziel = new Map();
-  for (const e of D.rows) {
-    if (e.art !== 'Umbuchung' || e.c <= 0 || !istGemeinsam(e.k)) continue;
-    const se = zweckSignatur(e.z);
-    // Verwendungszweck muss passen (oder auf einer Seite fehlen); ohne Zweck nur bei genau einem Kandidaten
-    let kand = (nachBetrag.get(e.c) || []).filter((r) => !ziel.has(r.i) && Math.abs(tageZwischen(r.d, e.d)) <= 4
-      && (!se || !zweckSignatur(r.z) || zweckSignatur(r.z) === se));
-    if (!se && kand.length !== 1) continue;
-    if (!kand.length) continue;
-    kand.sort((a, b) => (zweckSignatur(b.z) === se) - (zweckSignatur(a.z) === se) || Math.abs(tageZwischen(a.d, e.d)) - Math.abs(tageZwischen(b.d, e.d)));
-    ziel.set(kand[0].i, e.k);
+  for (const r of D.rows) {
+    if (r.art !== 'Ausgabe' || r.kat !== 'Gemeinschaftskonto' || r.c >= 0) continue;
+    const k = D.kontoIdx.get(r.ukat);
+    if (k != null) ziel.set(r.i, k);
   }
   return ziel;
 }
@@ -1750,7 +1759,8 @@ function fixkostenErkennen() {
   const gruppen = new Map();
   for (const r of D.rows) {
     const b = beitrag.has(r.i);
-    if ((r.art !== 'Ausgabe' && !b) || (!r.g && !b)) continue;
+    const ab = r.art === 'Ausgabe' || (r.art === 'Gemeinschaftskonto' && r.c < 0);
+    if ((!ab && !b) || (!r.g && !b)) continue;
     const key = b ? `gemeinsam|${zweckSignatur(r.z) || beitrag.get(r.i)}` : empfaengerKey(r.g) + '|' + zweckSignatur(r.z);
     if (!gruppen.has(key)) gruppen.set(key, []);
     gruppen.get(key).push(r);
@@ -1771,7 +1781,7 @@ function fixkostenErkennen() {
   // Schritt 2: übrige Zahlungen nur nach Empfänger und ähnlichem Betrag
   const rest = new Map();
   for (const r of D.rows) {
-    if (r.art !== 'Ausgabe' || !r.g || benutzt.has(r.i)) continue;
+    if (!(r.art === 'Ausgabe' || (r.art === 'Gemeinschaftskonto' && r.c < 0)) || !r.g || benutzt.has(r.i)) continue;
     const key = empfaengerKey(r.g);
     if (!rest.has(key)) rest.set(key, []);
     rest.get(key).push(r);

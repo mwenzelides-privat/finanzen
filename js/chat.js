@@ -106,7 +106,7 @@ function buchungenAuswerten(a) {
   const rows = D.rows.filter((r) => (!a.von || r.d >= a.von) && (!a.bis || r.d <= a.bis)
     && (!konten || konten.has(r.k)) && (!kats || kats.has(r.kat)) && (!ukats || ukats.has(r.ukat)) && (!stks || stks.has(r.st)) && (!a.nur_steuerrelevant || r.st)
     && (art === 'alle' || (art === 'ohne Umbuchungen' ? r.art !== 'Umbuchung' : r.art === art))
-    && (r.art !== 'Kinderkonto' || (konten && konten.has(r.k))) && test(r));
+    && ((r.art !== 'Kinderkonto' && r.art !== 'Gemeinschaftskonto') || (konten && konten.has(r.k))) && test(r));
   let ein = 0, aus = 0, sum = 0;
   for (const r of rows) { sum += r.c; if (r.art === 'Einnahme') ein += r.c; else if (r.art === 'Ausgabe') aus += r.c; }
   const max = Math.min(200, Math.max(1, a.max_zeilen || 40));
@@ -146,9 +146,9 @@ function kontostaendeAm({ datum }) {
     konto: x.k.name, kontostand_euro: x.c == null ? null : e2(x.c),
     sicherheit: STATUS_TEXT[x.status] + (x.status === 'unbekannt' ? ` (Daten ab ${x.k.von})` : x.status === 'ungefaehr' ? ` (bis zu ${EUR.format(x.abw)} Abweichung)` : ''),
   }));
-  const summe = liste.reduce((s, x) => s + (x.k.kind ? 0 : x.c ?? 0), 0);
-  out.forEach((o, i) => { if (liste[i].k.kind) o.konto_eines_kindes = true; });
-  return { datum, konten: out, summe_euro: e2(summe), hinweis: 'Stand am Ende des Tages. Depot ist nicht enthalten. Konten ohne Wert (unbekannt, nicht berechenbar) und die Konten der Kinder (konto_eines_kindes) sind nicht in der Summe.' };
+  const summe = liste.reduce((s, x) => s + (x.k.kind || x.k.gemeinsam ? 0 : x.c ?? 0), 0);
+  out.forEach((o, i) => { if (liste[i].k.kind) o.konto_eines_kindes = true; if (liste[i].k.gemeinsam) o.gemeinsames_konto = true; });
+  return { datum, konten: out, summe_euro: e2(summe), hinweis: 'Stand am Ende des Tages. Depot ist nicht enthalten. Konten ohne Wert (unbekannt, nicht berechenbar) , die Konten der Kinder (konto_eines_kindes) und die gemeinsamen Konten mit Kathrin (gemeinsames_konto) sind nicht in der Summe.' };
 }
 
 function fixkostenListe({ auch_beendete } = {}) {
@@ -167,7 +167,7 @@ function fixkostenListe({ auch_beendete } = {}) {
 function systemText() {
   const kat = new Map();
   for (const [u, k] of D.ukatZu) { if (!kat.has(k)) kat.set(k, []); kat.get(k).push(u); }
-  const konten = D.konten.map((k) => `- ${k.name}${k.kind ? ' (Konto eines Kindes – gehört nicht zu den Finanzen des Nutzers, Art „Kinderkonto“, zählt in keiner Summe)' : ''}: Buchungen ${k.von} bis ${k.bis}${k.saldo != null ? `, Kontostand ${EUR.format(k.saldo)} am ${k.saldoAm}` : ''}${k.vollstaendig ? ', lückenlos seit Eröffnung' : ''}`).join('\n');
+  const konten = D.konten.map((k) => `- ${k.name}${k.kind ? ' (Konto eines Kindes – gehört nicht zu den Finanzen des Nutzers, Art „Kinderkonto“, zählt in keiner Summe)' : k.gemeinsam ? ' (gemeinsames Konto mit Kathrin, je zur Hälfte befüllt – Buchungen dort haben die Art „Gemeinschaftskonto“ und zählen nicht; beim Nutzer zählen nur seine Einzahlungen dorthin als Ausgabe, Kategorie „Gemeinschaftskonto“)' : ''}: Buchungen ${k.von} bis ${k.bis}${k.saldo != null ? `, Kontostand ${EUR.format(k.saldo)} am ${k.saldoAm}` : ''}${k.vollstaendig ? ', lückenlos seit Eröffnung' : ''}`).join('\n');
   return `Du bist der Finanz-Assistent in der privaten App „Finanzen“ des Nutzers. Heute ist der ${new Date().toISOString().slice(0, 10)}.
 Die Daten: ${D.rows.length} Buchungen vom ${D.von} bis ${D.bis} (Stand der Datei ${D.j.erstellt}).
 
