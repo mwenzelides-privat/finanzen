@@ -1428,6 +1428,11 @@ button.ue-kz:hover { background: var(--surface-2); }
 .kt-l li b { text-align: right; white-space: nowrap; }
 @media (max-width: 640px) { .kt-l li { grid-template-columns: 78px minmax(0, 1fr) auto; } .kt-l li span:nth-child(3) { display: none; } }
 
+/* Kopfzeile bei mittlerer Breite: nichts darf über den Rand ragen */
+@media (min-width: 901px) and (max-width: 1360px) { .stand { display: none; } .einlesen-knopf span { display: none; } .einlesen-knopf { padding: 0 9px; } }
+@media (min-width: 901px) and (max-width: 1180px) { .nav button { padding: 7px 9px; gap: 5px; font-size: 13.5px; } .nav .n { display: none; } .top .brand span { display: none; } }
+@media (min-width: 901px) and (max-width: 1020px) { .nav button span:not(.n) { display: none; } .nav button { padding: 7px 11px; } .top .brand span { display: inline; } }
+
 @media (max-width: 900px), (max-height: 500px) {
   .ue, .uem { height: auto !important; min-height: 0 !important; grid-template-rows: none !important; }
   .ue-mitte, .ue-unten, .uem-haupt, .uem-unten { grid-template-columns: 1fr !important; min-height: 0; }
@@ -1440,3 +1445,28 @@ button.ue-kz:hover { background: var(--surface-2); }
 
 /* API-Schlüssel verdeckt anzeigen, ohne echtes Passwortfeld (sonst bieten Browser beim Suchen gespeicherte Passwörter an) */
 .geheim { -webkit-text-security: disc; text-security: disc; font-family: var(--font); }
+
+/* Steuer: offizielle Unterlagen */
+.st-off { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 12px 16px; margin: 0 0 14px; display: grid; gap: 10px; }
+.st-off > summary { cursor: pointer; font-size: 14.5px; list-style: none; }
+.st-off > summary::-webkit-details-marker { display: none; }
+.st-off > summary::before { content: "▸ "; color: var(--muted); }
+.st-off[open] > summary::before { content: "▾ "; }
+.st-off-kopf { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.st-off-kopf > div { display: grid; gap: 2px; padding: 8px 12px; border-radius: 10px; background: var(--surface-2); }
+.st-off-kopf span { font-size: 12px; color: var(--muted); }
+.st-off-kopf b { font-size: 18px; font-weight: 700; }
+.st-off-kopf b.klein-b { font-size: 13.5px; font-weight: 600; }
+.st-off-t { width: 100%; border-collapse: collapse; font-size: 13px; }
+.st-off-t td { padding: 4px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.st-off-t td.r { text-align: right; white-space: nowrap; font-weight: 600; }
+.st-off-t td.muted { font-size: 12px; }
+.st-off-t tr.sum td { font-weight: 700; border-top: 1.5px solid var(--border-strong); }
+.st-off-h b { font-size: 13px; }
+.st-off-l { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; color: var(--text-2); }
+.st-offiz { font-size: 12px; color: #5442b8; }
+:root[data-theme="dark"] .st-offiz { color: #a99cf2; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .st-offiz { color: #a99cf2; } }
+.st-offmarke { position: absolute; top: -4px; bottom: -4px; width: 3px; margin-left: -1.5px; background: #6d5bd0; border-radius: 2px; }
+.st-offmarke-i { display: inline-block; width: 3px; height: 11px; background: #6d5bd0; border-radius: 2px; vertical-align: -1px; }
+@media (max-width: 640px) { .st-off-t td.muted { display: none; } }

@@ -178,6 +178,53 @@ function automatisch(r) {
   return p ? { p, quelle, grund } : null;
 }
 
+// ---------------------------------------------------------------- Offizielle Unterlagen
+// Bescheide des Finanzamts und Erklärungen der Steuerberaterin (privat in den Finanzdaten: steuer_offiziell).
+// Sie entscheiden überall dort, wo du selbst noch nichts entschieden hast; deine Entscheidungen gehen immer vor.
+const OFF = () => D?.j?.steuer_offiziell?.jahre || {};
+const offiziell = (j) => OFF()[j] || null;
+const offJahre = () => Object.keys(OFF()).map(Number).sort((a, b) => a - b);
+const offName = (O) => O.kurz || `${O.art} ${O.jahr}`;
+// angesetzter Einzelposten zu einer Buchung: gleicher Betrag (±1 Cent), passendes Datum (falls bekannt) und gleicher Posten oder Empfänger
+function offBeleg(O, r, p) {
+  const b = Math.abs(r.c), t = norm(`${r.g} ${r.z}`), ab = POSTEN_ID.get(p)?.abschnitt;
+  const empf = (x) => x.e && new RegExp(x.e, 'i').test(t);
+  return (O.belege || []).find((x) => {
+    if (x.p && x.p !== p) return false;
+    if (x.a && x.a !== ab) return false;
+    if (x.d && Math.abs(Date.parse(x.d) - Date.parse(r.d)) > 40 * 864e5) return false;
+    if (x.b == null) return empf(x);
+    const tol = Number.isInteger(x.b) ? 100 : 1;
+    return Math.abs(Math.round(Math.abs(x.b) * 100) - b) <= tol && (!x.e || empf(x));
+  });
+}
+// Was die Unterlagen zu einer Buchung sagen: { art: 'ja' | 'nein' | 'fehlt' | 'info' | 'vj-nein' | 'vj-ja', text }
+function offEinordnung(r, p) {
+  const O = offiziell(r.y);
+  if (O) {
+    const bl = offBeleg(O, r, p), ps = O.posten?.[p];
+    if (bl) return { art: 'ja', text: `laut ${offName(O)} angesetzt${bl.t ? ` (${bl.t})` : ''}` };
+    if (ps?.s === 'alle') return { art: 'ja', text: `laut ${offName(O)} angesetzt${ps.t ? `: ${ps.t}` : ''}` };
+    if (ps?.s === 'nicht') return { art: 'nein', text: `laut ${offName(O)} nicht angesetzt${ps.t ? `: ${ps.t}` : ''}` };
+    if (ps?.s === 'fehlt') return { art: 'fehlt', text: ps.t || `fehlt in der ${offName(O)}` };
+    if (ps?.s === 'fertig') return { art: 'fertig', text: `${offName(O)}: ${ps.t}` };
+    return ps?.t ? { art: 'info', text: `${offName(O)}: ${ps.t}` } : null;
+  }
+  // Jahre ohne Unterlagen: was in den Vorjahren nie bzw. immer angesetzt wurde
+  const vj = offJahre().filter((y) => y < r.y);
+  if (!vj.length) return null;
+  const jt0 = vj.length > 1 ? `${vj[0]}–${vj.at(-1)}` : `${vj[0]}`, tx = norm(`${r.g} ${r.z}`);
+  // derselbe Empfänger wurde in einem Vorjahr als Einzelposten angesetzt
+  const frueher = vj.flatMap((y) => OFF()[y].belege || []).find((x) => (!x.p || x.p === p) && x.e && new RegExp(x.e, 'i').test(tx));
+  if (frueher) return { art: 'vj-ja', text: `In den Steuererklärungen ${jt0} angesetzt${frueher.t ? ` (${frueher.t})` : ''}` };
+  const st = vj.map((y) => OFF()[y].posten?.[p]).filter((x) => x?.s);
+  if (!st.length || st.length < vj.length) return null;
+  const jt = vj.length > 1 ? `${vj[0]}–${vj.at(-1)}` : `${vj[0]}`;
+  if (st.every((x) => x.s === 'nicht')) return { art: 'vj-nein', text: `In den Steuererklärungen ${jt} nicht angesetzt${st.at(-1).t ? `: ${st.at(-1).t}` : ''}` };
+  if (st.every((x) => x.s === 'alle')) return { art: 'vj-ja', text: `In den Steuererklärungen ${jt} jedes Mal angesetzt${st.at(-1).t ? ` (${st.at(-1).t})` : ''}` };
+  return null;
+}
+
 // Regeln: eine Entscheidung für alle Zahlungen an denselben Empfänger mit derselben automatischen Einordnung – in allen Jahren.
 // Eigene Entscheidungen zu einzelnen Buchungen gehen immer vor.
 const empfName = (r) => r.g || r.z || '–';
@@ -197,21 +244,34 @@ function einordnen(j) {
     const regelText = `Regel: alle Zahlungen an „${empfName(r)}“`;
     if (e?.x || rg?.x) { out.push({ r, p: e?.p || a?.p, status: 'ausgeschlossen', hinweis: '', notiz: e?.n || '', regel: !!rg, grund: rg ? `${regelText} ausschließen` : 'von dir ausgeschlossen' }); continue; }
     const p = e?.p || rg?.p || a.p;
-    const pr = pruefung(r, p);
+    const of = !eigen(e) && !rg ? offEinordnung(r, p) : null;
+    if (of?.art === 'ja') { out.push({ r, p, status: 'bestaetigt', hinweis: '', rat: '', aktionen: [], notiz: e?.n || '', quelle: 'offiziell', off: of.text, regel: false, grund: of.text }); continue; }
+    if (of?.art === 'fertig') { out.push({ r, p, status: 'veranlagt', hinweis: '', rat: '', aktionen: [], notiz: e?.n || '', quelle: 'offiziell', off: of.text, regel: false, grund: of.text }); continue; }
+    if (of?.art === 'nein') { out.push({ r, p, status: 'ausgeschlossen', hinweis: '', notiz: e?.n || '', regel: false, off: of.text, grund: of.text }); continue; }
+    const pr = of?.art === 'fehlt'
+      ? { art: 'pruefen', text: of.text, rat: 'Ist das absetzbar, der Steuerberaterin nachmelden – sonst ausschließen.', aktionen: [{ t: '✓ Absetzbar – nachmelden', p }, AUS] }
+      : pruefung(r, p);
     let status = eigen(e) || rg ? 'bestaetigt' : a.quelle === 'buhl' ? 'uebernommen' : 'vorschlag';
     if (status !== 'bestaetigt' && pr?.art === 'pruefen') status = 'pruefen';
     // Einnahmen braucht niemand zu bestätigen – sie stehen nur zur Kontrolle da
     if ((status === 'uebernommen' || status === 'vorschlag') && POSTEN_ID.get(p).abschnitt === 'einnahmen') status = 'kontrolle';
     let hinweis = pr?.text || '', rat = pr?.rat || '', aktionen = status === 'bestaetigt' ? [] : pr?.aktionen || [];
+    if (of && of.art !== 'fehlt' && status !== 'bestaetigt') hinweis = hinweis ? `${of.text}. ${hinweis}` : `${of.text}.`;
     if (status === 'vorschlag' && !hinweis) {
       hinweis = `In WISO/Buhl nicht markiert – vorgeschlagen wegen: ${a.grund}. ${POSTEN_ID.get(p).info}`;
       rat = 'Passt das, übernehmen. Sonst anderen Posten wählen oder ausschließen.';
       aktionen = [{ t: `✓ Als „${POSTEN_ID.get(p).name}“ übernehmen`, p }, { t: '✕ Nicht steuerlich relevant', p: 'x' }];
     }
-    out.push({ r, p, status, hinweis, rat, aktionen, notiz: e?.n || '', quelle: a?.quelle || 'manuell', klar: status === 'pruefen' ? pr?.klar : '', regel: !!rg,
+    out.push({ r, p, status, hinweis, rat, aktionen, notiz: e?.n || '', quelle: a?.quelle || 'manuell', regel: !!rg, vj: of?.art?.startsWith('vj') ? of.text : '', offInfo: of?.art === 'info' ? of.text : '',
+      klar: status === 'pruefen' && pr?.klar ? pr.klar : of?.art === 'vj-nein' && ZU.includes(status) ? 'in den Vorjahren nie angesetzt' : '',
       grund: rg ? `${regelText} → ${POSTEN_ID.get(p).name}` : e?.p && e.p !== a?.p ? `von dir zugeordnet${a ? ` (automatisch wäre: ${POSTEN_ID.get(a.p).name})` : ''}` : a?.grund || 'von dir zugeordnet' });
   }
   return out;
+}
+
+// Für den Chat und zur Kontrolle: die Einordnung eines Jahres als einfache Liste
+export function steuerListe(j) {
+  return einordnen(j).map((x) => ({ skey: x.r.skey, d: x.r.d, k: D.konten[x.r.k].name, c: x.r.c, g: x.r.g, z: x.r.z, kat: x.r.kat, ukat: x.r.ukat, st: x.r.st, p: x.p, status: x.status, regel: x.regel, grund: x.grund }));
 }
 
 // Gleicher Posten + gleicher Empfänger + gleicher Status = eine Gruppe (eine Entscheidung)
@@ -260,7 +320,7 @@ function gruppeEntscheiden(keys, wert, mitNotiz, still) {
 
 const STATUS = {
   uebernommen: ['aus WISO/Buhl – noch bestätigen', 'st-buhl'], bestaetigt: ['✓ bestätigt', 'st-ok'], vorschlag: ['Vorschlag', 'st-vor'],
-  pruefen: ['prüfen', 'st-pruef'], ausgeschlossen: ['ausgeschlossen', 'st-aus'], kontrolle: ['zur Kontrolle', 'st-aus'],
+  pruefen: ['prüfen', 'st-pruef'], ausgeschlossen: ['ausgeschlossen', 'st-aus'], kontrolle: ['zur Kontrolle', 'st-aus'], veranlagt: ['laut Unterlagen erledigt', 'st-aus'],
 };
 
 // ---------------------------------------------------------------- Anzeige
@@ -271,7 +331,7 @@ export function steuerZeigen(el, c) {
   const vollesJahr = +D.bis.slice(0, 4) - (D.bis.slice(5, 7) < '12' ? 1 : 0), ej = ctx.einJahr();
   if (!jahr) jahr = ej && ej <= vollesJahr ? ej : Math.min(jahre[0], vollesJahr);
   const alle = einordnen(jahr);
-  const istFertig = (x) => x.status === 'bestaetigt' || x.status === 'ausgeschlossen';
+  const istFertig = (x) => x.status === 'bestaetigt' || x.status === 'ausgeschlossen' || x.status === 'veranlagt';
   const wirksam = alle.filter((x) => x.status !== 'ausgeschlossen');
   const summe = (liste) => liste.reduce((t, x) => t + x.r.c, 0);
   const zu = alle.filter((x) => ZU.includes(x.status)), zuGruppen = arbeitsGruppen(zu).length;
@@ -300,20 +360,22 @@ export function steuerZeigen(el, c) {
     </div>
   </div>`;
 
+  h += offKachel(jahr);
   // Was du geltend machen kannst: je Abschnitt ein Balken, bei den Werbungskosten mit dem Pauschbetrag als Marke
   const abs = ABSCHNITTE.filter((a) => a.id !== 'einnahmen').map((a) => {
     const xs = wirksam.filter((x) => POSTEN_ID.get(x.p).abschnitt === a.id);
     return { a, xs, betrag: -summe(xs), offen: arbeitsGruppen(xs.filter((x) => ZU.includes(x.status))).length };
   }).filter((x) => x.xs.length);
   if (abs.length) {
-    const maxB = Math.max(1, ...abs.map((x) => x.betrag), abs.some((x) => x.a.id === 'wk') ? pausch(jahr) : 0);
+    const O = offiziell(jahr), offB = (id) => (O?.abschnitte?.[id]?.b != null ? Math.round(O.abschnitte[id].b * 100) : null);
+    const maxB = Math.max(1, ...abs.map((x) => Math.max(x.betrag, offB(x.a.id) || 0)), abs.some((x) => x.a.id === 'wk') ? pausch(jahr) : 0);
     const w = (v) => (Math.max(0, v) / maxB) * 100;
-    h += `<div class="st-geltend"><div class="st-geltend-t"><b>Was du ${jahr} geltend machen kannst</b> <span class="muted klein">· Offenes ist mitgezählt · anklicken: nur diesen Bereich zeigen</span></div>
+    h += `<div class="st-geltend"><div class="st-geltend-t"><b>Was du ${jahr} geltend machen kannst</b> <span class="muted klein">· laut Kontoauszügen, Offenes mitgezählt${O ? ' · <i class="st-offmarke-i"></i> = Betrag laut Unterlagen' : ''} · anklicken: nur diesen Bereich zeigen</span></div>
       ${abs.map((x) => `<button class="st-ab${abschnittF === x.a.id ? ' an' : ''}" data-sabf="${abschnittF === x.a.id ? '' : x.a.id}">
         <span class="st-ab-n">${esc(x.a.name)}${x.offen ? ` <span class="st-offen">${x.offen} offen</span>` : ''}</span>
-        <span class="st-ab-balken"><i style="width:${w(x.betrag)}%"></i>${x.a.id === 'wk' ? `<b class="st-pausch" style="left:${w(pausch(jahr))}%" title="Arbeitnehmer-Pauschbetrag ${eur(pausch(jahr))}"></b>` : ''}</span>
+        <span class="st-ab-balken"><i style="width:${w(x.betrag)}%"></i>${x.a.id === 'wk' ? `<b class="st-pausch" style="left:${w(pausch(jahr))}%" title="Arbeitnehmer-Pauschbetrag ${eur(pausch(jahr))}"></b>` : ''}${offB(x.a.id) != null ? `<b class="st-offmarke" style="left:${w(offB(x.a.id))}%" title="laut ${esc(offName(O))}: ${eur(offB(x.a.id))}"></b>` : ''}</span>
         <span class="st-ab-b">${eur0(x.betrag)}</span>
-        <span class="st-ab-w">${wirkung(x)}</span></button>`).join('')}
+        <span class="st-ab-w">${offB(x.a.id) != null ? `<span class="st-offiz">laut ${esc(offName(O))}: ${eur0(offB(x.a.id))}${O.abschnitte[x.a.id].t ? ` – ${esc(O.abschnitte[x.a.id].t)}` : ''}</span>` : wirkung(x)}</span></button>`).join('')}
     </div>`;
   }
 
@@ -364,6 +426,32 @@ export function steuerZeigen(el, c) {
   binden(el);
 }
 
+// Offizielle Zahlen eines Jahres: Ergebnis, Eckdaten, Hinweise des Finanzamts bzw. der Steuerberaterin; ohne Unterlagen: was die Vorjahre lehren
+function offKachel(j) {
+  const O = offiziell(j);
+  const zahl = (b) => (b == null ? '–' : EUR0.format(b));
+  if (!O) {
+    const vj = offJahre().filter((y) => y < j);
+    const L = D?.j?.steuer_offiziell?.kuenftig || [];
+    if (!vj.length || !L.length) return '';
+    return `<details class="st-off" open><summary><b>Was die Steuererklärungen ${vj[0]}–${vj.at(-1)} für ${j} bedeuten</b> <span class="muted klein">· ${L.length} Punkte</span></summary>
+      <ul class="st-off-l">${L.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></details>`;
+  }
+  const f = O.ergebnis || {};
+  const kopf = [
+    f.est != null ? `<div><span>Einkommensteuer</span><b>${zahl(f.est)}</b></div>` : '',
+    f.erstattung != null ? `<div><span>${f.erstattung >= 0 ? 'Erstattung' : 'Nachzahlung'}</span><b class="${f.erstattung >= 0 ? 'pos' : 'neg'}">${zahl(Math.abs(f.erstattung))}</b></div>` : '',
+    f.zve != null ? `<div><span>zu versteuerndes Einkommen</span><b>${zahl(f.zve)}</b></div>` : '',
+    O.veranlagung ? `<div><span>Veranlagung</span><b class="klein-b">${esc(O.veranlagung)}</b></div>` : '',
+  ].join('');
+  return `<details class="st-off" open><summary><b>${esc(O.titel || offName(O))}</b> <span class="muted klein">· ${esc(O.untertitel || '')}</span></summary>
+    <div class="st-off-kopf">${kopf}</div>
+    ${O.zahlen?.length ? `<table class="st-off-t">${O.zahlen.map((z) => `<tr class="${z.sum ? 'sum' : ''}"><td>${esc(z.t)}</td><td class="r">${zahl(z.b)}</td><td class="muted">${esc(z.h || '')}</td></tr>`).join('')}</table>` : ''}
+    ${O.hinweise?.length ? `<div class="st-off-h"><b>Was daraus folgt</b><ul class="st-off-l">${O.hinweise.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>` : ''}
+    <div class="muted klein">Quelle: ${esc(O.quelle || '')}. Buchungen, die zu den Unterlagen passen, sind automatisch entschieden (✓ angesetzt bzw. ✕ nicht angesetzt) – deine eigenen Entscheidungen gehen immer vor.</div>
+  </details>`;
+}
+
 function zeileHtml(x) {
   const zweck = x.r.g ? x.r.z : '';
   return `<div class="st-zeile st-${x.status}${x.status === 'ausgeschlossen' ? ' aus' : ''}" data-skey="${esc(x.r.skey)}">
@@ -391,9 +479,17 @@ function gruppeHtml(g, auf) {
 
 // Eine Zeile Hinweis: wohin es gehört und warum (die ausführliche Einschätzung unter „Warum?“ bzw. in den Details)
 function hinweisKurz(x) {
+  const k = hinweisKurz1(x);
+  return x.offInfo ? `${k}<div class="st-kurz"><span class="st-offiz">${esc(x.offInfo)}</span></div>` : k;
+}
+function hinweisKurz1(x) {
   const p = POSTEN_ID.get(x.p);
   const regel = x.regel ? ' <span class="muted">· gilt für alle Jahre</span>' : '';
   if (x.status === 'pruefen') return `<div class="st-kurz pruef"><b>Bitte prüfen:</b> ${esc(x.rat || x.hinweis)}${x.rat && x.hinweis ? `<details class="st-warum"><summary>Warum?</summary>${esc(x.hinweis)}</details>` : ''}</div>`;
+  if (x.off && x.status === 'bestaetigt') return `<div class="st-kurz ok">✓ ${esc(p.name)} <span class="st-offiz">${esc(x.off)}</span></div>`;
+  if (x.status === 'veranlagt') return `<div class="st-kurz muted">≈ <span class="st-offiz">${esc(x.off)}</span></div>`;
+  if (x.off && x.status === 'ausgeschlossen') return `<div class="st-kurz muted">✕ <span class="st-offiz">${esc(x.off)}</span></div>`;
+  if (x.vj) return `<div class="st-kurz">${x.status === 'pruefen' ? '<b>Bitte prüfen:</b> ' : ''}${esc(POSTEN_ID.get(x.p).name)} <span class="st-offiz">${esc(x.vj)}</span></div>`;
   if (x.status === 'vorschlag') return `<div class="st-kurz">Vorschlag: <b>${esc(p.name)}</b> <span class="muted">– ${esc(x.grund)}</span></div>`;
   if (x.status === 'uebernommen') return `<div class="st-kurz">Aus WISO/Buhl: <b>${esc(p.name)}</b></div>`;
   if (x.status === 'bestaetigt') return `<div class="st-kurz ok">✓ ${esc(p.name)}${regel}</div>`;
