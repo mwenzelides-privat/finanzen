@@ -1302,3 +1302,45 @@ button.ue-kz:hover { background: var(--surface-2); }
 .ab-band ~ .ab-achse { margin-top: 0; }
 .ab-band { height: 160px; }
 .ab-band .ab-heute span { top: 2px; }
+
+/* Fixkosten: Zahlungskalender (12 Monate × Tage) */
+.fix-zk { border-bottom: 1px solid var(--border); }
+.zk-leg { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--text-2); align-items: center; }
+.zk-leg span { display: inline-flex; align-items: center; gap: 6px; }
+.zk-leg .zk-k { position: static; transform: none; width: 10px; height: 10px; display: inline-block; }
+.zk { display: grid; gap: 0; }
+.zk-zeile { display: grid; grid-template-columns: 56px minmax(0, 1fr) 150px; gap: 12px; align-items: center; min-height: 30px; border-bottom: 1px solid var(--border); }
+.zk-zeile:last-child { border-bottom: 0; }
+.zk-zeile.jetzt { background: var(--accent-soft); border-radius: 8px; }
+.zk-m { font-size: 12.5px; color: var(--muted); padding-left: 6px; white-space: nowrap; }
+.zk-m b { color: var(--text); font-weight: 650; }
+.zk-spur { position: relative; height: 30px; background: repeating-linear-gradient(90deg, transparent 0 calc(100% / 31 - 1px), var(--border) calc(100% / 31 - 1px) calc(100% / 31)); background-size: 100% 100%; }
+.zk-kopf { min-height: 22px; border-bottom: 1px solid var(--border-strong); }
+.zk-kopf .zk-spur { height: 22px; background: none; }
+.zk-kopf .zk-spur span { position: absolute; top: 4px; transform: translateX(-50%); font-size: 11px; color: var(--muted); }
+.zk-kopf .zk-s { font-size: 11.5px; color: var(--muted); text-align: right; display: block; }
+.zk-k { position: absolute; top: 50%; transform: translate(-50%, -50%); border-radius: 50%; cursor: default; }
+.zk-k.mon { background: rgba(184, 70, 27, .82); }
+.zk-k.mon.vorbei { background: rgba(184, 70, 27, .35); }
+.zk-k.extra { background: #6d5bd0; box-shadow: 0 0 0 2px var(--surface); z-index: 2; }
+.zk-k.lohn { background: rgba(26, 158, 110, .85); }
+.zk-l { position: absolute; top: 50%; transform: translate(10px, -50%); z-index: 3; font-size: 11.5px; color: #5442b8; white-space: nowrap; background: var(--surface); padding: 0 5px; border-radius: 5px; border: 1px solid rgba(109, 91, 208, .35); cursor: pointer; line-height: 18px; }
+.zk-l b { font-weight: 700; }
+.zk-l:hover { border-color: #6d5bd0; }
+.zk-heute { position: absolute; top: 2px; bottom: 2px; width: 0; border-left: 1.5px dashed var(--text-2); }
+.zk-s { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 12.5px; padding-right: 6px; }
+.zk-s i { display: block; height: 8px; border-radius: 4px; background: rgba(184, 70, 27, .55); }
+.zk-s b { font-weight: 700; white-space: nowrap; text-align: right; }
+.zk-s small { grid-column: 1 / -1; justify-self: end; margin-top: -4px; font-size: 11px; color: #5442b8; font-weight: 650; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .zk-l, :root:not([data-theme="light"]) .zk-s small { color: #a99cf2; } }
+:root[data-theme="dark"] .zk-l, :root[data-theme="dark"] .zk-s small { color: #a99cf2; }
+@media (max-width: 640px) {
+  .zk-zeile { grid-template-columns: 44px minmax(0, 1fr) 70px; gap: 6px; }
+  .zk-s i { display: none; }
+  .zk-l { font-size: 10.5px; }
+}
+.zk-zeile { min-height: 34px; } .zk-spur { height: 34px; }
+.zk-l.links { transform: translate(calc(-100% - 10px), -50%); }
+.fix-zk { overflow-x: hidden; }
+@media (max-width: 640px) { .zk-s small { display: none; } }
+.ab-v { max-width: 100%; white-space: normal; text-align: left; }

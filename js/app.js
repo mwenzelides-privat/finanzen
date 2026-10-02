@@ -1650,13 +1650,13 @@ function tabelle(conds) {
     if (j) setze({ jahr: String(j), monat: S.monat === c ? '' : c }); else setze({ jahr: c });
   });
   el.querySelectorAll('[data-fixansicht]').forEach((b) => b.onclick = () => { fixAnsicht = b.dataset.fixansicht; tabelle(conds); });
-  el.querySelectorAll('[data-fixbezug]').forEach((b) => b.onclick = () => { fixBezug = b.dataset.fixbezug; try { localStorage.setItem('fd.fixbezug', fixBezug); } catch {} tabelle(conds); });
+  el.querySelectorAll('[data-fixbezug]').forEach((b) => b.onclick = () => { fixBezug = b.dataset.fixbezug; try { localStorage.setItem('fd.fixbezug2', fixBezug); } catch {} tabelle(conds); });
   el.querySelectorAll('.fix-zeile[data-fix]').forEach((tr) => tr.onclick = () => setze({ q: `"${tr.dataset.fix}"${tr.dataset.sig ? ' ' + tr.dataset.sig : ''}`, tab: 'buchungen' }));
   el.querySelectorAll('.fix-kopfzeile[data-fixgruppe]').forEach((b) => b.onclick = () => fixGruppeUmschalten(b.dataset.fixgruppe));
   el.querySelectorAll('.fa-zeile[data-fixgruppe], .kb-fix[data-fixgruppe]').forEach((b) => b.onclick = () => fixGruppeUmschalten(b.dataset.fixgruppe, true));
   el.querySelector('.fix-vertraege')?.addEventListener('toggle', (e) => { fixListeAuf = e.target.open; });
   el.querySelector('.fix-grundlage')?.addEventListener('toggle', (e) => { fixGrundlageAuf = e.target.open; });
-  el.querySelectorAll('.ks[data-fix], .ab-v[data-fix]').forEach((b) => b.onclick = () => setze({ q: `"${b.dataset.fix}"${b.dataset.sig ? ' ' + b.dataset.sig : ''}`, tab: 'buchungen' }));
+  el.querySelectorAll('.zk-l[data-fix], .ab-v[data-fix]').forEach((b) => b.onclick = () => setze({ q: `"${b.dataset.fix}"${b.dataset.sig ? ' ' + b.dataset.sig : ''}`, tab: 'buchungen' }));
   el.querySelectorAll('[data-leben]').forEach((b) => b.onclick = () => {
     lebenWahl = b.dataset.leben;
     if (lebenWahl === 'eigen' && !lebenEigen) lebenEigen = Math.round(lebenshaltung().schnitt / 100) * 100;
@@ -1844,7 +1844,7 @@ const fixSichtbar = (alle) => alle.filter((f) => f.aktiv || fixAnsicht === 'alle
 
 // Bezugsgröße für die Prozente: aktuelles Nettogehalt, Ø Gehalt der letzten 12 Monate oder Ø aller Einnahmen.
 // Die 12 Monate enden mit dem letzten Monat, in dem Gehalt eingegangen ist.
-let fixBezug = (() => { try { return localStorage.getItem('fd.fixbezug') || 'schnitt'; } catch { return 'schnitt'; } })();
+let fixBezug = (() => { try { return localStorage.getItem('fd.fixbezug2') || 'aktuell'; } catch { return 'aktuell'; } })();
 function einkommen() {
   if (D.einkommen) return D.einkommen;
   const lohn = new Map(), ein = new Map();
@@ -2059,9 +2059,10 @@ function tabFixkosten(conds) {
   </div>`;
 
   // Wofür und wann
-  h += `<div class="fix-raster">
+  h += `<div class="fix-feld fix-zk"><div class="fix-feld-t">Wann abgebucht wird <span class="muted">· die nächsten 12 Monate · Zeile = Monat, Spalte = Tag</span></div>${zahlungskalenderHtml(lauf)}</div>
+  <div class="fix-raster">
     <div class="fix-feld"><div class="fix-feld-t">Wofür deine Fixkosten draufgehen <span class="muted">· anklicken: Verträge</span></div>${artenHtml(ueber, pct)}</div>
-    <div class="fix-feld"><div class="fix-feld-t">Wann abgebucht wird <span class="muted">· monatliche Zahlungen · Eintrag anklicken: Buchungen</span></div>${kalenderHtml(lauf)}</div>
+    <div class="fix-feld"><div class="fix-feld-t">Abbuchungen je Tag <span class="muted">· jeden Monat gleich · ✓ = schon abgebucht · anklicken: Buchungen</span></div>${tageslisteHtml(lauf)}</div>
   </div>`;
 
   // Rechner
@@ -2135,56 +2136,95 @@ function artenHtml(arten, pct) {
       <span class="fa-betrag">${eur0(g.summe)}</span><span class="fa-anteil">${pct(g.summe)}</span></button>`).join('')}</div>`;
 }
 
-// Wann abgebucht wird: wie sich die festen Abbuchungen über den Monat aufsummieren, wann das Gehalt kommt,
-// und je Tag, was abgeht (✓ = in diesem Monat schon abgebucht). Darunter die Zahlungen außer der Reihe.
-function kalenderHtml(lauf) {
-  const tage = Array.from({ length: 31 }, () => ({ c: 0, fs: [] }));
-  for (const f of lauf) if (f.rh.proJahr === 12) { const t = tage[zahltag(f) - 1]; t.c += f.betrag; t.fs.push(f); }
-  const ges = tage.reduce((t, x) => t + x.c, 0), gt = gehaltstag(), lohn = ueMonatsDaten().typ.lohn;
-  const jetzt = D.bis.slice(0, 7), heute = +D.bis.slice(8);
-  if (!ges) return '<div class="leer">Keine monatlichen Abbuchungen.</div>';
+// Zahlungskalender: die nächsten 12 Monate untereinander, die Tage nebeneinander. Monatliche Zahlungen (orange),
+// Zahlungen außer der Reihe – jährlich, halb- oder vierteljährlich – (violett, beschriftet) und das Gehalt (grün).
+// Kreisfläche ∝ Betrag; rechts die Summe der festen Abbuchungen je Monat.
+function termineImMonat(f, k) {
+  const letzter = +monatsletzter(`${k}-01`).slice(8);
+  if (f.rh.proJahr === 12) return [Math.min(zahltag(f), letzter)];
+  const tage = [], a = Date.parse(`${k}-01`), b = Date.parse(monatsletzter(`${k}-01`)) + 864e5 - 1;
+  let t = Date.parse(f.zuletzt);
+  if (f.zuletzt.slice(0, 7) === k) tage.push(+f.zuletzt.slice(8));
+  for (let i = 0; i < 60 && t <= b; i++) { t += f.rh.tage * 864e5; if (t >= a && t <= b) tage.push(new Date(t).getUTCDate()); }
+  return tage;
+}
+
+function zahlungsDaten(lauf) {
+  const jetzt = D.bis.slice(0, 7), ek = einkommen(), lohn = ek.aktuell.wert || ek.schnitt.wert, gt = gehaltstag();
+  const monate = [];
+  for (let i = 0; i < 12; i++) {
+    const k = mVor(jetzt, i), tage = new Map();
+    for (const f of lauf) for (const d of termineImMonat(f, k)) {
+      if (!tage.has(d)) tage.set(d, { mon: 0, extra: [], fs: [] });
+      const x = tage.get(d);
+      if (f.rh.proJahr === 12) { x.mon += f.betrag; x.fs.push(f); } else x.extra.push(f);
+    }
+    const summe = [...tage.values()].reduce((t, x) => t + x.mon + x.extra.reduce((s, f) => s + f.betrag, 0), 0);
+    const extra = [...tage.values()].flatMap((x) => x.extra);
+    monate.push({ k, tage, summe, extra });
+  }
+  // monatliche Abbuchungen je Tag (für Satz und Tagesliste) – gleich in jedem Monat
+  const tag1 = Array.from({ length: 31 }, () => ({ c: 0, fs: [] }));
+  for (const f of lauf) if (f.rh.proJahr === 12) { const t = tag1[zahltag(f) - 1]; t.c += f.betrag; t.fs.push(f); }
+  return { monate, lohn, gt, jetzt, tag1, lohnMon: ek.letzter };
+}
+
+function zahlungskalenderHtml(lauf) {
+  const Z = zahlungsDaten(lauf), { monate, lohn, gt, jetzt } = Z;
+  const ges = Z.tag1.reduce((t, x) => t + x.c, 0);
+  if (!ges) return '<div class="leer">Keine regelmäßigen Abbuchungen.</div>';
   let kum = 0, bisTag = 31;
-  for (let i = 0; i < 31; i++) { kum += tage[i].c; if (kum >= ges * 0.9) { bisTag = i + 1; break; } }
-  const vorGehalt = gt ? tage.slice(0, gt - 1).reduce((t, x) => t + x.c, 0) : ges;
-  const satz = `<b>${Math.round((kum / ges) * 100)} %</b> deiner festen Abbuchungen (${eur0(kum)} von ${eur0(ges)}) gehen bis zum <b>${bisTag}.</b> ab${gt ? ` – das Gehalt kommt erst um den <b>${gt}.</b> Zum Monatsanfang sollten also gut <b>${eur0(vorGehalt)}</b> auf dem Konto sein.` : '.'}`;
-  // Monatsstrahl: Abbuchungen als Kreise unter der Linie, das Gehalt darüber – Fläche ∝ Betrag
+  for (let i = 0; i < 31; i++) { kum += Z.tag1[i].c; if (kum >= ges * 0.9) { bisTag = i + 1; break; } }
+  const vorGehalt = gt ? Z.tag1.slice(0, gt - 1).reduce((t, x) => t + x.c, 0) : ges;
+  const extraJahr = monate.reduce((t, m) => t + m.extra.reduce((s, f) => s + f.betrag, 0), 0);
+  const lohnText = `${MONAT[+Z.lohnMon.slice(5) - 1]}: ${eur0(lohn)}`;
+  const satz = `<b>${Math.round((kum / ges) * 100)} %</b> der monatlichen Abbuchungen (${eur0(kum)} von ${eur0(ges)}) gehen bis zum <b>${bisTag}.</b> ab${gt ? `, das Gehalt (zuletzt ${lohnText}) kommt erst um den <b>${gt}.</b> Zum Monatsanfang sollten also gut <b>${eur0(vorGehalt)}</b> auf dem Konto sein` : ''}.
+    ${extraJahr ? ` Außer der Reihe kommen in den nächsten 12 Monaten <b>${eur0(extraJahr)}</b> dazu – im Schnitt ${eur0(extraJahr / 12)} im Monat.` : ''}`;
+  const maxTag = Math.max(lohn || 0, ...monate.flatMap((m) => [...m.tage.values()].map((x) => x.mon)), 1);
+  const R = (c, min = 4) => Math.max(min, Math.sqrt(c / maxTag) * 13);
+  const maxSum = Math.max(...monate.map((m) => m.summe), 1), normal = ges;
   const pos = (d) => `${((d - 0.5) / 31) * 100}%`;
-  const maxC = Math.max(lohn || 0, ...tage.map((t) => t.c), 1);
-  const r = (c) => Math.max(5, Math.sqrt(c / maxC) * 30);   // Radius in px
-  const schieb = (d) => (d <= 3 ? '-6px' : d >= 29 ? 'calc(-100% + 6px)' : '-50%');   // Beschriftung am Rand nicht abschneiden
-  const kreise = tage.map((t, i) => {
-    if (!t.c) return '';
-    const d = i + 1, rad = r(t.c), tip = `${d}.: ${eur0(t.c)}\n${t.fs.map((f) => `${vertragName(f)}: ${EUR.format(f.betrag / 100)}`).join('\n')}`;
-    return `<span class="ab-k aus" style="left:clamp(${rad}px, ${pos(d)}, calc(100% - ${rad}px));width:${rad * 2}px;height:${rad * 2}px" title="${esc(tip)}"></span>
-      ${t.c >= ges * 0.03 ? `<span class="ab-kl aus" style="left:${pos(d)};transform:translateX(${schieb(d)});top:calc(50% + ${rad * 2 + 4}px)"><b>${d}.</b> −${eur0(t.c)}</span>` : ''}`;
+  const heute = +D.bis.slice(8);
+  const kreis = (cls_, d, c, tip, extra = '') => { const r = R(c, cls_ === 'extra' ? 6 : 4); return `<span class="zk-k ${cls_}" style="left:${pos(d)};width:${r * 2}px;height:${r * 2}px" title="${esc(tip)}">${extra}</span>`; };
+  const zeilen = monate.map((m, i) => {
+    let inhalt = '';
+    for (const [d, x] of [...m.tage].sort((a, b) => a[0] - b[0])) {
+      const vorbei = m.k === jetzt && d <= heute;
+      if (x.mon) inhalt += kreis(`mon${vorbei ? ' vorbei' : ''}`, d, x.mon, `${d}. ${MONAT[+m.k.slice(5) - 1]}: ${eur0(x.mon)}${vorbei ? ' (schon abgebucht)' : ''}\n${x.fs.map((f) => `${vertragName(f)}: ${EUR.format(f.betrag / 100)}`).join('\n')}`);
+      for (const f of x.extra) {
+        inhalt += kreis('extra', d, f.betrag, `${d}. ${MONAT[+m.k.slice(5) - 1]}: ${vertragName(f)} ${EUR.format(f.betrag / 100)} (${f.rh.name})`);
+        inhalt += `<span class="zk-l${d > 18 ? ' links' : ''}" style="left:${pos(d)}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}">${esc(vertragName(f))} <b>${eur0(f.betrag)}</b></span>`;
+      }
+    }
+    if (gt && lohn) inhalt += kreis('lohn', gt, lohn, `Gehalt um den ${gt}.: ≈ ${eur0(lohn)} (zuletzt ${lohnText})`);
+    const mehr = m.summe - normal;
+    return `<div class="zk-zeile${m.k === jetzt ? ' jetzt' : ''}">
+      <span class="zk-m"><b>${MON[+m.k.slice(5) - 1]}</b> ${m.k.slice(2, 4)}</span>
+      <div class="zk-spur">${m.k === jetzt ? `<span class="zk-heute" style="left:${pos(heute + 0.5)}"></span>` : ''}${inhalt}</div>
+      <span class="zk-s"><i style="width:${(m.summe / maxSum) * 100}%"></i><b>${eur0(m.summe)}</b>${mehr >= 500 ? `<small>+${eur0(mehr)}</small>` : ''}</span></div>`;
   }).join('');
-  const gk = gt && lohn ? (() => { const rad = r(lohn); return `<span class="ab-k ein" style="left:clamp(${rad}px, ${pos(gt)}, calc(100% - ${rad}px));width:${rad * 2}px;height:${rad * 2}px" title="Gehalt um den ${gt}.: ≈ ${eur0(lohn)}"></span>
-      <span class="ab-kl ein" style="left:${pos(gt)};transform:translateX(${schieb(gt)});bottom:calc(50% + ${rad * 2 + 4}px)"><b>${gt}.</b> +${eur0(lohn)} Gehalt</span>`; })() : '';
-  const kurve = `<div class="ab-band" aria-label="Monatsstrahl: wann Geld abgeht und wann das Gehalt kommt">
-      <span class="ab-linie"></span>
-      <span class="ab-zone" style="left:0;width:${pos(Math.max(1, bisTag) + 0.5)}" title="bis zum ${bisTag}. sind ${Math.round((kum / ges) * 100)} % abgebucht"></span>
-      <span class="ab-heute" style="left:${pos(heute)}" title="heute, ${dde(D.bis)}"><span>heute</span></span>
-      ${kreise}${gk}
-    </div>
-    <div class="ab-achse">${[1, 5, 10, 15, 20, 25, 31].map((d) => `<span style="left:${pos(d)}">${d}.</span>`).join('')}</div>`;
-  // Liste je Tag – mit dem Gehalt an seinem Tag
-  const zeilen = [];
-  tage.forEach((t, i) => {
+  return `<p class="ab-satz">${satz}</p>
+    <div class="zk-leg"><span><i class="zk-k mon"></i>monatlich</span><span><i class="zk-k extra"></i>außer der Reihe (jährlich, halb- oder vierteljährlich)</span><span><i class="zk-k lohn"></i>Gehalt (zuletzt ${eur0(lohn)})</span><span class="muted">Kreisfläche = Betrag · Kreis antippen: Einzelheiten</span></div>
+    <div class="zk">
+      <div class="zk-zeile zk-kopf"><span class="zk-m"></span><div class="zk-spur">${[1, 5, 10, 15, 20, 25, 31].map((d) => `<span style="left:${pos(d)}">${d}.</span>`).join('')}</div><span class="zk-s">feste Abbuchungen</span></div>
+      ${zeilen}
+    </div>`;
+}
+
+// Abbuchungen je Tag (gleich in jedem Monat), mit dem Gehalt an seinem Tag; ✓ = in diesem Monat schon abgebucht
+function tageslisteHtml(lauf) {
+  const Z = zahlungsDaten(lauf), zeilen = [];
+  Z.tag1.forEach((t, i) => {
     const d = i + 1;
-    if (gt === d) zeilen.push(`<div class="ab-tag ab-gtag"><span class="ab-d">${d}.</span><span class="ab-vs"><span class="ab-g">Gehalt kommt (≈ ${eur0(lohn)})</span></span><span class="ab-s pos">+${eur0(lohn)}</span></div>`);
+    if (Z.gt === d) zeilen.push(`<div class="ab-tag ab-gtag"><span class="ab-d">${d}.</span><span class="ab-vs"><span class="ab-g">Gehalt kommt (zuletzt ${eur0(Z.lohn)})</span></span><span class="ab-s pos">+${eur0(Z.lohn)}</span></div>`);
     if (!t.c) return;
     const fs = [...t.fs].sort((x, y) => y.betrag - x.betrag);
-    const bezahlt = (f) => f.zuletzt.slice(0, 7) === jetzt;
+    const bezahlt = (f) => f.zuletzt.slice(0, 7) === Z.jetzt;
     zeilen.push(`<div class="ab-tag${fs.every(bezahlt) ? ' ab-bezahlt' : ''}"><span class="ab-d">${d}.</span>
-      <span class="ab-vs">${fs.map((f) => `<button class="ab-v${bezahlt(f) ? ' ok' : ''}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="${bezahlt(f) ? `im ${MONAT[+jetzt.slice(5) - 1]} schon abgebucht – ` : ''}alle Zahlungen anzeigen">${bezahlt(f) ? '<i>✓</i>' : ''}${esc(vertragName(f))} <b>${eur0(f.betrag)}</b></button>`).join('')}</span>
+      <span class="ab-vs">${fs.map((f) => `<button class="ab-v${bezahlt(f) ? ' ok' : ''}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="${bezahlt(f) ? `im ${MONAT[+Z.jetzt.slice(5) - 1]} schon abgebucht – ` : ''}alle Zahlungen anzeigen">${bezahlt(f) ? '<i>✓</i>' : ''}${esc(vertragName(f))} <b>${eur0(f.betrag)}</b></button>`).join('')}</span>
       <span class="ab-s">${eur0(t.c)}</span></div>`);
   });
-  const selten = lauf.filter((f) => f.rh.proJahr < 12).map((f) => ({ f, am: naechsteZahlung(f) })).sort((a, b) => (a.am < b.am ? -1 : 1));
-  const rueck = selten.reduce((s, x) => s + x.f.proMonat, 0);
-  return `<p class="ab-satz">${satz}</p>${kurve}<div class="ab-liste">${zeilen.join('')}</div>
-    ${selten.length ? `<div class="fix-feld-t kal-selten-t">Außer der Reihe <span class="muted">· nächste Fälligkeit</span></div>
-    <div class="kal-selten">${selten.slice(0, 8).map(({ f, am }) => `<div class="ks" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="Alle Zahlungen anzeigen"><span class="ks-d">${MON[+am.slice(5, 7) - 1]} ${am.slice(2, 4)}</span><span class="ks-n">${esc(fixTitel(f, fixArt(f)))} <small>${esc(f.rh.name)}</small></span><b>${eur0(f.betrag)}</b></div>`).join('')}</div>
-    <div class="klein muted kal-hinweis">Dafür jeden Monat ${eur0(rueck)} zurücklegen – sie stecken anteilig schon in den Fixkosten.</div>` : ''}`;
+  return `<div class="ab-liste">${zeilen.join('')}</div>`;
 }
 
 // ---------- Rechner „Kann ich mir das leisten?“
