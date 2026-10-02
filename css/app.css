@@ -1437,3 +1437,6 @@ button.ue-kz:hover { background: var(--surface-2); }
   .uem-schnell { display: flex !important; flex-wrap: wrap; }
   body.ue-modus main { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
 }
+
+/* API-Schlüssel verdeckt anzeigen, ohne echtes Passwortfeld (sonst bieten Browser beim Suchen gespeicherte Passwörter an) */
+.geheim { -webkit-text-security: disc; text-security: disc; font-family: var(--font); }

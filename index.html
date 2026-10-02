@@ -56,7 +56,7 @@
       <div class="werkzeug" id="werkzeug">
       <div class="suche">
         <svg class="lupe" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="q" type="search" autocomplete="off" spellcheck="false" enterkeyhint="search"
+        <input id="q" type="search" name="suche" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"
                placeholder="Suchen: Rewe, Miete 2024, >500, 03.2025 …" aria-label="Buchungen durchsuchen" aria-controls="vorschlaege">
         <button class="hilfe" id="q-hilfe" title="So funktioniert die Suche">?</button>
         <ul id="vorschlaege" class="vorschlaege" role="listbox" hidden></ul>
@@ -229,7 +229,7 @@
         auf <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a> anmelden → „API Keys“ → „Create Key“, dann hier einfügen.
         Abgerechnet wird dort nach Nutzung, eine Frage kostet meist wenige Cent.</p>
       <p class="muted">Datenschutz: Der Schlüssel bleibt auf diesem Gerät. An Anthropic gehen deine Frage und nur die Zwischenergebnisse, die die KI für die Antwort abruft (z. B. Summen oder einzelne Buchungen), nicht die ganze Datei.</p>
-      <label class="feld">API-Schlüssel<input id="chat-key" type="password" autocomplete="off" spellcheck="false"></label>
+      <label class="feld">API-Schlüssel<input id="chat-key" type="text" class="geheim" name="anthropic-schluessel" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"></label>
       <label class="feld">Modell<select id="chat-modell"></select></label>
       <div class="menu-knoepfe"><button class="btn primary" id="chat-speichern">Speichern</button><button class="btn danger" id="chat-key-loeschen">Schlüssel löschen</button></div>
     </div>
