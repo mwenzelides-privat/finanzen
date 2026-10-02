@@ -94,20 +94,17 @@
       <div class="kpis" id="kpis"></div>
 
       <div class="seite" id="seite-start">
-      <div class="card fluss-card">
-        <div class="card-h"><h2 id="t-fluss">Woher dein Geld kommt – und wohin es geht</h2><span class="hint" id="h-fluss"></span></div>
-        <div class="fluss" id="geldfluss"></div>
-      </div>
-      <div class="grid2" id="start-grid">
-        <div class="card">
-          <div class="card-h"><h2 id="t-verlauf">Verlauf</h2><span class="hint" id="h-verlauf"></span>
-            <button class="icon-btn sm" data-bild="c-verlauf" title="Grafik als Bild speichern"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg></button></div>
-          <div class="chart"><canvas id="c-verlauf"></canvas></div>
+      <div class="ue" id="ue">
+        <div class="ue-kopf"><div class="ue-kopf-t"><h1 id="ue-titel">Übersicht</h1><span class="muted" id="ue-zeit"></span></div><div class="seg ue-zeitraum" id="ue-zeitraum" role="group" aria-label="Zeitraum"></div></div>
+        <div class="ue-kpis" id="ue-kpis"></div>
+        <div class="ue-mitte">
+          <div class="card ue-karte"><div class="ue-h"><h2>Einnahmen und Ausgaben je Monat</h2><span class="ue-leg" id="ue-verlauf-leg"></span></div><div class="ue-chart"><canvas id="c-ue"></canvas></div></div>
+          <div class="card ue-karte"><div class="ue-h"><h2>Wofür das Geld draufgeht</h2><button class="link klein" id="ue-alle-kat">alle Kategorien →</button></div><div class="ue-kat" id="ue-kat"></div></div>
         </div>
-        <div class="card" id="kat-card">
-          <div class="card-h"><h2 id="t-kat">Ausgaben nach Kategorie</h2><span class="hint" id="h-kat"></span>
-            <button class="icon-btn sm" data-bild="c-kat" title="Grafik als Bild speichern"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg></button></div>
-          <div class="chart" id="chart-kat"><canvas id="c-kat"></canvas></div>
+        <div class="ue-unten">
+          <div class="card ue-karte" id="ue-budget"></div>
+          <div class="card ue-karte" id="ue-termine"></div>
+          <div class="card ue-karte" id="ue-blick"></div>
         </div>
       </div>
       </div>

@@ -431,6 +431,13 @@ function wirkung(x) {
   return '';
 }
 
+// Für die Übersicht: offene Entscheidungen im letzten vollen Steuerjahr (null, solange die Entscheidungen noch laden)
+export function steuerStand() {
+  if (!D || !geladen) return null;
+  const j = +D.bis.slice(0, 4) - (D.bis.slice(5, 7) < '12' ? 1 : 0);
+  return { jahr: j, offen: arbeitsGruppen(einordnen(j).filter((x) => ZU.includes(x.status))).length };
+}
+
 // Auswahlliste der Posten (auch für die Buchungsdetails im Dashboard)
 export function postenOptionen(aktuell, mitLeer = false) {
   let h = mitLeer ? `<option value="">– nicht zugeordnet –</option>` : '';
