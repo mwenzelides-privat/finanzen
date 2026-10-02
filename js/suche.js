@@ -3,7 +3,7 @@
 //   rewe|edeka     → eines von beiden
 //   "dm drogerie"  → genau diese Wortfolge
 //   -storno        → ohne dieses Wort
-//   49,99          → Betrag genau 49,99 € (egal ob Ein- oder Ausgabe)
+//   49,99          → Betrag genau 49,99 € (egal ob Ein- oder Ausgabe); auch 49.99, 49,99 €, −49,99 (typografisches Minus)
 //   >500  <20  100-250  → Betragsbereich
 //   2024  2019-2021  03.2024  12.03.2024  → Zeitraum
 
@@ -34,7 +34,10 @@ export function tokens(q) {
 export function parse(q) {
   const out = [];
   for (const tk of tokens(q)) {
-    const t = tk.text.trim();
+    // typografische Minus- und Gedankenstriche wie „-“ behandeln, „€“/„EUR“ hinter einem Betrag ignorieren
+    let t = tk.text.trim().replace(/^[−–—]/, '-');
+    if (!tk.quoted && /^(€|eur|euro|-)$/i.test(t)) continue;
+    if (!tk.quoted) t = t.replace(/(\d)\s*(€|eur|euro)$/i, '$1');
     let m;
     const add = (label, test, kind = 'filter', span) => out.push({ raw: tk.raw, label, test, kind, span });
     if (!tk.quoted) {
@@ -60,6 +63,11 @@ export function parse(q) {
       if ((m = t.match(/^(\d[\d.]*(?:,\d{1,2})?)-(\d[\d.]*(?:,\d{1,2})?)€?$/))) {
         const a = cent(m[1]), b = cent(m[2]);
         add(`Betrag ${fmtC(Math.min(a, b))} bis ${fmtC(Math.max(a, b))}`, (r) => Math.abs(r.c) >= Math.min(a, b) && Math.abs(r.c) <= Math.max(a, b), 'betrag'); continue;
+      }
+      if ((m = t.match(/^-?(\d+)\.(\d{2})$/))) {
+        // Dezimalpunkt (252.96) – drei Stellen nach dem Punkt bleiben Tausender (1.305)
+        const v = +m[1] * 100 + +m[2], neg = t.startsWith('-');
+        add(`Betrag ${neg ? '−' : ''}${fmtC(v)}`, (r) => (neg ? r.c === -v : Math.abs(r.c) === v), 'betrag'); continue;
       }
       if ((m = t.match(/^-?(\d[\d.]*,\d{1,2})€?$/)) || (m = t.match(/^-?(\d+)€$/))) {
         const v = cent(m[1]), neg = t.startsWith('-');
