@@ -1348,9 +1348,37 @@ function sortiert() {
   return out;
 }
 
+// Keine Treffer: Gibt es welche in anderen Jahren oder ohne die übrigen Filter? Dann zeigen und mit einem Klick dorthin.
+function keineTreffer(conds) {
+  const leer = '<div class="leer">Keine Buchungen gefunden. Suche oder Filter ändern?</div>';
+  if (!conds.length && !S.jahr && !S.monat) return leer;
+  const kurz = (r) => `<li><span>${dde(r.d)}</span><span>${esc(r.g || r.z || '–')}</span><span class="muted">${esc(D.konten[r.k].name)}</span><b class="${cls(r.c)}">${EUR.format(r.c / 100)}</b></li>`;
+  const kasten = (text, l, ziel, knopf) => `<div class="leer kt"><p>${text}</p><ul class="kt-l">${l.slice(-5).reverse().map(kurz).join('')}</ul>${l.length > 5 ? `<p class="muted">… und ${l.length - 5} weitere</p>` : ''}<button class="btn" data-weiter="${esc(JSON.stringify(ziel))}">${knopf}</button></div>`;
+  const zeitraum = [S.jahr ? (S.jahr.includes(',') ? `in ${S.jahr.replace(/,/g, ', ')}` : `in ${S.jahr}`) : '', S.monat ? `(${monateWahl().map((m) => MON[m - 1]).join(', ')})` : ''].filter(Boolean).join(' ');
+  // 1. dieselben Filter, nur ohne Jahr und Monat
+  if (S.jahr || S.monat) {
+    const alt = { jahr: S.jahr, monat: S.monat };
+    let l; try { S.jahr = ''; S.monat = ''; l = D.rows.filter(pruefer(conds)); } finally { Object.assign(S, alt); }
+    if (l.length) {
+      const jahre = [...new Set(l.map((r) => r.y))];
+      return kasten(`${zeitraum ? `${zeitraum[0].toUpperCase()}${zeitraum.slice(1)}` : 'Im gewählten Zeitraum'} nichts gefunden – aber <b>${l.length} Treffer</b> in ${jahre.length === 1 ? jahre[0] : `${jahre.length} anderen Jahren`}:`, l,
+        jahre.length === 1 ? { jahr: String(jahre[0]), monat: '' } : { jahr: '', monat: '' }, jahre.length === 1 ? `${jahre[0]} anzeigen` : 'In allen Jahren anzeigen');
+    }
+  }
+  // 2. nur die Suche, ohne Konto, Kategorie, Art und Zeitraum
+  const test = matcher(conds), l = D.rows.filter(test);
+  if (l.length && (S.konto || S.kat || S.ukat || S.art !== 'alle' || !S.umb || S.jahr || S.monat)) {
+    const konten = [...new Set(l.map((r) => r.k))], nurFremd = l.every((r) => FREMD_ART.has(r.art));
+    const ziel = { jahr: '', monat: '', konto: nurFremd && konten.length === 1 ? D.konten[konten[0]].name : '', kat: '', ukat: '', art: 'alle', umb: l.some((r) => r.art === 'Umbuchung') || S.umb };
+    const warum = l.every((r) => r.art === 'Umbuchung') ? ' (es sind Umbuchungen, die sonst ausgeblendet sind)' : nurFremd ? ' (auf einem gemeinsamen bzw. Kinderkonto, das sonst nicht mitzählt)' : '';
+    return kasten(`Mit den gesetzten Filtern nichts gefunden – ohne Filter gibt es <b>${l.length} Treffer</b>${warum}:`, l, ziel, 'Ohne Filter anzeigen');
+  }
+  return leer;
+}
+
 function tabBuchungen(conds) {
   const rows = sortiert();
-  if (!rows.length) return '<div class="leer">Keine Buchungen gefunden. Suche oder Filter ändern?</div>';
+  if (!rows.length) return keineTreffer(conds);
   const w = highlightWords(conds);
   const re = w.length ? new RegExp('(' + w.map(escRe).join('|') + ')', 'gi') : null;
   const mk = (s) => (re ? esc(s).replace(re, '<mark>$1</mark>') : esc(s));
@@ -1693,6 +1721,7 @@ function tabelle(conds) {
     const i = +tr.dataset.i; offen.has(i) ? offen.delete(i) : offen.add(i); tabelle(conds);
   });
   el.querySelectorAll('[data-alle]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); setze({ q: `"${b.dataset.alle}"` }); });
+  el.querySelectorAll('[data-weiter]').forEach((b) => b.onclick = () => setze(JSON.parse(b.dataset.weiter)));
   el.querySelectorAll('[data-nurkat]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); setze({ kat: b.dataset.nurkat, ukat: '' }); });
   el.querySelectorAll('[data-steuer-i]').forEach((s) => {
     s.onclick = (e) => e.stopPropagation();

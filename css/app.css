@@ -1419,6 +1419,15 @@ button.ue-kz:hover { background: var(--surface-2); }
 :root[data-theme="dark"] .ue-t-rh { color: #a99cf2; }
 @media (max-width: 640px) { .ue-td { grid-template-columns: 56px minmax(0, 1fr) auto; } .ue-t-k { display: none; } }
 
+/* Keine Treffer: Hinweis auf Treffer in anderen Jahren / ohne Filter */
+.leer.kt { display: grid; gap: 10px; justify-items: start; text-align: left; max-width: 720px; margin: 0 auto; }
+.leer.kt p { margin: 0; }
+.kt-l { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; width: 100%; }
+.kt-l li { display: grid; grid-template-columns: 90px minmax(0, 1fr) auto 100px; gap: 12px; padding: 6px 10px; border-radius: 8px; background: var(--surface-2); font-size: 13.5px; color: var(--text); }
+.kt-l li span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kt-l li b { text-align: right; white-space: nowrap; }
+@media (max-width: 640px) { .kt-l li { grid-template-columns: 78px minmax(0, 1fr) auto; } .kt-l li span:nth-child(3) { display: none; } }
+
 @media (max-width: 900px), (max-height: 500px) {
   .ue, .uem { height: auto !important; min-height: 0 !important; grid-template-rows: none !important; }
   .ue-mitte, .ue-unten, .uem-haupt, .uem-unten { grid-template-columns: 1fr !important; min-height: 0; }
