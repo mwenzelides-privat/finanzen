@@ -1133,7 +1133,7 @@ function durchschnitte() {
     kachel('Sparquote', pf(quote(a)), cls(a.erg), 'Anteil der Einnahmen, der übrig bleibt', vgl(quote, true, pf, true), 'Überschuss geteilt durch Einnahmen. Faustregel: mindestens 20 %.'),
     kachel('Ø Ausgaben / Tag', ea(a.tage ? a.aus / a.tage : null), 'neg', `aus ${NUM.format(a.tage)} Tagen`, vgl((x) => (x.tage ? x.aus / x.tage : null), false, ea), 'Ausgaben geteilt durch die Kalendertage der abgeschlossenen Monate'),
     kachel('Fixkosten-Anteil', pf(fixq(a)), '', `der Ausgaben · Ø ${e0(pm(a, (x) => -x.fix))} / Monat${a.ein ? ` · ${pf(proz(-a.fix, a.ein))} der Einnahmen` : ''}`, vgl(fixq, false, pf, true),
-      'Regelmäßige Zahlungen (Miete, Unterhalt, Versicherungen, Verträge, Abos) als Anteil an allen Ausgaben im Zeitraum. Deine Überweisungen aufs Gemeinschaftskonto sind Umbuchungen – was von dort ausgegeben wird, zählt hier als Ausgabe.'),
+      'Regelmäßige Zahlungen (Miete, Unterhalt, Versicherungen, Verträge, Abos) als Anteil an allen Ausgaben im Zeitraum. Deine festen Einzahlungen aufs Gemeinschaftskonto zählen dazu; was von dort abgeht (Einkäufe, akf Bank …), zählt bei dir nicht.'),
   ].join('');
   return { a, v1, monate, t };
 }
