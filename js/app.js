@@ -698,8 +698,8 @@ function ueBudget(pm, L, B, ek) {
   $('#ue-budget').querySelector('[data-uezu]').onclick = () => setze({ tab: 'fix' });
 }
 
-// Abbuchungen der nächsten 30 Tage aus den erkannten Verträgen
-function ueTermine(fixV, n = 6, ziel = '#ue-termine') {
+// Abbuchungen der nächsten 30 Tage aus den erkannten Verträgen – nach Monat gruppiert, mit Zwischensumme und Laufsumme
+function ueTermine(fixV, n = 40, ziel = '#ue-termine') {
   const heute = D.bis, bis = plusTage(heute, 30);
   const liste = [];
   for (const f of fixV) {
@@ -715,15 +715,33 @@ function ueTermine(fixV, n = 6, ziel = '#ue-termine') {
     if (am > heute && am <= bis) liste.push({ f, am });
   }
   liste.sort((a, b) => (a.am < b.am ? -1 : a.am > b.am ? 1 : b.f.betrag - a.f.betrag));
-  const summe = liste.reduce((t, x) => t + x.f.betrag, 0), zeigen = liste.slice(0, n);
+  const summe = liste.reduce((t, x) => t + x.f.betrag, 0);
   const tagText = (iso) => { const d = new Date(`${iso}T12:00:00Z`); return `${WTAG[d.getUTCDay()]} ${+iso.slice(8)}.${+iso.slice(5, 7)}.`; };
-  $(ziel).innerHTML = `<div class="ue-h"><h2>Nächste 30 Tage</h2><span class="ue-h-wert">${eur0(summe)} feste Abbuchungen</span></div>
-    <div class="ue-termine">${zeigen.length ? zeigen.map(({ f, am }) => `<button class="ue-t" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="Alle Zahlungen anzeigen">
-      <span class="ue-t-d">${tagText(am)}</span><span class="ue-t-n">${esc(vertragName(f))}</span><b>${eur0(f.betrag)}</b></button>`).join('')
-      + (liste.length > zeigen.length ? `<div class="ue-t-mehr muted">+ ${liste.length - zeigen.length} weitere (${eur0(liste.slice(n).reduce((t, x) => t + x.f.betrag, 0))})</div>` : '')
-      : '<div class="leer">Keine festen Abbuchungen in den nächsten 30 Tagen.</div>'}</div>`;
+  // je Tag eine Zeile mit allen Verträgen; je Monat eine Zwischensumme; rechts die Laufsumme
+  const tage = new Map(), proMonat = new Map();
+  for (const x of liste) {
+    (tage.get(x.am) || tage.set(x.am, []).get(x.am)).push(x.f);
+    const k = x.am.slice(0, 7), g = proMonat.get(k) || { c: 0, n: 0 }; g.c += x.f.betrag; g.n++; proMonat.set(k, g);
+  }
+  let kum = 0, zuletzt = '', frei = n, wegN = 0, wegC = 0;
+  const gruppen = ziel === '#uem-termine';   // Zwischensummen je Monat nur in der breiten Karte der Monatsansicht
+  const chip = (f, mitBetrag) => `<button class="ab-v" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="${esc(vertragName(f))} · ${eur0(f.betrag)} · ${f.rh.name} – alle Zahlungen anzeigen">${esc(vertragName(f))}${f.rh.proJahr < 12 ? ` <i class="ue-t-rh">${esc(f.rh.name)}</i>` : ''}${mitBetrag ? ` <b>${eur0(f.betrag)}</b>` : ''}</button>`;
+  const zeilen = [...tage].map(([am, fs]) => {
+    const c = fs.reduce((t, f) => t + f.betrag, 0); kum += c;
+    if (frei <= 0) { wegN += fs.length; wegC += c; return ''; }   // passt nicht mehr hinein
+    let kopf = '';
+    if (gruppen && am.slice(0, 7) !== zuletzt) {
+      zuletzt = am.slice(0, 7);
+      const g = proMonat.get(zuletzt), name = MONAT[+zuletzt.slice(5) - 1];
+      kopf = `<div class="ue-t-gruppe"><span>${zuletzt === heute.slice(0, 7) ? `Rest ${name}` : `${name} bis ${+bis.slice(8)}.`}</span><span>${g.n} Abbuchung${g.n > 1 ? 'en' : ''} · <b>${eur0(g.c)}</b>${summe ? ` <small>${Math.round((g.c / summe) * 100)} %</small>` : ''}</span></div>`;
+    }
+    const zeig = fs.slice(0, frei), rest = fs.slice(zeig.length); frei -= zeig.length;
+    return `${kopf}<div class="ue-td"><span class="ue-t-d">${tagText(am)}</span><span class="ab-vs">${zeig.map((f) => chip(f, fs.length > 1)).join('')}${rest.length ? `<span class="ue-t-mehr muted">+ ${rest.length} weitere (${eur0(rest.reduce((t, f) => t + f.betrag, 0))})</span>` : ''}</span><b class="ue-td-s">${eur0(c)}</b><span class="ue-t-k" title="bis dahin zusammen">Σ ${eur0(kum)}</span></div>`;
+  }).join('') + (wegN ? `<div class="ue-t-mehr muted">+ ${wegN} weitere danach (${eur0(wegC)})</div>` : '');
+  $(ziel).innerHTML = `<div class="ue-h"><h2>Nächste 30 Tage</h2><span class="ue-h-wert">${liste.length} feste Abbuchungen · <b>${eur0(summe)}</b></span></div>
+    <div class="ue-termine">${liste.length ? zeilen : '<div class="leer">Keine festen Abbuchungen in den nächsten 30 Tagen.</div>'}</div>`;
   const tb = $(`${ziel} .ue-termine`);
-  if (n > 2 && tb && tb.scrollHeight > tb.clientHeight + 2) return ueTermine(fixV, n - 1, ziel);
+  if (n > 1 && tb && tb.scrollHeight > tb.clientHeight + 2) return ueTermine(fixV, n - 1, ziel);
   $(ziel).querySelectorAll('[data-fix]').forEach((b) => b.onclick = () => setze({ q: `"${b.dataset.fix}"${b.dataset.sig ? ' ' + b.dataset.sig : ''}`, tab: 'buchungen', jahr: '', monat: '' }));
 }
 
@@ -843,7 +861,7 @@ function ueMonate() {
   ueMonatsGrafik(M);
   ueAuswahlKarte(M);
   ueAuswahlKategorien(M);
-  ueTermine(fixkostenErkennen().filter((f) => !f.gemeinsam && f.aktiv), 6, '#uem-termine');
+  ueTermine(fixkostenErkennen().filter((f) => !f.gemeinsam && f.aktiv), 40, '#uem-termine');
 }
 
 // Kacheln: heute, dieser Monat, wohin es läuft, Durchschnitt, Fixkosten
@@ -983,60 +1001,79 @@ function ueMonatsGrafik(M) {
   });
 }
 
-// Die Auswahl im Vergleich zum Durchschnitt: Einnahmen, Ausgaben, Ergebnis (bei mehreren Monaten je Monat)
+// Die Auswahl als Monatsrechnung (Wasserfall): Einnahmen − feste − variable Ausgaben = Ergebnis.
+// Volle Fläche = schon gebucht, schraffiert = noch erwartet (laufender Monat, Prognose). Darunter vier Eckdaten.
 function ueAuswahlKarte(M) {
   const sel = M.monate.filter((m) => ueAuswahl.includes(m.k)), n = sel.length;
-  const sum = (f) => sel.reduce((t, m) => t + f(m), 0);
-  const ein = sum((m) => m.ein) / n, aus = sum((m) => m.aus) / n, erg = ein - aus;
-  const nurIst = sel.every((m) => m.art === 'ist'), lauf = sel.length === 1 && sel[0].art === 'laeuft' ? sel[0] : null;
-  const prog = sel.some((m) => m.art !== 'ist');
-  const titel = n === 1 ? `${MONAT[+sel[0].k.slice(5) - 1]} ${sel[0].k.slice(0, 4)}` : `${monatName(sel[0].k)} – ${monatName(sel[n - 1].k)} · ${n} Monate`;
-  const sE = M.schnitt.ein, sA = M.schnitt.aus, sErg = sE - sA;
+  const sum = (f) => sel.reduce((t, m) => t + f(m), 0) / n;
+  const ein = sum((m) => m.ein), aus = sum((m) => m.aus), fest = sum((m) => m.festAus), vari = aus - fest, erg = ein - aus;
+  // schon gebucht: abgeschlossene Monate ganz, der laufende bis heute, Prognosen nichts
+  const gebucht = (m, f) => (m.art === 'prognose' ? 0 : f(m.x));
+  const kEin = sum((m) => gebucht(m, (x) => x.ein)), kVar = sum((m) => gebucht(m, (x) => x.var)), kFest = sum((m) => gebucht(m, (x) => x.aus - x.var));
+  const nurIst = sel.every((m) => m.art === 'ist'), lauf = n === 1 && sel[0].art === 'laeuft' ? sel[0] : null;
+  const prog = !nurIst;
+  const titel = n === 1 ? `${MONAT[+sel[0].k.slice(5) - 1]} ${sel[0].k.slice(0, 4)}` : `${monatName(sel[0].k)} – ${monatName(sel[n - 1].k)}`;
+  const art = nurIst ? 'abgeschlossen' : lauf ? '' : sel.every((m) => m.art === 'prognose') ? 'Prognose' : 'mit Prognose';
+  const sE = M.schnitt.ein, sA = M.schnitt.aus, sF = M.schnitt.fest, sV = sA - sF, sErg = sE - sA;
   const pz = (a, b) => (b ? Math.round(((a - b) / Math.abs(b)) * 100) : 0);
-  const max = Math.max(ein, aus, sE, sA, 1);
-  const zeile = (l, v, s, cls_, mehrGut, extra = '') => {
+  const ca = prog ? '≈ ' : '';
+  const vgl = (v, s, mehrGut) => {
     const p = pz(v, s);
-    return `<div class="uem-v"><span class="uem-v-l">${l}</span>
-      <span class="uem-v-bar"><i class="${cls_}" style="width:${(v / max) * 100}%"></i>${extra}<b class="uem-v-s" style="left:${(s / max) * 100}%" title="Ø ${eur0(s)}"></b></span>
-      <span class="uem-v-w">${prog ? '≈ ' : ''}${eur0(v)}</span>
-      <span class="uem-v-d ${Math.abs(p) < 3 ? '' : (p > 0) === mehrGut ? 'gut' : 'schlecht'}">${Math.abs(p) < 3 ? '≈ Ø' : `${p > 0 ? '+' : '−'}${Math.abs(p)} % ggü. Ø`}</span></div>`;
+    return `<span class="wf-n ${Math.abs(p) < 3 ? '' : (p > 0) === mehrGut ? 'gut' : 'schlecht'}" title="Ø 12 Monate: ${eur0(s)}">${Math.abs(p) < 3 ? '≈ Ø' : `${p > 0 ? '+' : '−'}${Math.abs(p)} % ggü. Ø`}</span>`;
   };
-  let h = `<div class="ue-h"><h2>${esc(titel)}${n > 1 ? ' <span class="muted">· je Monat</span>' : ''}</h2>${nurIst || lauf ? `<button class="link klein" id="uem-buchungen">Buchungen →</button>` : ''}</div><div class="uem-auswahl">`;
+  // Wasserfall-Skala
+  const lo = Math.min(0, ein - fest, erg), hi = Math.max(ein, 1), X = (v) => ((v - lo) / (hi - lo)) * 100;
+  const balken = (von, bis, cls_, schraffiert = false) => (bis - von > 0 ? `<i class="wf-b ${cls_}${schraffiert ? ' erw' : ''}" style="left:${X(von)}%;width:${X(bis) - X(von)}%"></i>` : '');
+  const verbinder = (v) => `<b class="wf-vb" style="left:${X(v)}%"></b>`;
+  const null0 = lo < 0 ? `<b class="wf-0" style="left:${X(0)}%"></b>` : '';
+  const zeile = (l, wert, spur, notiz, cls_ = '', tip = '') => `<div class="wf-z ${cls_}" title="${esc(tip)}"><span class="wf-l">${l}</span><span class="wf-s">${null0}${spur}</span><span class="wf-w">${wert}</span>${notiz}</div>`;
+  const q = M.akt ? Math.round((fest / M.akt) * 100) : null;
+  const jeM = n > 1 ? ' je Monat' : '';
+  let h = `<div class="ue-h"><h2>${esc(titel)} <span class="muted">${n > 1 ? `· ${n} Monate, je Monat` : art ? `· ${art}` : ''}</span></h2>${nurIst || lauf ? `<button class="link klein" id="uem-buchungen">Buchungen →</button>` : ''}</div>`;
   if (lauf) {
-    const b = lauf.bisher, anteil = Math.round((lauf.tag / lauf.tage) * 100);
-    h += `<div class="uem-tempo"><div class="uem-tempo-z"><span>Monat zu <b>${anteil} %</b> vorbei</span><span>${eur0(b.aus)} von ≈ ${eur0(lauf.aus)} ausgegeben</span></div>
-      <div class="uem-tempo-bar"><i style="width:${Math.min(100, (b.aus / Math.max(lauf.aus, 1)) * 100)}%"></i><b style="left:${anteil}%" title="heute"></b></div></div>`;
+    const anteil = Math.round((lauf.tag / lauf.tage) * 100);
+    h += `<div class="wf-tempo" title="Monat zu ${anteil} % vorbei"><span>Tag ${lauf.tag} von ${lauf.tage}</span><span class="wf-tempo-bar"><i style="width:${anteil}%"></i></span><span>${anteil} %</span></div>`;
   }
-  h += zeile('Einnahmen', ein, sE, 'ein', true, lauf ? `<i class="ein bisher" style="width:${(lauf.bisher.ein / max) * 100}%"></i>` : '')
-    + zeile('Ausgaben', aus, sA, 'aus', false, lauf ? `<i class="aus bisher" style="width:${(lauf.bisher.aus / max) * 100}%"></i>` : '');
-  // davon fest – und wie viel vom Gehalt das ist
-  const fest = sum((m) => m.festAus) / n, lohn = M.akt, q = lohn ? Math.round((fest / lohn) * 100) : null;   // immer vom aktuellen Gehalt
-  h += `<div class="uem-v"><span class="uem-v-l">davon fest</span>
-    <span class="uem-v-bar"><i class="fix" style="width:${(fest / max) * 100}%"></i><b class="uem-v-s" style="left:${(M.schnitt.fest / max) * 100}%" title="Ø ${eur0(M.schnitt.fest)}"></b></span>
-    <span class="uem-v-w">${prog ? '≈ ' : ''}${eur0(fest)}</span>
-    <span class="uem-v-d ${q == null ? '' : q <= 50 ? 'gut' : 'schlecht'}" title="in diesem Zeitraum tatsächlich abgebuchte feste Kosten${n > 1 ? ' je Monat' : ''} im Verhältnis zum aktuellen Gehalt (${eur0(lohn)}) · Ziel höchstens 50 %">${q == null ? '–' : `${q} % vom Gehalt`}</span></div>`;
-  const pE = pz(erg, sErg);
-  h += `<div class="uem-erg-zeile"><span>Ergebnis${n > 1 ? ' je Monat' : ''}</span><b class="${erg >= 0 ? 'pos' : 'neg'}">${prog ? '≈ ' : ''}${erg < 0 ? '−' : '+'}${eur0(Math.abs(erg))}</b>
-    <span class="muted">Ø ${sErg < 0 ? '−' : '+'}${eur0(Math.abs(sErg))}${ein > 0 ? ` · Sparquote ${erg < 0 ? '−' : ''}${Math.abs(Math.round((erg / ein) * 100))} %` : ''}</span></div>`;
-  // Hinweise zum Monat
-  const punkte = [];
+  h += `<div class="uem-auswahl"><div class="wf">
+    ${zeile('Einnahmen', `${ca}${eur0(ein)}`, balken(0, kEin, 'ein') + balken(kEin, ein, 'ein', true), vgl(ein, sE, true), '',
+      `Einnahmen${jeM}: ${eur0(ein)}${prog ? ` · schon gebucht ${eur0(kEin)}` : ''} · Ø ${eur0(sE)}`)}
+    ${zeile('− fest', `${ca}${eur0(fest)}`, verbinder(ein) + balken(ein - kFest, ein, 'fix') + balken(ein - fest, ein - kFest, 'fix', true),
+      `<span class="wf-n ${q == null ? '' : q <= 50 ? 'gut' : 'schlecht'}" title="feste Ausgaben im Verhältnis zum aktuellen Gehalt (${eur0(M.akt)}) · Ziel höchstens 50 %">${q == null ? '–' : `${q} % vom Gehalt`}</span>`, '',
+      `Feste Ausgaben${jeM}: ${eur0(fest)}${prog ? ` · schon abgebucht ${eur0(kFest)}` : ''} · Ø ${eur0(sF)}`)}
+    ${zeile('− variabel', `${ca}${eur0(vari)}`, verbinder(ein - fest) + balken(ein - fest - kVar, ein - fest, 'var') + balken(ein - fest - vari, ein - fest - kVar, 'var', true), vgl(vari, sV, false), '',
+      `Variable Ausgaben${jeM}: ${eur0(vari)}${prog ? ` · bisher ${eur0(kVar)}` : ''} · Ø ${eur0(sV)}`)}
+    ${zeile('= Ergebnis', `<b class="${erg >= 0 ? 'pos' : 'neg'}">${ca}${erg < 0 ? '−' : '+'}${eur0(Math.abs(erg))}</b>`, verbinder(erg) + balken(Math.min(0, erg), Math.max(0, erg), erg >= 0 ? 'plus' : 'minus', prog),
+      `<span class="wf-n" title="Durchschnitt der letzten 12 abgeschlossenen Monate">Ø ${sErg < 0 ? '−' : '+'}${eur0(Math.abs(sErg))}</span>`, 'wf-erg')}
+  </div>`;
+  if (prog) h += `<div class="wf-leg"><span><i class="wf-k"></i>schon gebucht</span><span><i class="wf-k erw"></i>noch erwartet</span></div>`;
+  // vier Eckdaten
+  const fakt = (l, w, sub = '', cls_ = '') => `<div class="wf-f"><span>${l}</span><div><b class="${cls_}">${w}</b>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
+  const f = [];
+  const quote = ein > 0 ? `${erg < 0 ? '−' : ''}${Math.abs(Math.round((erg / ein) * 100))} %` : '–';
   if (lauf) {
-    punkte.push(`Noch fällig bis Monatsende: <b>${eur0(lauf.offenFest)}</b> feste Abbuchungen`);
-    punkte.push(lauf.gehaltKommt ? `Gehalt erwartet: <b>≈ ${eur0(lauf.gehaltKommt)}</b>${M.gt ? ` um den ${M.gt}.` : ''}` : `Gehalt ist da: <b>${eur0(lauf.x.lohn)}</b>`);
-  } else if (sel.every((m) => m.art === 'prognose')) {
-    punkte.push(`Davon fest: <b>${eur0(sum((m) => m.fest) / n)}</b>${n > 1 ? ' je Monat' : ''} (Verträge, Unterhalt, Versicherungen)`);
-    punkte.push(`Variabel erwartet: <b>≈ ${eur0(M.typ.var)}</b> – so viel gibst du in einem typischen Monat zusätzlich aus`);
-    punkte.push('Sonderzahlungen (z. B. Weihnachtsgeld) sind nicht eingerechnet – die Prognose ist eher vorsichtig.');
+    f.push(fakt('Noch fällig (fest)', eur0(lauf.offenFest), 'bis Monatsende'));
+    f.push(lauf.gehaltKommt ? fakt('Gehalt erwartet', `≈ ${eur0(lauf.gehaltKommt)}`, M.gt ? `um den ${M.gt}.` : '') : fakt('Gehalt ist da', eur0(lauf.x.lohn), ''));
   } else if (nurIst) {
-    const lohn = sel.reduce((t, m) => t + m.x.lohn, 0) / n;
-    if (lohn) punkte.push(`Gehalt damals: <b>${eur0(lohn)}</b>${n > 1 ? ' je Monat' : ''} · aktuell ${eur0(M.akt)} · Ø 12 Monate ${eur0(M.schnitt.lohn)}`);
-    const letzteM = sel[n - 1];
-    if (letzteM.stand != null) punkte.push(`Konten am Monatsende: <b>${eur0(letzteM.stand)}</b>`);
+    const lohn = sum((m) => m.x.lohn);
+    f.push(fakt(`Gehalt${n > 1 ? ' je Monat' : ''}`, eur0(lohn), `aktuell ${eur0(M.akt)}`));
+    f.push(n > 1 ? fakt('Ergebnis gesamt', `${erg < 0 ? '−' : '+'}${eur0(Math.abs(erg * n))}`, `${n} Monate`, erg >= 0 ? 'pos' : 'neg') : fakt('Sparquote', quote, 'vom Einkommen', erg >= 0 ? 'pos' : 'neg'));
+  } else {
+    f.push(fakt('Gehalt (aktuell)', eur0(M.akt), `zuletzt ${MONAT[+M.aktMonat.slice(5) - 1]}`));
+    f.push(n > 1 ? fakt('Ergebnis gesamt', `≈ ${erg < 0 ? '−' : '+'}${eur0(Math.abs(erg * n))}`, `${n} Monate`, erg >= 0 ? 'pos' : 'neg') : fakt('Sparquote', `≈ ${quote}`, 'vom Einkommen', erg >= 0 ? 'pos' : 'neg'));
   }
-  const ende = M.monate[M.monate.length - 1];
-  if (ende.stand != null) punkte.push(`Erwarteter Kontostand Ende ${MONAT[+ende.k.slice(5) - 1]}: <b class="${ende.stand < 0 ? 'neg' : ''}">≈ ${eur0(ende.stand)}</b>`);
-  h += `<ul class="uem-punkte">${punkte.map((p) => `<li>${p}</li>`).join('')}</ul></div>`;
+  const letzte = sel[n - 1], ende = M.monate[M.monate.length - 1];
+  if (letzte.stand != null) f.push(fakt(`Konten Ende ${MONAT[+letzte.k.slice(5) - 1]}`, `${letzte.art === 'ist' ? '' : '≈ '}${eur0(letzte.stand)}`, letzte.art === 'ist' ? 'tatsächlich' : 'erwartet', letzte.stand < 0 ? 'neg' : ''));
+  if (ende.stand != null && ende.k !== letzte.k) f.push(fakt(`Konten Ende ${MONAT[+ende.k.slice(5) - 1]}`, `≈ ${eur0(ende.stand)}`, `ggü. heute ${ende.stand - kontenSumme(D.bis) < 0 ? '−' : '+'}${eur0(Math.abs(ende.stand - kontenSumme(D.bis)))}`, ende.stand < 0 ? 'neg' : ''));
+  else f.push(fakt('Sparquote', `${prog ? '≈ ' : ''}${quote}`, 'vom Einkommen', erg >= 0 ? 'pos' : 'neg'));
+  h += `<div class="wf-fakten">${f.slice(0, 4).join('')}</div>`;
+  if (sel.some((m) => m.art === 'prognose')) h += '<p class="wf-fuss">Prognose: aktuelles Gehalt, typische variable Ausgaben und die fälligen Verträge – ohne Sonderzahlungen.</p>';
+  h += '</div>';
   $('#uem-stand').innerHTML = h;
+  // was nicht hineinpasst, fällt weg: zuerst die Fußnote, dann die Legende, dann eine Reihe Eckdaten
+  const box = $('#uem-stand .uem-auswahl'), passt = () => box.scrollHeight <= box.clientHeight + 2;
+  for (const s of ['.wf-fuss', '.wf-leg']) if (!passt()) box.querySelector(s)?.remove();
+  if (!passt()) [...box.querySelectorAll('.wf-f')].slice(2).forEach((e) => e.remove());
+  if (!passt()) box.querySelector('.wf-fakten')?.remove();
   $('#uem-buchungen')?.addEventListener('click', () => setze(ueFilterFuer(sel.filter((m) => m.art !== 'prognose').map((m) => m.k))));
 }
 
@@ -1046,37 +1083,56 @@ function ueFilterFuer(keys, extra = {}) {
   return { tab: 'buchungen', jahr: jahre.length === 1 ? jahre[0] : jahre[jahre.length - 1], monat: keys.filter((k) => k.slice(0, 4) === jahre[jahre.length - 1]).map((k) => String(+k.slice(5))).join(','), q: '', ...extra };
 }
 
-// Kategorien der gewählten Monate (je Monat) mit dem Durchschnitt als Marke
-function ueAuswahlKategorien(M, nMax = 8) {
+// Kategorien der gewählten Monate (je Monat) mit Anteil, Summe und dem Durchschnitt als Marke.
+// Im laufenden Monat: wie viel vom üblichen Monatsbetrag schon erreicht ist; übliche Kategorien ohne Buchung bisher füllen den Rest.
+function ueAuswahlKategorien(M, nMax = 16) {
   const sel = M.monate.filter((m) => ueAuswahl.includes(m.k) && m.art !== 'prognose');
   const box = $('#uem-kat');
+  const anteil = (v, g) => (g ? `${Math.round((v / g) * 100)} %` : '');
   if (!sel.length) {
     // nur Prognose: die festen Abbuchungen im Zeitraum
     const von = `${ueAuswahl[0]}-01`, bis = monatsletzter(`${ueAuswahl[ueAuswahl.length - 1]}-01`);
     const l = M.vertraege.map((f) => ({ f, c: faellig(f, von, bis) })).filter((x) => x.c > 0).sort((a, b) => b.c - a.c);
+    const ges = l.reduce((t, x) => t + x.c, 0), top = l.slice(0, nMax), rest = l.slice(nMax);
     $('#uem-kat-t').textContent = 'Feste Abbuchungen im Zeitraum';
-    $('#uem-kat-leg').innerHTML = `<span class="muted">${eur0(l.reduce((t, x) => t + x.c, 0))} insgesamt</span>`;
-    box.innerHTML = l.slice(0, nMax).map(({ f, c }) => `<div class="ue-kz uem-kz"><span class="ue-kz-n">${esc(vertragName(f))}</span><span class="ue-kz-b"><i style="width:${(c / l[0].c) * 100}%"></i></span><span class="ue-kz-w">${eur0(c)}</span><span class="ue-kz-d muted">${esc(f.rh.name)}</span></div>`).join('') || '<div class="leer">Keine festen Abbuchungen.</div>';
-    if (nMax > 3 && box.scrollHeight > box.clientHeight + 2) return ueAuswahlKategorien(M, nMax - 1);
+    $('#uem-kat-leg').innerHTML = `<span class="muted">${ueAuswahl.length} Monat${ueAuswahl.length > 1 ? 'e' : ''}</span>`;
+    box.innerHTML = !l.length ? '<div class="leer">Keine festen Abbuchungen.</div>'
+      : `<div class="ue-kz uem-kz kopf"><span></span><span></span><span>Betrag</span><span>Anteil</span><span>Rhythmus</span></div>`
+      + top.map(({ f, c }) => `<div class="ue-kz uem-kz"><span class="ue-kz-n">${esc(vertragName(f))}</span><span class="ue-kz-b"><i style="width:${(c / l[0].c) * 100}%"></i></span><span class="ue-kz-w">${eur0(c)}</span><span class="ue-kz-p">${anteil(c, ges)}</span><span class="ue-kz-d muted">${esc(f.rh.name)}</span></div>`).join('')
+      + (rest.length ? `<div class="ue-kz uem-kz rest"><span class="ue-kz-n">Übrige (${rest.length})</span><span></span><span class="ue-kz-w">${eur0(rest.reduce((t, x) => t + x.c, 0))}</span><span class="ue-kz-p">${anteil(rest.reduce((t, x) => t + x.c, 0), ges)}</span><span></span></div>` : '')
+      + `<div class="ue-kz uem-kz summe"><span class="ue-kz-n">Summe · ${l.length} Zahlungen</span><span></span><span class="ue-kz-w">${eur0(ges)}</span><span class="ue-kz-p">100 %</span><span></span></div>`;
+    if (nMax > 1 && box.scrollHeight > box.clientHeight + 2) return ueAuswahlKategorien(M, nMax - 1);
     return;
   }
   const n = sel.length, kat = new Map();
   for (const m of sel) for (const [k, v] of m.x.kat) kat.set(k, (kat.get(k) || 0) + v / n);
-  const l = [...kat].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
-  const lauf = sel.length === 1 && sel[0].art === 'laeuft';
+  const lauf = n === 1 && sel[0].art === 'laeuft';
+  const echt = [...kat].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  // übliche Kategorien (Ø ab 50 €), die in der Auswahl noch nicht vorkommen – nur als Füllung, wenn Platz ist
+  const ohne = [...M.schnitt.kat].filter(([k, s]) => s >= 5000 && !(kat.get(k) > 0)).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k]) => [k, 0]);
+  const l = [...echt, ...ohne], ges = sel.reduce((t, m) => t + m.x.aus, 0) / n;   // wie in den Kacheln
+  const top = l.slice(0, nMax), restL = l.slice(nMax).filter(([, v]) => v > 0), rest = restL.reduce((t, [, v]) => t + v, 0);
+  const sGes = M.schnitt.aus;
   $('#uem-kat-t').textContent = `Ausgaben nach Kategorie${n > 1 ? ' · je Monat' : lauf ? ' · bisher' : ''}`;
-  $('#uem-kat-leg').innerHTML = '<span><i class="uem-marke"></i>Ø 12 Monate</span>';
-  const top = l.slice(0, nMax), rest = l.slice(nMax).reduce((t, [, v]) => t + v, 0);
+  $('#uem-kat-leg').innerHTML = `<span><i class="uem-marke"></i>Ø 12 Monate</span>${lauf ? '<span class="muted">% vom Ø = so viel vom üblichen Monat ist schon erreicht</span>' : ''}`;
   const max = Math.max(1, ...top.map(([k, v]) => Math.max(v, M.schnitt.kat.get(k) || 0)));
-  box.innerHTML = `<div class="ue-kz uem-kz kopf"><span></span><span></span><span>Betrag</span><span>ggü. Ø</span></div>` + top.map(([k, v]) => {
-    const s = M.schnitt.kat.get(k) || 0, d = v - s;
-    return `<button class="ue-kz uem-kz" data-uemkat="${esc(k)}" title="${esc(schoen(k))}: ${eur0(v)} · Ø ${eur0(s)} – Klick: Buchungen">
+  const vglZelle = (v, s) => {
+    if (lauf) return `<span class="ue-kz-d ${!s ? 'muted' : v > s ? 'schlecht' : 'muted'}">${!s ? 'neu' : `${Math.round((v / s) * 100)} % vom Ø`}</span>`;
+    const d = v - s, klein = Math.abs(d) < Math.max(2000, s * 0.05);
+    return `<span class="ue-kz-d ${klein ? 'muted' : d > 0 ? 'schlecht' : 'gut'}">${!s ? 'neu' : klein ? '≈ Ø' : `${d > 0 ? '+' : '−'}${eur0(Math.abs(d))}`}</span>`;
+  };
+  box.innerHTML = `<div class="ue-kz uem-kz kopf"><span></span><span></span><span>Betrag</span><span>Anteil</span><span>${lauf ? 'vom Ø' : 'ggü. Ø'}</span></div>` + top.map(([k, v]) => {
+    const s = M.schnitt.kat.get(k) || 0;
+    return `<button class="ue-kz uem-kz${v ? '' : ' ohne'}" data-uemkat="${esc(k)}" title="${esc(schoen(k))}: ${eur0(v)}${ges ? ` (${anteil(v, ges)} der Ausgaben)` : ''} · Ø ${eur0(s)} im Monat – Klick: Buchungen">
       <span class="ue-kz-n">${esc(schoen(k))}</span>
       <span class="ue-kz-b uem-kz-b"><i style="width:${(v / max) * 100}%"></i>${s ? `<b class="uem-marke-b" style="left:${(s / max) * 100}%"></b>` : ''}</span>
-      <span class="ue-kz-w">${eur0(v)}</span>
-      <span class="ue-kz-d ${lauf || Math.abs(d) < Math.max(2000, s * 0.05) ? 'muted' : d > 0 ? 'schlecht' : 'gut'}">${!s ? 'neu' : Math.abs(d) < Math.max(2000, s * 0.05) ? '≈ Ø' : `${d > 0 ? '+' : '−'}${eur0(Math.abs(d))}`}</span></button>`;
-  }).join('') + (rest > 0 ? `<div class="ue-kz uem-kz rest"><span class="ue-kz-n">Übrige (${l.length - nMax})</span><span class="ue-kz-b"><i style="width:${(rest / max) * 100}%"></i></span><span class="ue-kz-w">${eur0(rest)}</span><span></span></div>` : '');
-  if (nMax > 3 && box.scrollHeight > box.clientHeight + 2) return ueAuswahlKategorien(M, nMax - 1);
+      <span class="ue-kz-w">${v ? eur0(v) : '–'}</span>
+      <span class="ue-kz-p">${v ? anteil(v, ges) : ''}</span>
+      ${vglZelle(v, s)}</button>`;
+  }).join('')
+    + (rest > 0 ? `<div class="ue-kz uem-kz rest"><span class="ue-kz-n">Übrige (${restL.length})</span><span class="ue-kz-b"><i style="width:${(rest / max) * 100}%"></i></span><span class="ue-kz-w">${eur0(rest)}</span><span class="ue-kz-p">${anteil(rest, ges)}</span><span></span></div>` : '')
+    + `<div class="ue-kz uem-kz summe" title="Summe aller Ausgaben${n > 1 ? ' je Monat' : ''} · Ø 12 Monate ${eur0(sGes)}"><span class="ue-kz-n">Summe${n > 1 ? ' je Monat' : ''} · ${echt.length} Kategorien</span><span class="ue-kz-b uem-kz-b"><i style="width:${sGes ? Math.min(100, (ges / Math.max(ges, sGes)) * 100) : 100}%"></i>${sGes ? `<b class="uem-marke-b" style="left:${(sGes / Math.max(ges, sGes)) * 100}%"></b>` : ''}</span><span class="ue-kz-w">${eur0(ges)}</span><span class="ue-kz-p">100 %</span>${vglZelle(ges, sGes)}</div>`;
+  if (nMax > 1 && box.scrollHeight > box.clientHeight + 2) return ueAuswahlKategorien(M, nMax - 1);
   box.querySelectorAll('[data-uemkat]').forEach((b) => b.onclick = () => setze(ueFilterFuer(sel.map((m) => m.k), { kat: b.dataset.uemkat, ukat: '' })));
 }
 
