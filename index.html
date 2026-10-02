@@ -95,7 +95,8 @@
 
       <div class="seite" id="seite-start">
       <div class="ue" id="ue">
-        <div class="ue-kopf"><div class="ue-kopf-t"><h1 id="ue-titel">Übersicht</h1><span class="muted" id="ue-zeit"></span></div><div class="seg ue-zeitraum" id="ue-zeitraum" role="group" aria-label="Zeitraum"></div></div>
+        <div class="ue-kopf"><div class="ue-kopf-t"><h1 id="ue-titel">Übersicht</h1><span class="muted" id="ue-zeit"></span></div>
+          <div class="ue-kopf-r"><div class="seg ue-zeitraum" id="ue-zeitraum" role="group" aria-label="Zeitraum"></div><div class="seg ue-modus-wahl" role="group" aria-label="Ansicht"></div></div></div>
         <div class="ue-kpis" id="ue-kpis"></div>
         <div class="ue-mitte">
           <div class="card ue-karte"><div class="ue-h"><h2>Einnahmen und Ausgaben je Monat</h2><span class="ue-leg" id="ue-verlauf-leg"></span></div><div class="ue-chart"><canvas id="c-ue"></canvas></div></div>
@@ -105,6 +106,17 @@
           <div class="card ue-karte" id="ue-budget"></div>
           <div class="card ue-karte" id="ue-termine"></div>
           <div class="card ue-karte" id="ue-blick"></div>
+        </div>
+      </div>
+      <div class="ue uem" id="uem" hidden>
+        <div class="ue-kopf"><div class="ue-kopf-t"><h1 id="uem-titel">Aktueller Stand</h1><span class="muted" id="uem-zeit"></span></div>
+          <div class="ue-kopf-r"><div class="seg ue-modus-wahl" role="group" aria-label="Ansicht"></div></div></div>
+        <div class="uem-leiste" id="uem-leiste"></div>
+        <div class="ue-kpis uem-schnitt" id="uem-schnitt"></div>
+        <div class="uem-mitte">
+          <div class="card ue-karte" id="uem-stand"></div>
+          <div class="card ue-karte"><div class="ue-h"><h2 id="uem-kat-t">Ausgaben nach Kategorie</h2><span class="ue-leg" id="uem-kat-leg"></span></div><div class="ue-kat" id="uem-kat"></div></div>
+          <div class="card ue-karte" id="uem-termine"></div>
         </div>
       </div>
       </div>

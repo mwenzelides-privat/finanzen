@@ -520,7 +520,19 @@ function ueSummen(von, bis) {
 // Summe aller eigenen Konten an einem Tag (wie im Reiter Konten: ohne Depot und ohne die Konten der Kinder)
 const kontenSumme = (tag) => (tag < D.von ? null : kontostaende(D, tag).filter((x) => !x.k.kind && x.c != null && x.status !== 'unbekannt').reduce((t, x) => t + x.c, 0));
 
+// Übersicht: Ansicht „Monate“ (aktueller Stand) oder „Jahr“ (Jahr bzw. letzte 12 Monate)
 function uebersicht() {
+  document.documentElement.style.setProperty('--kopf', `${$('.top').offsetHeight}px`);
+  const jahrAnsicht = ueModus === 'jahr';
+  $('#ue').hidden = !jahrAnsicht; $('#uem').hidden = jahrAnsicht;
+  document.querySelectorAll('.ue-modus-wahl').forEach((el) => {
+    el.innerHTML = `<button data-uemod="monat" class="${jahrAnsicht ? '' : 'an'}" title="Aktueller Stand: letzte 3 Monate, dieser Monat, Prognose">Monate</button><button data-uemod="jahr" class="${jahrAnsicht ? 'an' : ''}" title="Ganzes Jahr oder letzte 12 Monate">Jahr</button>`;
+    el.querySelectorAll('[data-uemod]').forEach((b) => b.onclick = () => { ueModus = b.dataset.uemod; try { localStorage.setItem('fd.uemodus', ueModus); } catch {} uebersicht(); });
+  });
+  if (jahrAnsicht) ueJahr(); else ueMonate();
+}
+
+function ueJahr() {
   const Z = ueZeitraum();
   document.documentElement.style.setProperty('--kopf', `${$('.top').offsetHeight}px`);
   const A = ueSummen(Z.von, Z.bis), V0 = ueSummen(vorjahrVon(Z.von), vorjahrVon(Z.bis));
@@ -681,7 +693,7 @@ function ueBudget(pm, L, B, ek) {
 }
 
 // Abbuchungen der nächsten 30 Tage aus den erkannten Verträgen
-function ueTermine(fixV, n = 6) {
+function ueTermine(fixV, n = 6, ziel = '#ue-termine') {
   const heute = D.bis, bis = plusTage(heute, 30);
   const liste = [];
   for (const f of fixV) {
@@ -699,14 +711,14 @@ function ueTermine(fixV, n = 6) {
   liste.sort((a, b) => (a.am < b.am ? -1 : a.am > b.am ? 1 : b.f.betrag - a.f.betrag));
   const summe = liste.reduce((t, x) => t + x.f.betrag, 0), zeigen = liste.slice(0, n);
   const tagText = (iso) => { const d = new Date(`${iso}T12:00:00Z`); return `${WTAG[d.getUTCDay()]} ${+iso.slice(8)}.${+iso.slice(5, 7)}.`; };
-  $('#ue-termine').innerHTML = `<div class="ue-h"><h2>Nächste 30 Tage</h2><span class="ue-h-wert">${eur0(summe)} feste Abbuchungen</span></div>
+  $(ziel).innerHTML = `<div class="ue-h"><h2>Nächste 30 Tage</h2><span class="ue-h-wert">${eur0(summe)} feste Abbuchungen</span></div>
     <div class="ue-termine">${zeigen.length ? zeigen.map(({ f, am }) => `<button class="ue-t" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="Alle Zahlungen anzeigen">
-      <span class="ue-t-d">${tagText(am)}</span><span class="ue-t-n">${esc(fixTitel(f, fixArt(f)) === f.name ? f.name : `${fixTitel(f, fixArt(f))} · ${f.name}`)}</span><b>${eur0(f.betrag)}</b></button>`).join('')
+      <span class="ue-t-d">${tagText(am)}</span><span class="ue-t-n">${esc(vertragName(f))}</span><b>${eur0(f.betrag)}</b></button>`).join('')
       + (liste.length > zeigen.length ? `<div class="ue-t-mehr muted">+ ${liste.length - zeigen.length} weitere (${eur0(liste.slice(n).reduce((t, x) => t + x.f.betrag, 0))})</div>` : '')
       : '<div class="leer">Keine festen Abbuchungen in den nächsten 30 Tagen.</div>'}</div>`;
-  const tb = $('#ue-termine .ue-termine');
-  if (n > 2 && tb && tb.scrollHeight > tb.clientHeight + 2) return ueTermine(fixV, n - 1);
-  $('#ue-termine').querySelectorAll('[data-fix]').forEach((b) => b.onclick = () => setze({ q: `"${b.dataset.fix}"${b.dataset.sig ? ' ' + b.dataset.sig : ''}`, tab: 'buchungen', jahr: '', monat: '' }));
+  const tb = $(`${ziel} .ue-termine`);
+  if (n > 2 && tb && tb.scrollHeight > tb.clientHeight + 2) return ueTermine(fixV, n - 1, ziel);
+  $(ziel).querySelectorAll('[data-fix]').forEach((b) => b.onclick = () => setze({ q: `"${b.dataset.fix}"${b.dataset.sig ? ' ' + b.dataset.sig : ''}`, tab: 'buchungen', jahr: '', monat: '' }));
 }
 
 // Gut zu wissen: laufender Monat, auffälligste Veränderung, größte Ausgabe, Steuer
@@ -730,6 +742,243 @@ function ueBlick(Z, A, V0, laufend) {
   const bx = $('#ue-blick .ue-blick');
   while (bx.children.length > 2 && bx.scrollHeight > bx.clientHeight + 2) bx.lastElementChild.remove();   // nur, was hineinpasst
   $('#ue-blick').querySelectorAll('[data-ueb]').forEach((b) => b.onclick = () => punkte[+b.dataset.ueb][2]());
+}
+
+// ======================================================================= Übersicht „Monate“: aktueller Stand
+// Sieben Monate nebeneinander: drei abgeschlossene, der laufende (bisher + erwartet bis Monatsende) und drei Prognosen.
+// Prognose: typische Einnahmen (Median der letzten 12 Monate) und typische variable Ausgaben plus die festen Abbuchungen,
+// die in dem Monat fällig sind. Daneben der erwartete Kontostand am Monatsende. Ein Klick wählt Monate aus.
+let ueModus = (() => { try { return localStorage.getItem('fd.uemodus') || 'monat'; } catch { return 'monat'; } })();
+let ueAuswahl = null;   // gewählte Monate 'JJJJ-MM'
+const mVor = (k, n) => { let [y, m] = k.split('-').map(Number); m += n; while (m <= 0) { m += 12; y--; } while (m > 12) { m -= 12; y++; } return mkey(y, m); };
+const monatName = (k, lang = false) => `${(lang ? MONAT : MON)[+k.slice(5) - 1]} ${lang ? k.slice(0, 4) : k.slice(2, 4)}`;
+
+// Zahlungen eines laufenden Vertrags zwischen von und bis (ISO, beide inklusive)
+function faellig(f, von, bis) {
+  if (f.rh.proJahr === 12) {
+    let n = 0;
+    for (let k = von.slice(0, 7); k <= bis.slice(0, 7); k = mVor(k, 1)) {
+      const letzter = +monatsletzter(`${k}-01`).slice(8), tag = `${k}-${String(Math.min(zahltag(f), letzter)).padStart(2, '0')}`;
+      if (f.zuletzt.slice(0, 7) === k) continue;   // in diesem Monat schon bezahlt
+      if (tag >= von && tag <= bis) n++;
+      else if (k === D.bis.slice(0, 7) && tag <= D.bis && von > D.bis) n++;   // diesen Monat noch nicht abgebucht: kommt noch
+    }
+    return n * f.betrag;
+  }
+  let t = Date.parse(f.zuletzt), n = 0;
+  const a = Date.parse(von), b = Date.parse(bis) + 864e5 - 1;
+  for (let i = 0; i < 40 && t <= b; i++) { t += f.rh.tage * 864e5; if (t >= a && t <= b) n++; }
+  return n * f.betrag;
+}
+
+function ueMonatsDaten() {
+  if (D.ueM) return D.ueM;
+  const heute = D.bis, jetzt = heute.slice(0, 7), laeuft = heute !== monatsletzter(heute);
+  const fx = fixIds(), leer = () => ({ ein: 0, aus: 0, var: 0, lohn: 0, spar: 0, kat: new Map() });
+  const ist = new Map();
+  for (const r of D.rows) {
+    if (!['Einnahme', 'Ausgabe', 'Sparen'].includes(r.art) || (r.art === 'Sparen' && istGemeinsam(r.k))) continue;
+    const k = r.d.slice(0, 7);
+    let x = ist.get(k); if (!x) ist.set(k, (x = leer()));
+    if (r.art === 'Einnahme') { x.ein += r.c; if (r.ukat === 'Lohn / Gehalt') x.lohn += r.c; }
+    else if (r.art === 'Ausgabe') { x.aus -= r.c; if (!fx.has(r.i)) x.var -= r.c; x.kat.set(r.kat, (x.kat.get(r.kat) || 0) - r.c); }
+    else x.spar += r.c;
+  }
+  // Vergleich: die 12 abgeschlossenen Monate vor dem laufenden
+  const ref = []; for (let i = laeuft ? 1 : 0; ref.length < 12; i++) { const k = mVor(jetzt, -i); if (k < D.von.slice(0, 7)) break; ref.unshift(k); }
+  const w = (k) => ist.get(k) || leer();
+  const med = (f) => (ref.length ? median(ref.map((k) => f(w(k)))) : 0), avg = (f) => (ref.length ? ref.reduce((t, k) => t + f(w(k)), 0) / ref.length : 0);
+  const typ = { ein: med((x) => x.ein), var: med((x) => x.var), lohn: med((x) => x.lohn), spar: med((x) => x.spar) };
+  const schnitt = { ein: avg((x) => x.ein), aus: avg((x) => x.aus), kat: new Map() };
+  for (const k of ref) for (const [kat, v] of w(k).kat) schnitt.kat.set(kat, (schnitt.kat.get(kat) || 0) + v / ref.length);
+  // feste Abbuchungen (nur echte Ausgaben – Beiträge zum Gemeinschaftskonto sind Umbuchungen)
+  const vertraege = fixkostenErkennen().filter((f) => f.aktiv && !f.gemeinsam && !f.beitrag);
+  const fest = (von, bis) => vertraege.reduce((t, f) => t + faellig(f, von, bis), 0);
+  const gt = gehaltstag();
+  // die sieben Monate
+  const monate = [];
+  let stand = kontenSumme(heute);
+  for (let i = -3; i <= 3; i++) {
+    const k = mVor(jetzt, i), x = w(k), ende = monatsletzter(`${k}-01`);
+    if (i < 0 || (i === 0 && !laeuft)) {
+      monate.push({ k, art: 'ist', ein: x.ein, aus: x.aus, erg: x.ein - x.aus, x, stand: kontenSumme(ende > heute ? heute : ende) });
+    } else if (i === 0) {
+      const offenFest = fest(plusTage(heute, 1), ende);
+      const gehaltKommt = x.lohn > 0 ? 0 : typ.lohn;
+      // Einnahmen: mindestens ein typischer Monat (das Gehalt fehlt oft noch); was schon mehr ist, bleibt
+      const einE = Math.max(x.ein + gehaltKommt, typ.ein), ausE = x.aus + offenFest + Math.max(0, typ.var - x.var);
+      stand += einE - x.ein - (ausE - x.aus) + typ.spar * (1 - +heute.slice(8) / +ende.slice(8));
+      const tag = +heute.slice(8), tage = +ende.slice(8);
+      monate.push({ k, art: 'laeuft', ein: einE, aus: ausE, erg: einE - ausE, x, bisher: { ein: x.ein, aus: x.aus, erg: x.ein - x.aus }, offenFest, gehaltKommt, tag, tage, stand });
+    } else {
+      const f = fest(`${k}-01`, ende), einE = typ.ein, ausE = typ.var + f;
+      stand += einE - ausE + typ.spar;
+      monate.push({ k, art: 'prognose', ein: einE, aus: ausE, erg: einE - ausE, fest: f, stand });
+    }
+  }
+  return (D.ueM = { monate, ref, typ, schnitt, vertraege, gt, jetzt, laeuft, ist, w });
+}
+
+function ueMonate() {
+  const M = ueMonatsDaten(), heuteK = M.jetzt;
+  const alle = M.monate.map((m) => m.k);
+  if (!ueAuswahl || !ueAuswahl.every((k) => alle.includes(k))) ueAuswahl = [heuteK];
+  const aus = new Set(ueAuswahl);
+  $('#uem-titel').textContent = `Aktueller Stand · ${MONAT[+heuteK.slice(5) - 1]} ${heuteK.slice(0, 4)}`;
+  $('#uem-zeit').textContent = `Daten bis ${dde(D.bis)} · Ø = Durchschnitt ${monatsText(M.ref)}`;
+
+  // Monatsleiste
+  const maxW = Math.max(1, ...M.monate.flatMap((m) => [m.ein, m.aus]));
+  const z = (c) => `${c < 0 ? '−' : '+'}${eur0(Math.abs(c))}`;
+  const karte = (m) => {
+    const lauf = m.art === 'laeuft', prog = m.art === 'prognose';
+    const status = prog ? 'Prognose' : lauf ? `läuft · Tag ${m.tag} von ${m.tage}` : 'abgeschlossen';
+    return `<button class="uem-m uem-${m.art}${aus.has(m.k) ? ' an' : ''}" data-uemk="${m.k}" title="${prog ? 'Prognose aus typischen Einnahmen und Ausgaben plus den fälligen festen Abbuchungen' : lauf ? 'Bisher gebucht und erwartet bis Monatsende' : 'Abgeschlossener Monat'} – Klick: auswählen, Strg/Umschalt: mehrere">
+      <span class="uem-m-k"><b>${MONAT[+m.k.slice(5) - 1]}</b> ${m.k.slice(0, 4)}<span class="uem-st">${status}</span></span>
+      <span class="uem-erg ${m.erg >= 0 ? 'pos' : 'neg'}">${prog || lauf ? '≈ ' : ''}${z(m.erg)}</span>
+      <span class="uem-zeile"><i class="uem-b ein" style="width:${(m.ein / maxW) * 100}%"></i><span>${eur0(m.ein)}</span></span>
+      <span class="uem-zeile"><i class="uem-b aus" style="width:${(m.aus / maxW) * 100}%"></i><span>${eur0(m.aus)}</span></span>
+      ${lauf ? `<span class="uem-bisher">bisher ${z(m.bisher.erg)}</span>` : ''}
+      <span class="uem-stand">Konten ${prog || lauf ? '≈ ' : ''}${m.stand == null ? '–' : eur0(m.stand)}<small>${lauf || prog ? 'Monatsende' : m.k === heuteK ? 'heute' : 'Monatsende'}</small></span></button>`;
+  };
+  $('#uem-leiste').innerHTML = `<div class="uem-leiste-kopf"><span class="uem-gruppe">Zurück</span><span class="uem-gruppe jetzt">Jetzt</span><span class="uem-gruppe vor">Prognose</span>
+      <span class="uem-schnell"><span class="muted">Auswahl:</span><button class="link" data-uems="-3">letzte 3 Monate</button><button class="link" data-uems="0">dieser Monat</button><button class="link" data-uems="3">nächste 3 Monate</button><button class="link" data-uems="alle">alle 7</button></span></div>
+    <div class="uem-karten">${M.monate.map(karte).join('')}</div>
+    <div class="uem-leg"><span><i class="uem-b ein"></i>Einnahmen</span><span><i class="uem-b aus"></i>Ausgaben</span><span class="muted">≈ erwartet · Klick wählt den Monat, Strg oder Umschalt + Klick mehrere</span></div>`;
+  // schmale Bildschirme: die Leiste so schieben, dass der laufende Monat sichtbar ist
+  const leiste = $('#uem-leiste .uem-karten'), akt = leiste.querySelector('.uem-laeuft') || leiste.querySelector('.an');
+  if (akt && leiste.scrollWidth > leiste.clientWidth) leiste.scrollLeft = akt.offsetLeft - leiste.offsetLeft - 12;
+  let letzter = ueAuswahl[ueAuswahl.length - 1];
+  $('#uem-leiste').querySelectorAll('[data-uemk]').forEach((b) => b.onclick = (e) => {
+    const k = b.dataset.uemk;
+    if (e.shiftKey) { const a = alle.indexOf(letzter), c = alle.indexOf(k); ueAuswahl = alle.slice(Math.min(a, c), Math.max(a, c) + 1); }
+    else if (e.ctrlKey || e.metaKey) ueAuswahl = aus.has(k) ? (ueAuswahl.length > 1 ? ueAuswahl.filter((x) => x !== k) : ueAuswahl) : [...ueAuswahl, k].sort();
+    else ueAuswahl = [k];
+    ueMonate();
+  });
+  $('#uem-leiste').querySelectorAll('[data-uems]').forEach((b) => b.onclick = () => {
+    const v = b.dataset.uems;
+    ueAuswahl = v === 'alle' ? alle : v === '0' ? [heuteK] : v === '-3' ? alle.slice(0, 3) : alle.slice(4);
+    ueMonate();
+  });
+
+  ueSchnitt(M);
+  ueAuswahlKarte(M);
+  ueAuswahlKategorien(M);
+  ueTermine(fixkostenErkennen().filter((f) => !f.gemeinsam && f.aktiv), 6, '#uem-termine');
+}
+
+// Durchschnittswerte der letzten 12 Monate und der Kontostand heute
+function ueSchnitt(M) {
+  const heute = kontenSumme(D.bis), anfang = kontenSumme(plusTage(`${M.jetzt}-01`, -1));
+  const sE = M.schnitt.ein, sA = M.schnitt.aus, sErg = sE - sA;
+  const festAus = M.vertraege.reduce((t, f) => t + f.proMonat, 0);
+  const fixV = fixkostenErkennen().filter((f) => !f.gemeinsam && f.aktiv), pm = fixV.reduce((t, f) => t + f.proMonat, 0);
+  const B = einkommen().schnitt.wert;
+  const kachel = (ziel, icon, titel, wert, cls_, zeile) => `<button class="ue-kpi" data-uemz="${ziel}"><span class="ue-kpi-l"><span class="ue-ic ${icon}">${UE_ICON[icon]}</span>${titel}</span><b class="${cls_}">${wert}</b><span class="ue-kpi-s">${zeile}</span></button>`;
+  const vz = (c) => `${c < 0 ? '−' : '+'}${eur0(Math.abs(c))}`;
+  $('#uem-schnitt').innerHTML = [
+    kachel('konten', 'konto', 'Kontostand heute', heute == null ? '–' : eur0(heute), heute < 0 ? 'neg' : '', heute != null && anfang != null ? `<span class="ue-d ${heute - anfang >= 0 ? 'gut' : 'schlecht'}">${vz(heute - anfang)}</span> <span class="muted">seit Monatsanfang</span>` : ''),
+    kachel('ein', 'ein', 'Ø Einnahmen / Monat', eur0(sE), 'pos', `<span class="muted">typisch ${eur0(M.typ.ein)} · Gehalt meist ${eur0(M.typ.lohn)}</span>`),
+    kachel('aus', 'aus', 'Ø Ausgaben / Monat', eur0(sA), 'neg', `<span class="muted">davon fest ≈ ${eur0(festAus)} · variabel ≈ ${eur0(M.typ.var)}</span>`),
+    kachel('erg', 'erg', 'Ø Ergebnis / Monat', vz(sErg), sErg >= 0 ? 'pos' : 'neg', `<span class="ue-d ${sErg >= 0 ? 'gut' : 'schlecht'}">Sparquote ${sE ? `${sErg < 0 ? '−' : ''}${Math.abs(Math.round((sErg / sE) * 100))} %` : '–'}</span> <span class="muted">Ziel: 20 %</span>`),
+    kachel('fix', 'fix', 'Fixkosten / Monat', eur0(pm), '', `<span class="ue-d ${pm <= B * 0.5 ? 'gut' : 'schlecht'}">${B ? Math.round((pm / B) * 100) : '–'} % vom Gehalt</span> <span class="muted">Ziel: höchstens 50 %</span>`),
+  ].join('');
+  $('#uem-schnitt').querySelectorAll('[data-uemz]').forEach((b) => b.onclick = () => ({
+    konten: () => setze({ tab: 'konten' }), ein: () => setze({ tab: 'kennzahlen', jahr: '', monat: '' }), aus: () => setze({ tab: 'kennzahlen', jahr: '', monat: '' }),
+    erg: () => setze({ tab: 'kennzahlen', jahr: '', monat: '' }), fix: () => setze({ tab: 'fix' }),
+  })[b.dataset.uemz]());
+}
+
+// Die Auswahl im Vergleich zum Durchschnitt: Einnahmen, Ausgaben, Ergebnis (bei mehreren Monaten je Monat)
+function ueAuswahlKarte(M) {
+  const sel = M.monate.filter((m) => ueAuswahl.includes(m.k)), n = sel.length;
+  const sum = (f) => sel.reduce((t, m) => t + f(m), 0);
+  const ein = sum((m) => m.ein) / n, aus = sum((m) => m.aus) / n, erg = ein - aus;
+  const nurIst = sel.every((m) => m.art === 'ist'), lauf = sel.length === 1 && sel[0].art === 'laeuft' ? sel[0] : null;
+  const prog = sel.some((m) => m.art !== 'ist');
+  const titel = n === 1 ? `${MONAT[+sel[0].k.slice(5) - 1]} ${sel[0].k.slice(0, 4)}` : `${monatName(sel[0].k)} – ${monatName(sel[n - 1].k)} · ${n} Monate`;
+  const sE = M.schnitt.ein, sA = M.schnitt.aus, sErg = sE - sA;
+  const pz = (a, b) => (b ? Math.round(((a - b) / Math.abs(b)) * 100) : 0);
+  const max = Math.max(ein, aus, sE, sA, 1);
+  const zeile = (l, v, s, cls_, mehrGut, extra = '') => {
+    const p = pz(v, s);
+    return `<div class="uem-v"><span class="uem-v-l">${l}</span>
+      <span class="uem-v-bar"><i class="${cls_}" style="width:${(v / max) * 100}%"></i>${extra}<b class="uem-v-s" style="left:${(s / max) * 100}%" title="Ø ${eur0(s)}"></b></span>
+      <span class="uem-v-w">${prog ? '≈ ' : ''}${eur0(v)}</span>
+      <span class="uem-v-d ${Math.abs(p) < 3 ? '' : (p > 0) === mehrGut ? 'gut' : 'schlecht'}">${Math.abs(p) < 3 ? '≈ Ø' : `${p > 0 ? '+' : '−'}${Math.abs(p)} % ggü. Ø`}</span></div>`;
+  };
+  let h = `<div class="ue-h"><h2>${esc(titel)}${n > 1 ? ' <span class="muted">· je Monat</span>' : ''}</h2>${nurIst || lauf ? `<button class="link klein" id="uem-buchungen">Buchungen →</button>` : ''}</div><div class="uem-auswahl">`;
+  if (lauf) {
+    const b = lauf.bisher, anteil = Math.round((lauf.tag / lauf.tage) * 100);
+    h += `<div class="uem-tempo"><div class="uem-tempo-z"><span>Monat zu <b>${anteil} %</b> vorbei</span><span>${eur0(b.aus)} von ≈ ${eur0(lauf.aus)} ausgegeben</span></div>
+      <div class="uem-tempo-bar"><i style="width:${Math.min(100, (b.aus / Math.max(lauf.aus, 1)) * 100)}%"></i><b style="left:${anteil}%" title="heute"></b></div></div>`;
+  }
+  h += zeile('Einnahmen', ein, sE, 'ein', true, lauf ? `<i class="ein bisher" style="width:${(lauf.bisher.ein / max) * 100}%"></i>` : '')
+    + zeile('Ausgaben', aus, sA, 'aus', false, lauf ? `<i class="aus bisher" style="width:${(lauf.bisher.aus / max) * 100}%"></i>` : '');
+  const pE = pz(erg, sErg);
+  h += `<div class="uem-erg-zeile"><span>Ergebnis${n > 1 ? ' je Monat' : ''}</span><b class="${erg >= 0 ? 'pos' : 'neg'}">${prog ? '≈ ' : ''}${erg < 0 ? '−' : '+'}${eur0(Math.abs(erg))}</b>
+    <span class="muted">Ø ${sErg < 0 ? '−' : '+'}${eur0(Math.abs(sErg))}${ein > 0 ? ` · Sparquote ${erg < 0 ? '−' : ''}${Math.abs(Math.round((erg / ein) * 100))} %` : ''}</span></div>`;
+  // Hinweise zum Monat
+  const punkte = [];
+  if (lauf) {
+    punkte.push(`Noch fällig bis Monatsende: <b>${eur0(lauf.offenFest)}</b> feste Abbuchungen`);
+    punkte.push(lauf.gehaltKommt ? `Gehalt erwartet: <b>≈ ${eur0(lauf.gehaltKommt)}</b>${M.gt ? ` um den ${M.gt}.` : ''}` : `Gehalt ist da: <b>${eur0(lauf.x.lohn)}</b>`);
+  } else if (sel.every((m) => m.art === 'prognose')) {
+    punkte.push(`Davon fest: <b>${eur0(sum((m) => m.fest) / n)}</b>${n > 1 ? ' je Monat' : ''} (Verträge, Unterhalt, Versicherungen)`);
+    punkte.push(`Variabel erwartet: <b>≈ ${eur0(M.typ.var)}</b> – so viel gibst du in einem typischen Monat zusätzlich aus`);
+    punkte.push('Sonderzahlungen (z. B. Weihnachtsgeld) sind nicht eingerechnet – die Prognose ist eher vorsichtig.');
+  } else if (nurIst) {
+    const lohn = sel.reduce((t, m) => t + m.x.lohn, 0) / n;
+    if (lohn) punkte.push(`Gehalt: <b>${eur0(lohn)}</b>${n > 1 ? ' je Monat' : ''} · Ø ${eur0(M.typ.lohn)}`);
+    const letzteM = sel[n - 1];
+    if (letzteM.stand != null) punkte.push(`Konten am Monatsende: <b>${eur0(letzteM.stand)}</b>`);
+  }
+  const ende = M.monate[M.monate.length - 1];
+  if (ende.stand != null) punkte.push(`Erwarteter Kontostand Ende ${MONAT[+ende.k.slice(5) - 1]}: <b class="${ende.stand < 0 ? 'neg' : ''}">≈ ${eur0(ende.stand)}</b>`);
+  h += `<ul class="uem-punkte">${punkte.map((p) => `<li>${p}</li>`).join('')}</ul></div>`;
+  $('#uem-stand').innerHTML = h;
+  $('#uem-buchungen')?.addEventListener('click', () => setze(ueFilterFuer(sel.filter((m) => m.art !== 'prognose').map((m) => m.k))));
+}
+
+// Monate → Filter für die anderen Reiter (gleiches Jahr: Jahr + Monate; über den Jahreswechsel: beide Jahre, nur diese Monate)
+function ueFilterFuer(keys, extra = {}) {
+  const jahre = [...new Set(keys.map((k) => k.slice(0, 4)))];
+  return { tab: 'buchungen', jahr: jahre.length === 1 ? jahre[0] : jahre[jahre.length - 1], monat: keys.filter((k) => k.slice(0, 4) === jahre[jahre.length - 1]).map((k) => String(+k.slice(5))).join(','), q: '', ...extra };
+}
+
+// Kategorien der gewählten Monate (je Monat) mit dem Durchschnitt als Marke
+function ueAuswahlKategorien(M, nMax = 8) {
+  const sel = M.monate.filter((m) => ueAuswahl.includes(m.k) && m.art !== 'prognose');
+  const box = $('#uem-kat');
+  if (!sel.length) {
+    // nur Prognose: die festen Abbuchungen im Zeitraum
+    const von = `${ueAuswahl[0]}-01`, bis = monatsletzter(`${ueAuswahl[ueAuswahl.length - 1]}-01`);
+    const l = M.vertraege.map((f) => ({ f, c: faellig(f, von, bis) })).filter((x) => x.c > 0).sort((a, b) => b.c - a.c);
+    $('#uem-kat-t').textContent = 'Feste Abbuchungen im Zeitraum';
+    $('#uem-kat-leg').innerHTML = `<span class="muted">${eur0(l.reduce((t, x) => t + x.c, 0))} insgesamt</span>`;
+    box.innerHTML = l.slice(0, nMax).map(({ f, c }) => `<div class="ue-kz uem-kz"><span class="ue-kz-n">${esc(vertragName(f))}</span><span class="ue-kz-b"><i style="width:${(c / l[0].c) * 100}%"></i></span><span class="ue-kz-w">${eur0(c)}</span><span class="ue-kz-d muted">${esc(f.rh.name)}</span></div>`).join('') || '<div class="leer">Keine festen Abbuchungen.</div>';
+    if (nMax > 3 && box.scrollHeight > box.clientHeight + 2) return ueAuswahlKategorien(M, nMax - 1);
+    return;
+  }
+  const n = sel.length, kat = new Map();
+  for (const m of sel) for (const [k, v] of m.x.kat) kat.set(k, (kat.get(k) || 0) + v / n);
+  const l = [...kat].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  const lauf = sel.length === 1 && sel[0].art === 'laeuft';
+  $('#uem-kat-t').textContent = `Ausgaben nach Kategorie${n > 1 ? ' · je Monat' : lauf ? ' · bisher' : ''}`;
+  $('#uem-kat-leg').innerHTML = '<span><i class="uem-marke"></i>Ø 12 Monate</span>';
+  const top = l.slice(0, nMax), rest = l.slice(nMax).reduce((t, [, v]) => t + v, 0);
+  const max = Math.max(1, ...top.map(([k, v]) => Math.max(v, M.schnitt.kat.get(k) || 0)));
+  box.innerHTML = `<div class="ue-kz uem-kz kopf"><span></span><span></span><span>Betrag</span><span>ggü. Ø</span></div>` + top.map(([k, v]) => {
+    const s = M.schnitt.kat.get(k) || 0, d = v - s;
+    return `<button class="ue-kz uem-kz" data-uemkat="${esc(k)}" title="${esc(schoen(k))}: ${eur0(v)} · Ø ${eur0(s)} – Klick: Buchungen">
+      <span class="ue-kz-n">${esc(schoen(k))}</span>
+      <span class="ue-kz-b uem-kz-b"><i style="width:${(v / max) * 100}%"></i>${s ? `<b class="uem-marke-b" style="left:${(s / max) * 100}%"></b>` : ''}</span>
+      <span class="ue-kz-w">${eur0(v)}</span>
+      <span class="ue-kz-d ${lauf || Math.abs(d) < Math.max(2000, s * 0.05) ? 'muted' : d > 0 ? 'schlecht' : 'gut'}">${!s ? 'neu' : Math.abs(d) < Math.max(2000, s * 0.05) ? '≈ Ø' : `${d > 0 ? '+' : '−'}${eur0(Math.abs(d))}`}</span></button>`;
+  }).join('') + (rest > 0 ? `<div class="ue-kz uem-kz rest"><span class="ue-kz-n">Übrige (${l.length - nMax})</span><span class="ue-kz-b"><i style="width:${(rest / max) * 100}%"></i></span><span class="ue-kz-w">${eur0(rest)}</span><span></span></div>` : '');
+  if (nMax > 3 && box.scrollHeight > box.clientHeight + 2) return ueAuswahlKategorien(M, nMax - 1);
+  box.querySelectorAll('[data-uemkat]').forEach((b) => b.onclick = () => setze(ueFilterFuer(sel.map((m) => m.k), { kat: b.dataset.uemkat, ukat: '' })));
 }
 
 // ======================================================================= Durchschnitte und Quoten
@@ -1606,6 +1855,15 @@ function naechsteZahlung(f) {
   const ab = Date.parse(D.bis) - 5 * 864e5;
   do t += f.rh.tage * 864e5; while (t < ab);
   return new Date(t).toISOString().slice(0, 10);
+}
+// Name eines Vertrags für Listen: „Miete Kathrin Kluge“, „Kindesunterhalt Leo“, „Lebensversicherung“ …
+function vertragName(f) {
+  const a = fixArt(f), t = fixTitel(f, a);
+  if (a === 'Miete') return `Miete ${f.name}`;
+  if (a === 'Kindesunterhalt') return `Kindesunterhalt ${t}`;
+  if (a === 'Trennungsunterhalt') return 'Trennungsunterhalt';
+  if (f.beitrag) return `${t} (${f.name})`;
+  return t;
 }
 const vertragsKey = (f) => `${f.name}|${f.sig}|${f.seit}`;
 const pzVon = (v, g) => (!g ? '–' : Math.abs(v / g) < 0.0005 ? '< 0,1 %' : `${NUM.format(Math.round((v / g) * 1000) / 10)} %`);
