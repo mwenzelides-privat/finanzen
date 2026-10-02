@@ -979,7 +979,7 @@ main { max-width: 1600px; padding: 18px 20px 48px; }
 
 /* ============ Übersicht: alles auf einem Bildschirm ============ */
 body.ue-modus main { padding-top: 14px; padding-bottom: 14px; }
-.ue { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 12px; height: calc(100dvh - var(--kopf, 58px) - 28px); min-height: 620px; }
+.ue { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 12px; height: calc(100dvh - var(--kopf, 58px) - 28px); min-height: 460px; }
 .ue-kopf { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .ue-kopf-t { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .ue-kopf h1 { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -.01em; }
@@ -1070,7 +1070,7 @@ button.ue-kz:hover { background: var(--surface-2); }
   .ue-kz { grid-template-columns: minmax(90px, 1.2fr) minmax(40px, 1fr) 70px 36px 52px; gap: 8px; }
 }
 /* zu klein für eine Seite: dann normal untereinander und scrollen */
-@media (max-width: 1000px), (max-height: 640px) {
+@media (max-width: 900px), (max-height: 500px) {
   .ue { height: auto; min-height: 0; grid-template-rows: none; }
   .ue-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ue-kpis .ue-kpi:first-child { grid-column: 1 / -1; }
@@ -1094,7 +1094,7 @@ button.ue-kz:hover { background: var(--surface-2); }
 .ue-unten .ue-karte { min-height: 0; }
 .ue-kat, .ue-termine, .ue-blick { flex: 1; min-height: 0; }
 @media (max-height: 820px) { .ue { gap: 10px; } .ue-kpi { padding: 9px 14px; } .ue-kpi > b { font-size: 22px; } .ue-h { padding-top: 10px; } .ue-kz { padding-top: 5px; padding-bottom: 5px; } }
-@media (max-width: 1000px), (max-height: 640px) { .ue { grid-template-rows: none; } }
+@media (max-width: 900px), (max-height: 500px) { .ue { grid-template-rows: none; } }
 .ue-bb-leg b small { font-size: 11.5px; font-weight: 500; color: var(--muted); margin-left: 3px; }
 .ue-spark { top: 10px; width: 34%; }
 
@@ -1166,10 +1166,9 @@ button.ue-kz:hover { background: var(--surface-2); }
   .uem-m { padding: 9px 10px; }
   .uem-erg { font-size: 17px; }
   .uem-mitte { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  #uem-termine { display: none; }
   .uem-v { grid-template-columns: 70px minmax(0, 1fr) 80px 96px; }
 }
-@media (max-width: 1000px), (max-height: 640px) {
+@media (max-width: 900px), (max-height: 500px) {
   .uem { grid-template-rows: none; }
   .uem-karten { grid-template-columns: repeat(7, minmax(118px, 1fr)); overflow-x: auto; padding-bottom: 4px; }
   .uem-leiste-kopf { display: none; }
@@ -1183,11 +1182,55 @@ button.ue-kz:hover { background: var(--surface-2); }
 .uem { grid-template-rows: auto auto auto minmax(0, 1fr); }
 .uem-schnitt .ue-kpi { padding: 9px 14px; }
 .uem-schnitt .ue-kpi > b { font-size: 20px; }
-@media (max-width: 1000px), (max-height: 640px) { .uem { grid-template-rows: none; } }
-@media (max-width: 1000px), (max-height: 640px) {
+@media (max-width: 900px), (max-height: 500px) { .uem { grid-template-rows: none; } }
+@media (max-width: 900px), (max-height: 500px) {
   .uem-leiste-kopf { display: flex; }
   .uem-gruppe { display: none; }
   .uem-schnell { position: static; flex-wrap: wrap; background: none; padding-left: 0; gap: 4px 12px; }
   .uem-m-k { flex-direction: column; align-items: flex-start; gap: 0; }
   .uem-st { margin-left: 0; }
 }
+
+/* ============ Übersicht „Monate“ mit Grafik – passt auch auf niedrige Bildschirme ============ */
+.uem { grid-template-rows: auto auto minmax(0, 1.4fr) minmax(0, 1fr); }
+.uem-haupt { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(300px, 1fr); gap: 12px; min-height: 0; }
+.uem-unten { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 12px; min-height: 0; }
+.uem-kpis .ue-kpi { padding: 9px 14px; }
+.uem-kpis .ue-kpi > b { font-size: 21px; }
+.uem-k-tempo { position: relative; display: block; height: 6px; border-radius: 3px; background: var(--surface-2); margin: 3px 0 2px; }
+.uem-k-tempo i { display: block; height: 100%; border-radius: 3px; background: var(--aus); }
+.uem-k-tempo b { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--text); }
+.uem-haupt .ue-h { flex-wrap: wrap; justify-content: flex-start; gap: 6px 16px; }
+.uem-haupt .ue-h h2 { margin-right: auto; }
+.uem-schnell { position: static; display: flex; gap: 10px; font-size: 12.5px; background: none; padding: 0; letter-spacing: 0; text-transform: none; font-weight: 500; }
+.uem-leg-linie { width: 16px !important; height: 3px !important; background: var(--accent); border-radius: 2px; }
+.uem-leg-prog { background: repeating-linear-gradient(135deg, rgba(128, 128, 128, .6) 0 2px, rgba(128, 128, 128, .15) 2px 4px); }
+.uem-unten .ue-kat { padding-top: 0; }
+@media (max-height: 780px) {
+  body.ue-modus main { padding-top: 10px; padding-bottom: 10px; }
+  .ue { gap: 8px; height: calc(100dvh - var(--kopf, 58px) - 20px); }
+  .ue-kopf h1 { font-size: 18px; }
+  .ue-kpi { padding: 7px 12px !important; }
+  .ue-kpi > b, .uem-kpis .ue-kpi > b { font-size: 18px; margin: 0; }
+  .ue-kpi-l { font-size: 12px; }
+  .ue-ic { width: 22px; height: 22px; }
+  .ue-kpi-s { font-size: 11.5px; }
+  .ue-h { padding: 8px 14px 2px; }
+  .ue-h h2 { font-size: 13.5px; }
+  .uem-auswahl { gap: 6px; padding-bottom: 8px; }
+  .uem-v { font-size: 12.5px; }
+  .uem-erg-zeile { padding-top: 5px; }
+  .uem-erg-zeile b { font-size: 16px; }
+  .uem-punkte { font-size: 12px; gap: 2px; }
+  .uem-tempo { padding: 5px 8px; }
+  .ue-t, .ue-kz { padding-top: 3px; padding-bottom: 3px; font-size: 12.5px; }
+}
+@media (max-height: 640px) { .uem-punkte li:nth-child(n+3) { display: none; } .uem-tempo { display: none; } }
+@media (max-width: 1180px) { .uem-haupt { grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr); } .uem-v { grid-template-columns: 66px minmax(0, 1fr) 74px 84px; gap: 8px; } }
+@media (max-width: 900px), (max-height: 500px) {
+  .uem { grid-template-rows: none; }
+  .uem-haupt, .uem-unten { grid-template-columns: 1fr; }
+  .uem-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-height: 720px) { .uem { grid-template-rows: auto auto minmax(0, 1.9fr) minmax(0, 1fr); } .uem-schnell { display: none; } .ue-kopf .muted { display: none; } }
+@media (max-width: 1100px) { .uem-schnell { display: none; } }

@@ -595,6 +595,7 @@ function ueJahr() {
 }
 
 const UE_ICON = {
+  kal: '<svg viewBox="0 0 24 24"><path d="M4 6.5h16v13H4zM4 10.5h16M8.5 4v4M15.5 4v4"/></svg>',
   konto: '<svg viewBox="0 0 24 24"><path d="M3 9.5 12 4l9 5.5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20.5h18"/></svg>',
   ein: '<svg viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg>',
   aus: '<svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
@@ -823,71 +824,125 @@ function ueMonate() {
   const M = ueMonatsDaten(), heuteK = M.jetzt;
   const alle = M.monate.map((m) => m.k);
   if (!ueAuswahl || !ueAuswahl.every((k) => alle.includes(k))) ueAuswahl = [heuteK];
-  const aus = new Set(ueAuswahl);
   $('#uem-titel').textContent = `Aktueller Stand · ${MONAT[+heuteK.slice(5) - 1]} ${heuteK.slice(0, 4)}`;
-  $('#uem-zeit').textContent = `Daten bis ${dde(D.bis)} · Ø = Durchschnitt ${monatsText(M.ref)}`;
-
-  // Monatsleiste
-  const maxW = Math.max(1, ...M.monate.flatMap((m) => [m.ein, m.aus]));
-  const z = (c) => `${c < 0 ? '−' : '+'}${eur0(Math.abs(c))}`;
-  const karte = (m) => {
-    const lauf = m.art === 'laeuft', prog = m.art === 'prognose';
-    const status = prog ? 'Prognose' : lauf ? `läuft · Tag ${m.tag} von ${m.tage}` : 'abgeschlossen';
-    return `<button class="uem-m uem-${m.art}${aus.has(m.k) ? ' an' : ''}" data-uemk="${m.k}" title="${prog ? 'Prognose aus typischen Einnahmen und Ausgaben plus den fälligen festen Abbuchungen' : lauf ? 'Bisher gebucht und erwartet bis Monatsende' : 'Abgeschlossener Monat'} – Klick: auswählen, Strg/Umschalt: mehrere">
-      <span class="uem-m-k"><b>${MONAT[+m.k.slice(5) - 1]}</b> ${m.k.slice(0, 4)}<span class="uem-st">${status}</span></span>
-      <span class="uem-erg ${m.erg >= 0 ? 'pos' : 'neg'}">${prog || lauf ? '≈ ' : ''}${z(m.erg)}</span>
-      <span class="uem-zeile"><i class="uem-b ein" style="width:${(m.ein / maxW) * 100}%"></i><span>${eur0(m.ein)}</span></span>
-      <span class="uem-zeile"><i class="uem-b aus" style="width:${(m.aus / maxW) * 100}%"></i><span>${eur0(m.aus)}</span></span>
-      ${lauf ? `<span class="uem-bisher">bisher ${z(m.bisher.erg)}</span>` : ''}
-      <span class="uem-stand">Konten ${prog || lauf ? '≈ ' : ''}${m.stand == null ? '–' : eur0(m.stand)}<small>${lauf || prog ? 'Monatsende' : m.k === heuteK ? 'heute' : 'Monatsende'}</small></span></button>`;
-  };
-  $('#uem-leiste').innerHTML = `<div class="uem-leiste-kopf"><span class="uem-gruppe">Zurück</span><span class="uem-gruppe jetzt">Jetzt</span><span class="uem-gruppe vor">Prognose</span>
-      <span class="uem-schnell"><span class="muted">Auswahl:</span><button class="link" data-uems="-3">letzte 3 Monate</button><button class="link" data-uems="0">dieser Monat</button><button class="link" data-uems="3">nächste 3 Monate</button><button class="link" data-uems="alle">alle 7</button></span></div>
-    <div class="uem-karten">${M.monate.map(karte).join('')}</div>
-    <div class="uem-leg"><span><i class="uem-b ein"></i>Einnahmen</span><span><i class="uem-b aus"></i>Ausgaben</span><span class="muted">≈ erwartet · Klick wählt den Monat, Strg oder Umschalt + Klick mehrere</span></div>`;
-  // schmale Bildschirme: die Leiste so schieben, dass der laufende Monat sichtbar ist
-  const leiste = $('#uem-leiste .uem-karten'), akt = leiste.querySelector('.uem-laeuft') || leiste.querySelector('.an');
-  if (akt && leiste.scrollWidth > leiste.clientWidth) leiste.scrollLeft = akt.offsetLeft - leiste.offsetLeft - 12;
-  let letzter = ueAuswahl[ueAuswahl.length - 1];
-  $('#uem-leiste').querySelectorAll('[data-uemk]').forEach((b) => b.onclick = (e) => {
-    const k = b.dataset.uemk;
-    if (e.shiftKey) { const a = alle.indexOf(letzter), c = alle.indexOf(k); ueAuswahl = alle.slice(Math.min(a, c), Math.max(a, c) + 1); }
-    else if (e.ctrlKey || e.metaKey) ueAuswahl = aus.has(k) ? (ueAuswahl.length > 1 ? ueAuswahl.filter((x) => x !== k) : ueAuswahl) : [...ueAuswahl, k].sort();
-    else ueAuswahl = [k];
-    ueMonate();
-  });
-  $('#uem-leiste').querySelectorAll('[data-uems]').forEach((b) => b.onclick = () => {
+  $('#uem-zeit').textContent = `Daten bis ${dde(D.bis)}`;
+  $('#uem-schnell').innerHTML = `<button class="link" data-uems="-3">letzte 3</button><button class="link" data-uems="0">dieser Monat</button><button class="link" data-uems="3">nächste 3</button><button class="link" data-uems="alle">alle 7</button>`;
+  $('#uem-schnell').querySelectorAll('[data-uems]').forEach((b) => b.onclick = () => {
     const v = b.dataset.uems;
     ueAuswahl = v === 'alle' ? alle : v === '0' ? [heuteK] : v === '-3' ? alle.slice(0, 3) : alle.slice(4);
     ueMonate();
   });
-
-  ueSchnitt(M);
+  ueKacheln(M);
+  ueMonatsGrafik(M);
   ueAuswahlKarte(M);
   ueAuswahlKategorien(M);
   ueTermine(fixkostenErkennen().filter((f) => !f.gemeinsam && f.aktiv), 6, '#uem-termine');
 }
 
-// Durchschnittswerte der letzten 12 Monate und der Kontostand heute
-function ueSchnitt(M) {
+// Kacheln: heute, dieser Monat, wohin es läuft, Durchschnitt, Fixkosten
+function ueKacheln(M) {
   const heute = kontenSumme(D.bis), anfang = kontenSumme(plusTage(`${M.jetzt}-01`, -1));
+  const jetzt = M.monate[3], ende = M.monate[6];
   const sE = M.schnitt.ein, sA = M.schnitt.aus, sErg = sE - sA;
-  const festAus = M.vertraege.reduce((t, f) => t + f.proMonat, 0);
   const fixV = fixkostenErkennen().filter((f) => !f.gemeinsam && f.aktiv), pm = fixV.reduce((t, f) => t + f.proMonat, 0);
   const B = einkommen().schnitt.wert;
-  const kachel = (ziel, icon, titel, wert, cls_, zeile) => `<button class="ue-kpi" data-uemz="${ziel}"><span class="ue-kpi-l"><span class="ue-ic ${icon}">${UE_ICON[icon]}</span>${titel}</span><b class="${cls_}">${wert}</b><span class="ue-kpi-s">${zeile}</span></button>`;
   const vz = (c) => `${c < 0 ? '−' : '+'}${eur0(Math.abs(c))}`;
-  $('#uem-schnitt').innerHTML = [
-    kachel('konten', 'konto', 'Kontostand heute', heute == null ? '–' : eur0(heute), heute < 0 ? 'neg' : '', heute != null && anfang != null ? `<span class="ue-d ${heute - anfang >= 0 ? 'gut' : 'schlecht'}">${vz(heute - anfang)}</span> <span class="muted">seit Monatsanfang</span>` : ''),
-    kachel('ein', 'ein', 'Ø Einnahmen / Monat', eur0(sE), 'pos', `<span class="muted">typisch ${eur0(M.typ.ein)} · Gehalt meist ${eur0(M.typ.lohn)}</span>`),
-    kachel('aus', 'aus', 'Ø Ausgaben / Monat', eur0(sA), 'neg', `<span class="muted">davon fest ≈ ${eur0(festAus)} · variabel ≈ ${eur0(M.typ.var)}</span>`),
-    kachel('erg', 'erg', 'Ø Ergebnis / Monat', vz(sErg), sErg >= 0 ? 'pos' : 'neg', `<span class="ue-d ${sErg >= 0 ? 'gut' : 'schlecht'}">Sparquote ${sE ? `${sErg < 0 ? '−' : ''}${Math.abs(Math.round((sErg / sE) * 100))} %` : '–'}</span> <span class="muted">Ziel: 20 %</span>`),
-    kachel('fix', 'fix', 'Fixkosten / Monat', eur0(pm), '', `<span class="ue-d ${pm <= B * 0.5 ? 'gut' : 'schlecht'}">${B ? Math.round((pm / B) * 100) : '–'} % vom Gehalt</span> <span class="muted">Ziel: höchstens 50 %</span>`),
+  const kachel = (ziel, icon, titel, wert, cls_, zeile, extra = '') => `<button class="ue-kpi" data-uemz="${ziel}"><span class="ue-kpi-l"><span class="ue-ic ${icon}">${UE_ICON[icon]}</span>${titel}</span><b class="${cls_}">${wert}</b>${extra}<span class="ue-kpi-s">${zeile}</span></button>`;
+  const lauf = jetzt.art === 'laeuft';
+  const tempo = lauf ? `<span class="uem-k-tempo" title="Strich = heute (Tag ${jetzt.tag} von ${jetzt.tage})"><i style="width:${Math.min(100, (jetzt.bisher.aus / Math.max(1, jetzt.aus)) * 100)}%"></i><b style="left:${(jetzt.tag / jetzt.tage) * 100}%"></b></span>` : '';
+  const monatJ = MONAT[+M.jetzt.slice(5) - 1], monatE = MONAT[+ende.k.slice(5) - 1];
+  $('#uem-kpis').innerHTML = [
+    kachel('konten', 'konto', 'Kontostand heute', heute == null ? '–' : eur0(heute), heute < 0 ? 'neg' : '',
+      heute != null && anfang != null ? `<span class="ue-d ${heute - anfang >= 0 ? 'gut' : 'schlecht'}">${vz(heute - anfang)}</span> <span class="muted">seit 1. ${monatJ}</span>` : ''),
+    kachel('monat', 'kal', lauf ? `${monatJ} bisher ausgegeben` : `${monatJ} ausgegeben`, eur0(lauf ? jetzt.bisher.aus : jetzt.aus), 'neg',
+      lauf ? `<span class="muted">Tag ${jetzt.tag} von ${jetzt.tage} · erwartet ≈ ${eur0(jetzt.aus)}</span>` : '', tempo),
+    kachel('monat', 'erg', `Erwartet Ende ${monatJ}`, `≈ ${vz(jetzt.erg)}`, jetzt.erg >= 0 ? 'pos' : 'neg', `<span class="muted">Konten ≈ ${jetzt.stand == null ? '–' : eur0(jetzt.stand)} am Monatsende</span>`),
+    kachel('prognose', 'konto', `Prognose Ende ${monatE}`, ende.stand == null ? '–' : `≈ ${eur0(ende.stand)}`, ende.stand < 0 ? 'neg' : '',
+      heute != null && ende.stand != null ? `<span class="ue-d ${ende.stand - heute >= 0 ? 'gut' : 'schlecht'}">${vz(ende.stand - heute)}</span> <span class="muted">ggü. heute auf den Konten</span>` : ''),
+    kachel('schnitt', 'fix', 'Ø pro Monat (12 Monate)', vz(sErg), sErg >= 0 ? 'pos' : 'neg',
+      `<span class="muted">${eur0(sE)} rein · ${eur0(sA)} raus · Fixkosten ${eur0(pm)}</span> <span class="ue-d ${pm <= B * 0.5 ? 'gut' : 'schlecht'}">(${B ? Math.round((pm / B) * 100) : '–'} %)</span>`),
   ].join('');
-  $('#uem-schnitt').querySelectorAll('[data-uemz]').forEach((b) => b.onclick = () => ({
-    konten: () => setze({ tab: 'konten' }), ein: () => setze({ tab: 'kennzahlen', jahr: '', monat: '' }), aus: () => setze({ tab: 'kennzahlen', jahr: '', monat: '' }),
-    erg: () => setze({ tab: 'kennzahlen', jahr: '', monat: '' }), fix: () => setze({ tab: 'fix' }),
+  $('#uem-kpis').querySelectorAll('[data-uemz]').forEach((b) => b.onclick = () => ({
+    konten: () => setze({ tab: 'konten' }), monat: () => { ueAuswahl = [M.jetzt]; ueMonate(); },
+    prognose: () => { ueAuswahl = M.monate.slice(4).map((m) => m.k); ueMonate(); },
+    schnitt: () => setze({ tab: 'kennzahlen', jahr: '', monat: '' }),
   })[b.dataset.uemz]());
+}
+
+// Eine Grafik für die sieben Monate: Einnahmen und Ausgaben als Säulen, Kontostand am Monatsende als Linie,
+// Prognose schraffiert und gestrichelt, „heute“ als Marke. Klick: Monat wählen (Strg/Umschalt: mehrere).
+function ueMonatsGrafik(M) {
+  const ms = M.monate, keys = ms.map((m) => m.k), ij = 3;
+  const cE = css('--ein'), cA = css('--aus'), cK = css('--accent');
+  const muster = (farbe) => {
+    const c = document.createElement('canvas'); c.width = c.height = 8;
+    const x = c.getContext('2d'); x.fillStyle = alpha(farbe, 0.28); x.fillRect(0, 0, 8, 8);
+    x.strokeStyle = alpha(farbe, 0.75); x.lineWidth = 2; x.beginPath(); x.moveTo(-2, 10); x.lineTo(10, -2); x.moveTo(-2, 2); x.lineTo(2, -2); x.moveTo(6, 10); x.lineTo(10, 6); x.stroke();
+    return x.createPattern(c, 'repeat');
+  };
+  const pE = muster(cE), pA = muster(cA);
+  const fuell = (farbe, p) => ms.map((m) => (m.art === 'prognose' ? p : m.art === 'laeuft' ? alpha(farbe, 0.55) : alpha(farbe, 0.9)));
+  const erg = ms.map((m) => m.erg / 100);
+  const o = basis();
+  o.interaction = { mode: 'index', intersect: false };
+  o.layout = { padding: { top: 18, bottom: 2 } };
+  o.plugins.tooltip.callbacks = {
+    title: (it) => { const m = ms[it[0].dataIndex]; return `${MONAT[+m.k.slice(5) - 1]} ${m.k.slice(0, 4)}${m.art === 'prognose' ? ' – Prognose' : m.art === 'laeuft' ? ' – erwartet bis Monatsende' : ''}`; },
+    label: (it) => ` ${it.dataset.label}: ${it.raw == null ? '–' : EUR0.format(it.raw)}`,
+    footer: (it) => { const m = ms[it[0].dataIndex]; return [`${m.erg >= 0 ? 'Überschuss' : 'Fehlbetrag'}: ${EUR0.format(m.erg / 100)}`, m.art === 'laeuft' ? `bisher: ${EUR0.format(m.bisher.ein / 100)} rein, ${EUR0.format(m.bisher.aus / 100)} raus` : '', 'Klick: Monat wählen · Strg/Umschalt: mehrere'].filter(Boolean); },
+  };
+  o.scales = {
+    x: { ...achsenStil(), grid: { display: false }, ticks: { ...achsenStil().ticks, padding: 20, font: { size: 12, weight: '600' }, color: css('--text-2') } },
+    y: { ...achsenStil(), beginAtZero: true, ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 5 } },
+  };
+  o.onClick = (e, el, ch) => {
+    const i = el.length ? el[0].index : ch.scales.x.getValueForPixel(e.x);
+    if (i == null || i < 0 || i >= keys.length) return;
+    const k = keys[i], n = e.native;
+    if (n?.shiftKey) { const a = keys.indexOf(ueAuswahl[ueAuswahl.length - 1]); ueAuswahl = keys.slice(Math.min(a, i), Math.max(a, i) + 1); }
+    else if (n?.ctrlKey || n?.metaKey) ueAuswahl = ueAuswahl.includes(k) ? (ueAuswahl.length > 1 ? ueAuswahl.filter((x) => x !== k) : ueAuswahl) : [...ueAuswahl, k].sort();
+    else ueAuswahl = [k];
+    ueMonate();
+  };
+  o.onHover = (e) => { e.native.target.style.cursor = 'pointer'; };
+  const gewaehlt = new Set(ueAuswahl.map((k) => keys.indexOf(k)));
+  // Hintergrund: Auswahl, Prognosebereich, „heute“
+  const hintergrund = {
+    id: 'ueHintergrund',
+    beforeDatasetsDraw(ch) {
+      const c = ch.ctx, x = ch.scales.x, a = ch.chartArea, breite = x.width / keys.length;
+      c.save();
+      c.fillStyle = 'rgba(128, 128, 128, 0.07)';
+      c.fillRect(x.getPixelForValue(ij + 1) - breite / 2, a.top, breite * 3, a.bottom - a.top);
+      c.fillStyle = alpha(cK, 0.1);
+      for (const i of gewaehlt) c.fillRect(x.getPixelForValue(i) - breite / 2 + 2, a.top - 14, breite - 4, a.bottom - a.top + 14 + 40);
+      const hx = x.getPixelForValue(ij - 0.5 + (ms[ij].tag || ms[ij].tage || 1) / (ms[ij].tage || 1));
+      c.strokeStyle = css('--text-2'); c.setLineDash([4, 3]); c.lineWidth = 1;
+      c.beginPath(); c.moveTo(hx, a.top - 6); c.lineTo(hx, a.bottom); c.stroke();
+      c.setLineDash([]); c.fillStyle = css('--text-2'); c.font = `600 10.5px ${css('--font')}`; c.textAlign = 'center';
+      c.fillText('heute', hx, a.top - 9);
+      c.fillStyle = css('--muted'); c.textAlign = 'left';
+      c.fillText('PROGNOSE', x.getPixelForValue(ij + 1) - breite / 2 + 6, a.top + 10);
+      c.restore();
+    },
+    afterDraw(ch) {   // Ergebnis je Monat zwischen Achse und Monatsnamen
+      const c = ch.ctx, x = ch.scales.x, y = ch.chartArea.bottom + 11;
+      c.save(); c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = `700 11px ${css('--font')}`;
+      erg.forEach((v, i) => { c.fillStyle = css(v >= 0 ? '--ein-text' : '--aus-text'); c.fillText(`${ms[i].art === 'ist' ? '' : '≈ '}${v >= 0 ? '+' : '−'}${kurzWert(Math.abs(v))}`, x.getPixelForValue(i), y); });
+      c.restore();
+    },
+  };
+  zeichne('c-uem', {
+    type: 'bar',
+    data: { labels: ms.map((m) => `${MON[+m.k.slice(5) - 1]} ${m.k.slice(2, 4)}`), datasets: [
+      { label: 'Einnahmen', data: ms.map((m) => m.ein / 100), backgroundColor: fuell(cE, pE), hoverBackgroundColor: cE, borderRadius: 4, maxBarThickness: 40, categoryPercentage: 0.7, barPercentage: 0.88, order: 2 },
+      { label: 'Ausgaben', data: ms.map((m) => m.aus / 100), backgroundColor: fuell(cA, pA), hoverBackgroundColor: cA, borderRadius: 4, maxBarThickness: 40, categoryPercentage: 0.7, barPercentage: 0.88, order: 2 },
+      { type: 'line', label: 'Kontostand Monatsende', data: ms.map((m) => (m.stand == null ? null : m.stand / 100)), borderColor: cK, backgroundColor: cK, borderWidth: 2.5, tension: 0.3,
+        pointRadius: ms.map((_, i) => (gewaehlt.has(i) ? 5 : 3.5)), pointBackgroundColor: ms.map((m) => (m.art === 'ist' ? cK : css('--surface'))), pointBorderColor: cK, pointBorderWidth: 2,
+        segment: { borderDash: (s) => (s.p1DataIndex > ij - 1 ? [6, 4] : undefined) }, order: 1 },
+    ] },
+    options: o, plugins: [hintergrund, saeulenWerteMit({ groesse: 9.5, linie: (v) => kurzWert(v) })],
+  });
 }
 
 // Die Auswahl im Vergleich zum Durchschnitt: Einnahmen, Ausgaben, Ergebnis (bei mehreren Monaten je Monat)

@@ -111,10 +111,15 @@
       <div class="ue uem" id="uem" hidden>
         <div class="ue-kopf"><div class="ue-kopf-t"><h1 id="uem-titel">Aktueller Stand</h1><span class="muted" id="uem-zeit"></span></div>
           <div class="ue-kopf-r"><div class="seg ue-modus-wahl" role="group" aria-label="Ansicht"></div></div></div>
-        <div class="uem-leiste" id="uem-leiste"></div>
-        <div class="ue-kpis uem-schnitt" id="uem-schnitt"></div>
-        <div class="uem-mitte">
+        <div class="ue-kpis uem-kpis" id="uem-kpis"></div>
+        <div class="uem-haupt">
+          <div class="card ue-karte"><div class="ue-h"><h2>Monatsverlauf mit Prognose</h2>
+            <span class="ue-leg"><span><i style="background:var(--ein)"></i>Einnahmen</span><span><i style="background:var(--aus)"></i>Ausgaben</span><span><i class="uem-leg-linie"></i>Kontostand</span><span><i class="uem-leg-prog"></i>Prognose</span></span>
+            <span class="uem-schnell" id="uem-schnell"></span></div>
+            <div class="ue-chart"><canvas id="c-uem"></canvas></div></div>
           <div class="card ue-karte" id="uem-stand"></div>
+        </div>
+        <div class="uem-unten">
           <div class="card ue-karte"><div class="ue-h"><h2 id="uem-kat-t">Ausgaben nach Kategorie</h2><span class="ue-leg" id="uem-kat-leg"></span></div><div class="ue-kat" id="uem-kat"></div></div>
           <div class="card ue-karte" id="uem-termine"></div>
         </div>
