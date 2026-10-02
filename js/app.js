@@ -568,7 +568,7 @@ function ueJahr() {
   })();
   const fixV = fixkostenErkennen().filter((f) => !f.gemeinsam && f.aktiv);
   const pm = fixV.reduce((t, f) => t + f.proMonat, 0);
-  const ek = einkommen(), B = ek.schnitt.wert || ek.einnahmen.wert, L = lebenshaltung().schnitt, spiel = B - pm - L;
+  const ek = einkommen(), B = ek.aktuell.wert || ek.schnitt.wert, L = lebenGewaehlt(), spiel = B - pm - L;   // Grundlage: aktuelles Gehalt
   const quote = A.ein ? Math.round((A.erg / A.ein) * 100) : null;
   const kachel = (ziel, icon, titel, wert, cls_, zeile1, zeile2, extra = '') => `<button class="ue-kpi" data-uez="${ziel}" title="Details öffnen">
       <span class="ue-kpi-l"><span class="ue-ic ${icon}">${UE_ICON[icon]}</span>${titel}</span><b class="${cls_}">${wert}</b>${extra}
@@ -583,7 +583,7 @@ function ueJahr() {
     kachel('erg', 'erg', A.erg >= 0 ? 'Überschuss' : 'Fehlbetrag', `${A.erg < 0 ? '−' : '+'}${eur0(Math.abs(A.erg))}`, A.erg >= 0 ? 'pos' : 'neg',
       quote == null ? '' : `<span class="ue-d ${quote >= 10 ? 'gut' : quote >= 0 ? '' : 'schlecht'}">Sparquote ${quote < 0 ? '−' : ''}${Math.abs(quote)} %</span> <span class="muted">Ziel: 20 %</span>`,
       V0.ein || V0.aus ? `<span class="muted">Vorjahr: ${V0.erg < 0 ? '−' : '+'}${eur0(Math.abs(V0.erg))}</span>` : ''),
-    kachel('fix', 'fix', 'Fixkosten pro Monat', eur0(pm), '', `<span class="ue-d ${pm <= B * 0.5 ? 'gut' : 'schlecht'}">${B ? Math.round((pm / B) * 100) : '–'} % vom Gehalt</span> <span class="muted">Ziel: höchstens 50 %</span>`,
+    kachel('fix', 'fix', 'Fixkosten pro Monat', eur0(pm), '', `<span class="ue-d ${pm <= B * 0.5 ? 'gut' : 'schlecht'}">${B ? pzVon(pm, B) : '–'} vom aktuellen Gehalt</span> <span class="muted">Ziel: höchstens 50 %</span>`,
       `<span class="muted">Spielraum nach Lebenshaltung:</span> <b class="${spiel >= 0 ? 'pos' : 'neg'}">${spiel < 0 ? '−' : '+'}${eur0(Math.abs(spiel))}</b>`),
   ].join('');
   $('#ue-kpis').querySelectorAll('[data-uez]').forEach((b) => b.onclick = () => ({
@@ -684,7 +684,7 @@ function ueBudget(pm, L, B, ek) {
   const p = (c) => `${B ? Math.round((c / B) * 100) : 0} %`;
   $('#ue-budget').innerHTML = `<div class="ue-h"><h2>Monatsbudget</h2><button class="link klein" data-uezu="fix">Fixkosten und Rechner →</button></div>
     <div class="ue-budget">
-      <p class="ue-satz">Von <b>${eur0(B)}</b> Ø Nettogehalt bleiben nach Fixkosten und Lebenshaltung ${rest >= 0 ? `<b class="pos">${eur0(rest)}</b> übrig.` : `<b class="neg">−${eur0(-rest)}</b> – du lebst gerade von Rücklagen.`}</p>
+      <p class="ue-satz">Von deinem aktuellen Nettogehalt (<b>${eur0(B)}</b>, ${MONAT[+ek.letzter.slice(5) - 1]}) bleiben nach Fixkosten und Lebenshaltung ${rest >= 0 ? `<b class="pos">${eur0(rest)}</b> übrig.` : `<b class="neg">−${eur0(-rest)}</b> – du lebst gerade von Rücklagen.`}</p>
       <div class="ue-bb">
         <i class="bb-fix" style="width:${w(pm)}%" title="Fixkosten ${eur0(pm)} · ${p(pm)}"></i><i class="bb-leben" style="width:${w(L)}%" title="Lebenshaltung ${eur0(L)} · ${p(L)}"></i>${rest > 0 ? `<i class="bb-rest" style="width:${w(rest)}%" title="bleibt ${eur0(rest)}"></i>` : ''}
         ${rest < 0 ? `<b class="ue-bb-minus" style="left:${w(B)}%;width:${w(-rest)}%"></b><b class="ue-bb-linie" style="left:${w(B)}%" title="100 % = ${eur0(B)}"></b>` : ''}
@@ -794,7 +794,9 @@ function ueMonatsDaten() {
   const ref = []; for (let i = laeuft ? 1 : 0; ref.length < 12; i++) { const k = mVor(jetzt, -i); if (k < D.von.slice(0, 7)) break; ref.unshift(k); }
   const w = (k) => ist.get(k) || leer();
   const med = (f) => (ref.length ? median(ref.map((k) => f(w(k)))) : 0), avg = (f) => (ref.length ? ref.reduce((t, k) => t + f(w(k)), 0) / ref.length : 0);
-  const typ = { ein: med((x) => x.ein), var: med((x) => x.var), lohn: med((x) => x.lohn), spar: med((x) => x.spar) };
+  const typ = { ein: med((x) => x.ein), sonst: med((x) => x.ein - x.lohn), var: med((x) => x.var), lohn: med((x) => x.lohn), spar: med((x) => x.spar) };
+  // Grundlage für Prognose und Prozente: das aktuelle Gehalt (letzter Monat mit Gehaltseingang)
+  const ekA = einkommen(), akt = ekA.aktuell.wert || typ.lohn;
   const schnitt = { ein: avg((x) => x.ein), aus: avg((x) => x.aus), fest: avg((x) => x.aus - x.var), lohn: avg((x) => x.lohn), kat: new Map() };
   for (const k of ref) for (const [kat, v] of w(k).kat) schnitt.kat.set(kat, (schnitt.kat.get(kat) || 0) + v / ref.length);
   // feste Abbuchungen, auch deine festen Einzahlungen aufs Gemeinschaftskonto (Verträge, die von dort abgehen, nicht)
@@ -810,19 +812,19 @@ function ueMonatsDaten() {
       monate.push({ k, art: 'ist', ein: x.ein, aus: x.aus, festAus: x.aus - x.var, lohn: x.lohn, erg: x.ein - x.aus, x, stand: kontenSumme(ende > heute ? heute : ende) });
     } else if (i === 0) {
       const offenFest = fest(plusTage(heute, 1), ende);
-      const gehaltKommt = x.lohn > 0 ? 0 : typ.lohn;
-      // Einnahmen: mindestens ein typischer Monat (das Gehalt fehlt oft noch); was schon mehr ist, bleibt
-      const einE = Math.max(x.ein + gehaltKommt, typ.ein), ausE = x.aus + offenFest + Math.max(0, typ.var - x.var);
+      const gehaltKommt = x.lohn > 0 ? 0 : akt;
+      // Einnahmen: das aktuelle Gehalt (falls noch nicht da) plus die typischen sonstigen Einnahmen, soweit sie noch fehlen
+      const einE = x.ein + gehaltKommt + Math.max(0, typ.sonst - (x.ein - x.lohn)), ausE = x.aus + offenFest + Math.max(0, typ.var - x.var);
       stand += einE - x.ein - (ausE - x.aus) + typ.spar * (1 - +heute.slice(8) / +ende.slice(8));
       const tag = +heute.slice(8), tage = +ende.slice(8);
       monate.push({ k, art: 'laeuft', ein: einE, aus: ausE, festAus: x.aus - x.var + offenFest, lohn: x.lohn + gehaltKommt, erg: einE - ausE, x, bisher: { ein: x.ein, aus: x.aus, erg: x.ein - x.aus }, offenFest, gehaltKommt, tag, tage, stand });
     } else {
-      const f = fest(`${k}-01`, ende), einE = typ.ein, ausE = typ.var + f;
+      const f = fest(`${k}-01`, ende), einE = akt + typ.sonst, ausE = typ.var + f;
       stand += einE - ausE + typ.spar;
-      monate.push({ k, art: 'prognose', ein: einE, aus: ausE, festAus: f, lohn: typ.lohn, erg: einE - ausE, fest: f, stand });
+      monate.push({ k, art: 'prognose', ein: einE, aus: ausE, festAus: f, lohn: akt, erg: einE - ausE, fest: f, stand });
     }
   }
-  return (D.ueM = { monate, ref, typ, schnitt, vertraege, gt, jetzt, laeuft, ist, w });
+  return (D.ueM = { monate, ref, typ, schnitt, vertraege, gt, jetzt, laeuft, ist, w, akt, aktMonat: ekA.letzter });
 }
 
 function ueMonate() {
@@ -864,8 +866,8 @@ function ueKacheln(M) {
     kachel('monat', 'erg', `Erwartet Ende ${monatJ}`, `≈ ${vz(jetzt.erg)}`, jetzt.erg >= 0 ? 'pos' : 'neg', `<span class="muted">Konten ≈ ${jetzt.stand == null ? '–' : eur0(jetzt.stand)} am Monatsende</span>`),
     kachel('prognose', 'konto', `Prognose Ende ${monatE}`, ende.stand == null ? '–' : `≈ ${eur0(ende.stand)}`, ende.stand < 0 ? 'neg' : '',
       jetzt.stand != null && ende.stand != null ? `<span class="ue-d ${ende.stand - jetzt.stand >= 0 ? 'gut' : 'schlecht'}">${vz(ende.stand - jetzt.stand)}</span> <span class="muted">ggü. Ende ${monatJ} (≈ ${vz((ende.stand - jetzt.stand) / 3)} pro Monat)</span>` : ''),
-    kachel('fixg', 'fix', 'Fixkosten vom Gehalt', B ? `${Math.round((pm / B) * 100)} %` : '–', pm <= B * 0.5 ? 'pos' : 'neg',
-      `<span class="muted">${eur0(pm)} von ${eur0(B)} aktuellem Gehalt (${gMon}) · Ziel ≤ 50 %</span>`, fixGehaltBalken(pm, lebenshaltung().schnitt, B)),
+    kachel('fixg', 'fix', 'Fixkosten vom Gehalt', B ? pzVon(pm, B) : '–', pm <= B * 0.5 ? 'pos' : 'neg',
+      `<span class="muted">${eur0(pm)} von ${eur0(B)} aktuellem Gehalt (${gMon}) · Ziel ≤ 50 %</span>`, fixGehaltBalken(pm, lebenGewaehlt(), B)),
     kachel('schnitt', 'erg', 'Ø pro Monat (12 Monate)', vz(sErg), sErg >= 0 ? 'pos' : 'neg',
       `<span class="muted">${eur0(sE)} rein · ${eur0(sA)} raus</span> <span class="ue-d ${sErg >= 0 ? 'gut' : 'schlecht'}">Sparquote ${sE ? `${sErg < 0 ? '−' : ''}${Math.abs(Math.round((sErg / sE) * 100))} %` : '–'}</span>`),
   ].join('');
@@ -906,7 +908,7 @@ function ueMonatsGrafik(M) {
   o.plugins.tooltip.callbacks = {
     title: (it) => { const m = ms[it[0].dataIndex]; return `${MONAT[+m.k.slice(5) - 1]} ${m.k.slice(0, 4)}${m.art === 'prognose' ? ' – Prognose' : m.art === 'laeuft' ? ' – erwartet bis Monatsende' : ''}`; },
     label: (it) => ` ${it.dataset.label}: ${it.raw == null ? '–' : EUR0.format(it.raw)}`,
-    footer: (it) => { const m = ms[it[0].dataIndex]; return [`${m.erg >= 0 ? 'Überschuss' : 'Fehlbetrag'}: ${EUR0.format(m.erg / 100)}`, m.lohn ? `Fixkosten = ${Math.round((m.festAus / m.lohn) * 100)} % vom Gehalt (${EUR0.format(m.lohn / 100)})` : '', m.art === 'laeuft' ? `bisher: ${EUR0.format(m.bisher.ein / 100)} rein, ${EUR0.format(m.bisher.aus / 100)} raus` : '', 'Klick: Monat wählen · Strg/Umschalt: mehrere'].filter(Boolean); },
+    footer: (it) => { const m = ms[it[0].dataIndex]; return [`${m.erg >= 0 ? 'Überschuss' : 'Fehlbetrag'}: ${EUR0.format(m.erg / 100)}`, M.akt ? `feste Ausgaben = ${Math.round((m.festAus / M.akt) * 100)} % vom aktuellen Gehalt (${EUR0.format(M.akt / 100)})` : '', m.art === 'laeuft' ? `bisher: ${EUR0.format(m.bisher.ein / 100)} rein, ${EUR0.format(m.bisher.aus / 100)} raus` : '', 'Klick: Monat wählen · Strg/Umschalt: mehrere'].filter(Boolean); },
   };
   o.scales = {
     x: { ...achsenStil(), stacked: true, grid: { display: false }, ticks: { ...achsenStil().ticks, padding: 20, font: { size: 12, weight: '600' }, color: css('--text-2') } },
@@ -971,7 +973,7 @@ function ueMonatsGrafik(M) {
           if (mE.data[i]) schreib(kurzWert(m.ein / 100), mE.data[i].x, mE.data[i].y - 3, css('--text-2'));
           if (mV.data[i]) schreib(kurzWert(m.aus / 100), mV.data[i].x, Math.min(mV.data[i].y, mF.data[i].y) - 3, css('--text-2'));
           const f = mF.data[i];
-          if (f && f.base - f.y > 15 && m.lohn) { c.textBaseline = 'middle'; c.font = `700 9px ${css('--font')}`; c.fillStyle = '#fff'; c.fillText(`${Math.round((m.festAus / m.lohn) * 100)} %`, f.x, (f.y + f.base) / 2); }
+          if (f && f.base - f.y > 15 && M.akt) { c.textBaseline = 'middle'; c.font = `700 9px ${css('--font')}`; c.fillStyle = '#fff'; c.fillText(`${Math.round((m.festAus / M.akt) * 100)} %`, f.x, (f.y + f.base) / 2); }
           const k = mK.data[i];
           if (k && m.stand != null) { c.textBaseline = 'bottom'; schreib(kurzWert(m.stand / 100), k.x, k.y - 6, cK, 700); }
         });
@@ -1008,11 +1010,11 @@ function ueAuswahlKarte(M) {
   h += zeile('Einnahmen', ein, sE, 'ein', true, lauf ? `<i class="ein bisher" style="width:${(lauf.bisher.ein / max) * 100}%"></i>` : '')
     + zeile('Ausgaben', aus, sA, 'aus', false, lauf ? `<i class="aus bisher" style="width:${(lauf.bisher.aus / max) * 100}%"></i>` : '');
   // davon fest – und wie viel vom Gehalt das ist
-  const fest = sum((m) => m.festAus) / n, lohn = sum((m) => m.lohn) / n, q = lohn ? Math.round((fest / lohn) * 100) : null;
+  const fest = sum((m) => m.festAus) / n, lohn = M.akt, q = lohn ? Math.round((fest / lohn) * 100) : null;   // immer vom aktuellen Gehalt
   h += `<div class="uem-v"><span class="uem-v-l">davon fest</span>
     <span class="uem-v-bar"><i class="fix" style="width:${(fest / max) * 100}%"></i><b class="uem-v-s" style="left:${(M.schnitt.fest / max) * 100}%" title="Ø ${eur0(M.schnitt.fest)}"></b></span>
     <span class="uem-v-w">${prog ? '≈ ' : ''}${eur0(fest)}</span>
-    <span class="uem-v-d ${q == null ? '' : q <= 50 ? 'gut' : 'schlecht'}" title="Gehalt ${eur0(lohn)}${n > 1 ? ' je Monat' : ''} · Ziel höchstens 50 %">${q == null ? '–' : `${q} % vom Gehalt`}</span></div>`;
+    <span class="uem-v-d ${q == null ? '' : q <= 50 ? 'gut' : 'schlecht'}" title="in diesem Zeitraum tatsächlich abgebuchte feste Kosten${n > 1 ? ' je Monat' : ''} im Verhältnis zum aktuellen Gehalt (${eur0(lohn)}) · Ziel höchstens 50 %">${q == null ? '–' : `${q} % vom Gehalt`}</span></div>`;
   const pE = pz(erg, sErg);
   h += `<div class="uem-erg-zeile"><span>Ergebnis${n > 1 ? ' je Monat' : ''}</span><b class="${erg >= 0 ? 'pos' : 'neg'}">${prog ? '≈ ' : ''}${erg < 0 ? '−' : '+'}${eur0(Math.abs(erg))}</b>
     <span class="muted">Ø ${sErg < 0 ? '−' : '+'}${eur0(Math.abs(sErg))}${ein > 0 ? ` · Sparquote ${erg < 0 ? '−' : ''}${Math.abs(Math.round((erg / ein) * 100))} %` : ''}</span></div>`;
@@ -1027,7 +1029,7 @@ function ueAuswahlKarte(M) {
     punkte.push('Sonderzahlungen (z. B. Weihnachtsgeld) sind nicht eingerechnet – die Prognose ist eher vorsichtig.');
   } else if (nurIst) {
     const lohn = sel.reduce((t, m) => t + m.x.lohn, 0) / n;
-    if (lohn) punkte.push(`Gehalt: <b>${eur0(lohn)}</b>${n > 1 ? ' je Monat' : ''} · Ø ${eur0(M.typ.lohn)}`);
+    if (lohn) punkte.push(`Gehalt damals: <b>${eur0(lohn)}</b>${n > 1 ? ' je Monat' : ''} · aktuell ${eur0(M.akt)} · Ø 12 Monate ${eur0(M.schnitt.lohn)}`);
     const letzteM = sel[n - 1];
     if (letzteM.stand != null) punkte.push(`Konten am Monatsende: <b>${eur0(letzteM.stand)}</b>`);
   }
@@ -1938,6 +1940,8 @@ function lebenshaltung() {
   return (D.leben = { monate, werte, kats, schnitt: werte.reduce((s, x) => s + x, 0) / n, typisch: werte.length ? median(werte) : 0, spar: spar / n });
 }
 let lebenWahl = (() => { try { return localStorage.getItem('fd.leben') || 'schnitt'; } catch { return 'schnitt'; } })();
+// Lebenshaltung so, wie sie im Reiter Fixkosten gewählt ist (Ø 12 Monate, typischer Monat oder eigener Wert)
+const lebenGewaehlt = () => (lebenWahl === 'eigen' && lebenEigen ? lebenEigen : lebenWahl === 'typisch' ? lebenshaltung().typisch : lebenshaltung().schnitt);
 let lebenEigen = (() => { try { return +localStorage.getItem('fd.lebeneigen') || 0; } catch { return 0; } })();   // Cent
 
 // Geld auf deinen eigenen Konten (ohne Gemeinschaftskonto und Pockets, Mietkaution und die Konten der Kinder)
@@ -2316,7 +2320,7 @@ function planErgebnisHtml() {
     ? `<li>Neue Kosten alles zusammen höchstens <b>${eur0(Math.max(0, maxPuffer))}</b> pro Monat mit 10 % Sparpuffer, <b>${eur0(maxNull)}</b> bis zur Grenze (dann bleibt nichts mehr übrig)${weg ? ` – inklusive der ${eur0(weg)}, die wegfallen` : ''}.</li>`
     : `<li>Für neue Kosten ist derzeit nichts frei: ${weg ? `selbst mit den ${eur0(weg)}, die wegfallen, fehlen` : 'es fehlen'} noch ${eur0(-maxNull)} im Monat.</li>`;
   if (hatWohnung) {
-    const netto = bz.reihe === 'lohn' ? B : einkommen().schnitt.wert;
+    const netto = einkommen().aktuell.wert || B;
     grenzen += `<li>Warmmiete höchstens <b>${eur0(Math.max(0, wohnAlt + restL - puffer - andere))}</b> mit Puffer bzw. <b>${eur0(Math.max(0, wohnAlt + restL - andere))}</b> bis zur Grenze.</li>
       <li class="muted">Faustregel von Vermietern und Banken: Warmmiete höchstens ein Drittel vom Netto – bei ${eur0(netto)} also ${eur0(netto / 3)}. Unterhalt und deine übrigen Fixkosten berücksichtigt sie nicht, deshalb zählt die Rechnung oben.</li>`;
   }
