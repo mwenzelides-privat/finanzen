@@ -850,7 +850,7 @@ function ueKacheln(M) {
   const jetzt = M.monate[3], ende = M.monate[6];
   const sE = M.schnitt.ein, sA = M.schnitt.aus, sErg = sE - sA;
   const fixV = fixkostenErkennen().filter((f) => !f.gemeinsam && f.aktiv), pm = fixV.reduce((t, f) => t + f.proMonat, 0);
-  const B = einkommen().schnitt.wert;
+  const ek = einkommen(), B = ek.aktuell.wert || ek.schnitt.wert, gMon = `${MON[+ek.letzter.slice(5) - 1]} ${ek.letzter.slice(2, 4)}`;
   const vz = (c) => `${c < 0 ? '−' : '+'}${eur0(Math.abs(c))}`;
   const kachel = (ziel, icon, titel, wert, cls_, zeile, extra = '') => `<button class="ue-kpi" data-uemz="${ziel}"><span class="ue-kpi-l"><span class="ue-ic ${icon}">${UE_ICON[icon]}</span>${titel}</span><b class="${cls_}">${wert}</b>${extra}<span class="ue-kpi-s">${zeile}</span></button>`;
   const lauf = jetzt.art === 'laeuft';
@@ -865,7 +865,7 @@ function ueKacheln(M) {
     kachel('prognose', 'konto', `Prognose Ende ${monatE}`, ende.stand == null ? '–' : `≈ ${eur0(ende.stand)}`, ende.stand < 0 ? 'neg' : '',
       jetzt.stand != null && ende.stand != null ? `<span class="ue-d ${ende.stand - jetzt.stand >= 0 ? 'gut' : 'schlecht'}">${vz(ende.stand - jetzt.stand)}</span> <span class="muted">ggü. Ende ${monatJ} (≈ ${vz((ende.stand - jetzt.stand) / 3)} pro Monat)</span>` : ''),
     kachel('fixg', 'fix', 'Fixkosten vom Gehalt', B ? `${Math.round((pm / B) * 100)} %` : '–', pm <= B * 0.5 ? 'pos' : 'neg',
-      `<span class="muted">${eur0(pm)} von ${eur0(B)} Ø Gehalt · Ziel ≤ 50 %</span>`, fixGehaltBalken(pm, lebenshaltung().schnitt, B)),
+      `<span class="muted">${eur0(pm)} von ${eur0(B)} aktuellem Gehalt (${gMon}) · Ziel ≤ 50 %</span>`, fixGehaltBalken(pm, lebenshaltung().schnitt, B)),
     kachel('schnitt', 'erg', 'Ø pro Monat (12 Monate)', vz(sErg), sErg >= 0 ? 'pos' : 'neg',
       `<span class="muted">${eur0(sE)} rein · ${eur0(sA)} raus</span> <span class="ue-d ${sErg >= 0 ? 'gut' : 'schlecht'}">Sparquote ${sE ? `${sErg < 0 ? '−' : ''}${Math.abs(Math.round((sErg / sE) * 100))} %` : '–'}</span>`),
   ].join('');
