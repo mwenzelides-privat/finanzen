@@ -196,6 +196,7 @@ function jahrMenu(auf) {
   $('#f-jahr').setAttribute('aria-expanded', String(auf));
 }
 
+let filterMehr = (() => { try { return localStorage.getItem('fd.filtermehr') === '1'; } catch { return false; } })();
 function filterZeigen(conds) {
   const jw = jahreWahl();
   $('#f-jahr-text').textContent = !jw.length ? 'Alle Jahre' : jw.length === 1 ? String(jw[0]) : jw.length <= 3 ? `${jw.join(', ')} · Vergleich` : `${jw.length} Jahre · Vergleich`;
@@ -212,6 +213,14 @@ function filterZeigen(conds) {
   $('#f-umb').closest('.schalter').classList.toggle('an', S.umb);
   if ($('#q').value !== S.q) $('#q').value = S.q;
   const chips = conds.map((c, i) => `<button class="chip" data-cond="${i}" title="Aus der Suche entfernen">${esc(c.label)}<span class="x">×</span></button>`);
+  // eingeklappte Filter als Chips, damit man sieht, was wirkt
+  const mehrAktiv = [S.konto && ['konto', `Konto <b>${esc(S.konto)}</b>`], S.kat && ['kat', `Kategorie <b>${esc(schoen(S.kat))}</b>`],
+    S.art !== 'alle' && ['art', S.art === 'aus' ? 'nur Ausgaben' : 'nur Einnahmen'], S.umb && ['umb', 'mit Umbuchungen']].filter(Boolean);
+  $('#f-mehr').hidden = !filterMehr;
+  $('#f-mehr-knopf').setAttribute('aria-expanded', String(filterMehr));
+  $('#f-mehr-knopf').classList.toggle('aktiv', mehrAktiv.length > 0);
+  $('#f-mehr-n').hidden = !mehrAktiv.length; $('#f-mehr-n').textContent = mehrAktiv.length;
+  if (!filterMehr) for (const [k, t] of mehrAktiv) chips.push(`<button class="chip" data-mehr="${k}" title="Filter entfernen">${t}<span class="x">×</span></button>`);
   if (S.ukat) chips.push(`<button class="chip" data-ukat="1" title="Unterkategorie-Filter entfernen">Unterkategorie <b>${esc(S.ukat)}</b><span class="x">×</span></button>`);
   $('#chips').innerHTML = chips.join('');
   $('#chips').querySelectorAll('[data-cond]').forEach((b) => b.onclick = () => {
@@ -219,6 +228,7 @@ function filterZeigen(conds) {
     setze({ q: S.q.replace(raw, '').replace(/\s+/g, ' ').trim() });
   });
   $('#chips').querySelector('[data-ukat]')?.addEventListener('click', () => setze({ ukat: '' }));
+  $('#chips').querySelectorAll('[data-mehr]').forEach((b) => b.onclick = () => setze(({ konto: { konto: '' }, kat: { kat: '', ukat: '' }, art: { art: 'alle' }, umb: { umb: false } })[b.dataset.mehr]));
   const aktiv = S.q || S.jahr || S.monat || S.konto || S.kat || S.ukat || S.art !== 'alle' || S.umb;
   $('#f-reset').hidden = !aktiv;
   $('#f-zurueck').hidden = stufe <= 0;
@@ -564,6 +574,100 @@ function kategorien() {
   });
 }
 
+// ======================================================================= Geldfluss (Übersicht)
+// Woher das Geld kommt (Einnahmen nach Art) und wohin es geht (Ausgaben nach Kategorie) – als Fluss durch eine Mitte.
+// Fehlt Geld, fließt links „aus Rücklagen“ zu; bleibt etwas übrig, steht rechts „Überschuss“. Summen wie in den Kacheln.
+function geldfluss(conds) {
+  const box = $('#geldfluss');
+  if (!box) return;
+  const unter = !!S.kat;
+  const gesamt = !unter && !conds.some((c) => c.kind === 'text' || c.kind === 'betrag');
+  const s = summen(FK), E = s.ein, A = -s.aus;
+  const ql = new Map(), zl = new Map(), katVon = new Map();
+  for (const r of FK) {
+    if (r.art === 'Einnahme') { const k = r.ukat || r.kat || 'Sonstige'; ql.set(k, (ql.get(k) || 0) + r.c); if (!katVon.has(k)) katVon.set(k, r.kat); }
+    else if (r.art === 'Ausgabe') { const k = unter ? r.ukat || '(ohne Unterkategorie)' : r.kat; zl.set(k, (zl.get(k) || 0) - r.c); }
+  }
+  // die größten n Posten, der Rest zusammengefasst – so, dass die Summe genau den Kacheln entspricht
+  const oben = (m, n, summe, rest) => {
+    const l = [...m].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+    const top = l.slice(0, l.length > n ? n - 1 : n).map(([k, v]) => ({ k, name: schoen(k), v }));
+    const r = summe - top.reduce((t, x) => t + x.v, 0);
+    if (r > summe * 0.004) top.push({ k: '', name: rest(l.length - top.length), v: r, rest: true });
+    return top;
+  };
+  const links = gesamt ? oben(ql, 5, E, (n) => (n > 0 ? `Sonstige Einnahmen (${n})` : 'Sonstige Einnahmen')) : [];
+  const rechts = oben(zl, 9, A, (n) => (n > 0 ? `Übrige (${n})` : 'Übrige'));
+  if (gesamt && A > E) links.push({ name: 'Fehlbetrag – aus Rücklagen', v: A - E, minus: true });
+  else if (gesamt && E > A) rechts.push({ name: 'Überschuss – bleibt übrig', v: E - A, plus: true });
+  $('#h-fluss').textContent = gesamt ? `% = Anteil an den Einnahmen (${eur0(E)}) · anklicken: filtern` : `${unter ? schoen(S.kat) : 'Treffer der Suche'} · % = Anteil an diesen Ausgaben · anklicken: filtern`;
+  if (!rechts.length && !links.length) { box.innerHTML = '<div class="leer">Keine Einnahmen oder Ausgaben im gewählten Zeitraum.</div>'; return; }
+
+  const W = Math.max(320, box.clientWidth || 900), schmal = W < 640;
+  const T = Math.max(links.reduce((t, x) => t + x.v, 0), rechts.reduce((t, x) => t + x.v, 0)) || 1;
+  const basisP = gesamt && E > 0 ? E : A || 1;
+  const nw = schmal ? 8 : 12, slot = schmal ? 34 : 40, kopf = 24;
+  const lw = links.length ? (schmal ? 108 : 210) : 0, rw = schmal ? 118 : 250;
+  const k = (schmal ? 210 : 300) / T;
+  // jeder Knoten bekommt mindestens eine Zeile Platz für seine Beschriftung
+  const legen = (liste) => liste.map((x) => ({ ...x, h: Math.max(2, x.v * k), platz: Math.max(slot, x.v * k + (schmal ? 6 : 10)) }));
+  const L = legen(links), R = legen(rechts);
+  const hoehe = (l) => l.reduce((t, x) => t + x.platz, 0);
+  const H = Math.ceil(kopf + Math.max(hoehe(L), hoehe(R), T * k + 20) + 4);
+  const setzen = (l) => { let y = kopf + (H - kopf - hoehe(l)) / 2; for (const x of l) { x.y = y + (x.platz - x.h) / 2; y += x.platz; } };
+  setzen(L); setzen(R);
+  const xL = lw, xM = links.length ? Math.round(W * (schmal ? 0.46 : 0.45)) : 0, xR = W - rw - nw;
+  const mh = T * k, my = kopf + (H - kopf - mh) / 2;
+  const band = (x0, y0, h0, x1, y1, h1) => { const xm = (x0 + x1) / 2; return `M${x0},${y0}C${xm},${y0} ${xm},${y1} ${x1},${y1}L${x1},${y1 + h1}C${xm},${y1 + h1} ${xm},${y0 + h0} ${x0},${y0 + h0}Z`; };
+  const pz = (v) => `${NUM.format(Math.round((v / basisP) * 1000) / 10)} %`;
+  const fs = schmal ? 11 : 12.5;
+  if (schmal) for (const x of [...L, ...R]) { if (x.minus) x.name = 'Fehlbetrag'; else if (x.rest) x.name = x.name.replace('Sonstige Einnahmen', 'Sonstige'); else if (x.plus) x.name = 'Überschuss'; }
+  // lange Namen kürzen, damit sie neben die Knoten passen
+  const passt = (t, platz) => { const n = Math.floor(platz / (fs * 0.56)); return t.length > n ? t.slice(0, Math.max(4, n - 1)).trimEnd() + '…' : t; };
+  const text = (x, y, anker, name, wert, cls_) => `<text x="${x}" y="${y}" text-anchor="${anker}" class="fl-t ${cls_ || ''}"><tspan class="fl-name" font-size="${fs}">${esc(name)}</tspan><tspan x="${x}" dy="${fs + 3}" class="fl-wert" font-size="${fs - 0.5}">${wert}</tspan></text>`;
+  let svg = `<svg class="fluss-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Geldfluss: Einnahmen und Ausgaben">
+    <defs><pattern id="fl-schraffur" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" class="fl-minus-grund"/><rect width="4" height="8" class="fl-minus-strich"/></pattern></defs>`;
+  if (links.length) svg += `<text x="${xL + nw}" y="14" text-anchor="end" class="fl-kopf">Woher</text>`;
+  svg += `<text x="${xR}" y="14" class="fl-kopf">Wohin</text>`;
+  // linke Seite → Mitte
+  let ym = my;
+  L.forEach((x, i) => {
+    const hm = x.v * k;
+    const art = x.minus ? 'minus' : x.rest ? 'rest' : 'ein';
+    const tip = `${x.name}: ${eur0(x.v)} · ${pz(x.v)}`;
+    svg += `<g class="fl-n fl-${art}"${!x.minus && !x.rest ? ` data-fein="${esc(x.k)}"` : ''}><title>${esc(tip)}</title>
+      <path class="fl-band" d="${band(xL + nw, x.y, x.h, xM, ym, hm)}"/>
+      <rect class="fl-knoten" x="${xL}" y="${x.y}" width="${nw}" height="${x.h}" rx="2"/>
+      ${text(xL - 8, x.y + x.h / 2 - 2, 'end', passt(x.name, lw - 10), `${eur0(x.v)} · ${pz(x.v)}`)}</g>`;
+    ym += hm;
+  });
+  // Mitte → rechte Seite
+  ym = my;
+  const x0 = xM + nw;
+  R.forEach((x) => {
+    const hm = x.v * k;
+    const art = x.plus ? 'plus' : x.rest ? 'rest' : 'aus';
+    const tip = `${x.name}: ${eur0(x.v)} · ${pz(x.v)}`;
+    svg += `<g class="fl-n fl-${art}"${!x.plus && !x.rest ? ` data-faus="${esc(x.k)}"` : ''}><title>${esc(tip)}</title>
+      <path class="fl-band" d="${band(x0, ym, hm, xR, x.y, x.h)}"/>
+      <rect class="fl-knoten" x="${xR}" y="${x.y}" width="${nw}" height="${x.h}" rx="2"/>
+      ${text(xR + nw + 8, x.y + x.h / 2 - 2, 'start', passt(x.name, rw - 12), `${eur0(x.v)} · ${pz(x.v)}`)}</g>`;
+    ym += hm;
+  });
+  const titel = gesamt && E >= A ? 'Einnahmen' : 'Ausgaben';
+  svg += `<rect class="fl-mitte" x="${xM}" y="${my}" width="${nw}" height="${mh}" rx="2"><title>${titel}: ${eur0(T)}</title></rect>`;
+  if (!links.length) svg += `<text x="0" y="14" class="fl-kopf">Ausgaben ${eur0(T)}</text>`;
+  box.innerHTML = svg + '</svg>';
+  box.querySelectorAll('[data-faus]').forEach((g) => g.onclick = () => {
+    const k2 = g.dataset.faus;
+    if (!unter) setze({ kat: k2, ukat: '' }); else if (k2 !== '(ohne Unterkategorie)') setze({ ukat: S.ukat === k2 ? '' : k2 });
+  });
+  box.querySelectorAll('[data-fein]').forEach((g) => g.onclick = () => {
+    const k2 = g.dataset.fein, kat = katVon.get(k2);
+    setze(kat && kat !== k2 ? { kat, ukat: k2 } : { kat: k2, ukat: '' });
+  });
+}
+
 // Ist der Monat (bzw. das Jahr) mit dem Datenstand noch nicht abgeschlossen? Dann fehlen oft noch Gehalt oder Abbuchungen.
 const monatsletzter = (iso) => new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7), 0)).toISOString().slice(0, 10);
 function laeuftNoch(jahr, k) {
@@ -735,7 +839,7 @@ function durchschnitte() {
     const jetzt = f(a);
     const zeilen = [];
     if (v1) zeilen.push(`<span class="muted">Vorjahr</span> ${fmt(f(v1))} ${diff(jetzt, f(v1), mehrGut, pp)}`);
-    if (v3) zeilen.push(`<span class="muted">Ø 3 Vorjahre</span> ${fmt(f(v3))}`);
+    if (v3 && !v1) zeilen.push(`<span class="muted">Ø 3 Vorjahre</span> ${fmt(f(v3))}`);   // knapp halten: eine Vergleichszeile
     if (l12) zeilen.push(`<span class="muted">letzte 12 Mon.</span> ${fmt(f(l12))} ${diff(jetzt, f(l12), mehrGut, pp)}`);
     return zeilen.map((z) => `<div class="sv">${z}</div>`).join('');
   };
@@ -971,21 +1075,46 @@ function tabUebersicht() {
   const GANZ = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 0 });
   const f = stufe === 2 ? (c) => (c / 100000).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : stufe === 1 ? (c) => GANZ.format(Math.round(c / 100)) : eur0;
   const z = (c, extraCls = '') => (c ? `<td class="r ${cls(c)} ${extraCls}" title="${eur(c)}">${f(c)}</td>` : `<td class="r muted ${extraCls}">–</td>`);
+  // Wärmekarte: Ausgaben orange, Einnahmen grün – je kräftiger, desto größer
+  const NEUTRAL = new Set(['Einnahmen', 'Umbuchung', 'Sparen']);
+  const maxNeg = Math.max(1, ...p.rows.filter((r) => !NEUTRAL.has(r.key)).flatMap((r) => r.v.filter((c) => c < 0).map((c) => -c)));
+  const maxPos = Math.max(1, ...p.rows.flatMap((r) => r.v.filter((c) => c > 0)));
+  const zw = (c) => {
+    if (!c) return z(c);
+    const a = c < 0 ? Math.min(1, -c / maxNeg) : Math.min(1, c / maxPos);
+    return `<td class="r ${cls(c)} warm" style="--w:${(0.04 + a * 0.36).toFixed(3)}" title="${eur(c)}">${f(c)}</td>`;
+  };
   const vjZellen = (jetzt, vorher) => (p.vj && !schmal ? `${z(vorher, 'vj')}<td class="r ${cls(jetzt - vorher)}" title="${eur(jetzt - vorher)}">${jetzt - vorher ? (jetzt - vorher > 0 ? '+' : '') + f(jetzt - vorher) : '–'}</td>` : '');
   const avg = (c) => (schmal ? '' : z(c / n));
   const dz = (v) => (p.diff ? (() => { const d = v[p.diff[1]] - v[p.diff[0]]; return `<td class="r ${cls(d)} vj" title="${eur(d)}">${d ? (d > 0 ? '+' : '') + f(d) : '–'}</td>`; })() : '');
-  let h = `<div class="tab-scroll"><table class="t klein fix pivot" style="width:${Math.min(breite, erste + (p.cols.length + extra) * 130)}px"><thead><tr>
+  let h = katEinsicht(p) + `<div class="tab-scroll"><table class="t klein fix pivot" style="width:${Math.min(breite, erste + (p.cols.length + extra) * 130)}px"><thead><tr>
     <th class="erste" style="width:${erste}px">${p.unter ? 'Unterkategorie' : 'Kategorie'}${kompakt ? `<small class="muted"> in ${stufe === 2 ? 'Tsd. ' : ''}€</small>` : ''}</th>
     ${p.cols.map((c) => `<th class="r${typeof c === 'number' ? ' sort' : ''}"${typeof c === 'number' ? ` data-spalte="${c}" title="${p.jahr ? 'Monat' : 'Jahr'} filtern"` : ' title="zusammengefasst"'}>${p.label(c)}</th>`).join('')}
     ${ohneSumme ? '' : `<th class="r" ${ew}>Summe</th>`}${schmal ? '' : `<th class="r" ${ew} title="Durchschnitt je ${p.jahr ? 'Monat' : 'Jahr'}">Ø ${p.jahr ? 'Mon.' : 'Jahr'}</th>`}
     ${p.diff ? `<th class="r vj" ${ew} title="Veränderung ${p.cols[p.diff[1]]} gegenüber ${p.cols[p.diff[0]]}">± ${String(p.cols[p.diff[0]]).slice(2)}→${String(p.cols[p.diff[1]]).slice(2)}</th>` : ''}
     ${p.vj && !schmal ? `<th class="r vj" ${ew} title="Gleicher Zeitraum ein Jahr früher">${esc(V.label)}</th><th class="r" ${ew} title="Veränderung gegenüber ${esc(V.label)}">± Vorj.</th>` : ''}</tr></thead><tbody>`;
   for (const r of p.rows) {
-    h += `<tr class="klick" data-zeile="${esc(r.key)}"><td class="erste" title="${esc(schoen(r.key))}">${esc(schoen(r.key))}</td>${r.v.map((c) => z(c)).join('')}
+    h += `<tr class="klick" data-zeile="${esc(r.key)}"><td class="erste" title="${esc(schoen(r.key))}">${esc(schoen(r.key))}</td>${r.v.map((c) => zw(c)).join('')}
       ${ohneSumme ? '' : z(r.sum, 'fett')}${avg(r.sum)}${dz(r.v)}${vjZellen(r.sum, p.vj?.get(r.key) || 0)}</tr>`;
   }
   h += `</tbody><tfoot><tr><td class="erste">Ergebnis</td>${p.sums.map((c) => z(c)).join('')}${ohneSumme ? '' : z(p.total)}${avg(p.total)}${dz(p.sums)}${vjZellen(p.total, p.vjTotal)}</tr></tfoot></table></div>`;
   return h;
+}
+
+// Ein Satz über der Tabelle: größter Posten, stärkster Anstieg und Rückgang gegenüber dem Vorjahr
+function katEinsicht(p) {
+  const aus = p.rows.filter((r) => !['Einnahmen', 'Umbuchung', 'Sparen'].includes(r.key) && r.sum < 0);
+  if (!aus.length) return '';
+  const ges = aus.reduce((t, r) => t + r.sum, 0);
+  const gross = [...aus].sort((a, b) => a.sum - b.sum)[0];
+  const teile = [`Größter Posten: <b>${esc(schoen(gross.key))}</b> mit ${eur0(-gross.sum)} (${Math.round((gross.sum / ges) * 100)} % der Ausgaben)`];
+  if (p.vj) {
+    const d = aus.map((r) => ({ r, d: -r.sum + (p.vj.get(r.key) || 0) })).filter((x) => Math.abs(x.d) >= 10000);
+    const hoch = [...d].sort((a, b) => b.d - a.d)[0], runter = [...d].sort((a, b) => a.d - b.d)[0];
+    if (hoch?.d > 0) teile.push(`am stärksten gestiegen: <b>${esc(schoen(hoch.r.key))}</b> <span class="neg">+${eur0(hoch.d)}</span>`);
+    if (runter?.d < 0) teile.push(`am stärksten gesunken: <b>${esc(schoen(runter.r.key))}</b> <span class="pos">−${eur0(-runter.d)}</span> ggü. ${esc(V.label)}`);
+  }
+  return `<div class="kat-einsicht">${teile.join(' · ')}<span class="kat-skala muted"><i></i>klein → groß</span></div>`;
 }
 
 // Stichtag: selbst gewählt, sonst Ende des gewählten Jahres/Monats, sonst der letzte Datenstand
@@ -1045,6 +1174,13 @@ function tabKonten() {
   if (vert.length > 7) vert = [...vert.slice(0, 6), { name: `Übrige (${vert.length - 6})`, c: vert.slice(6).reduce((t, x) => t + x.c, 0) }];
   const vSumme = vert.reduce((t, x) => t + x.c, 0);
   kontenGrafik = { tag, vert };
+  const nurK = S.konto ? D.kontoIdx.get(S.konto) : -1;
+  const summeAm = (d) => (d < D.von ? null : kontostaende(D, d).filter((x) => (nurK === -1 ? !x.k.kind : x.i === nurK) && x.c != null && x.status !== 'unbekannt').reduce((t, x) => t + x.c, 0));
+  const jb = `${+tag.slice(0, 4) - 1}-12-31`, vor = `${+tag.slice(0, 4) - 1}${tag.slice(4)}`;
+  const delta = (d, t) => { const v = summeAm(d); if (v == null) return ''; const x = saldo - v; return `<div class="kh-d"><span class="muted">${t}</span> <b class="${cls(x)}">${x >= 0 ? '+' : '−'}${eur0(Math.abs(x))}</b></div>`; };
+  h += `<div class="konten-held"><div class="kh-haupt"><span class="muted">${nurK === -1 ? 'Auf deinen Konten' : esc(S.konto)} am ${dde(tag)}</span><b class="${saldo < 0 ? 'neg' : ''}">${eur0(saldo)}</b></div>
+    ${tag.slice(5) !== '12-31' ? delta(jb, `seit 31.12.${jb.slice(0, 4)}`) : ''}${delta(vor, `ggü. ${dde(vor)}`)}
+    <div class="kh-d muted klein">ohne Depot${nurK === -1 ? ', ohne die Konten der Kinder' : ''}</div></div>`;
   h += `<div class="konten-grafiken">
       <div class="kg"><div class="fix-grafik-t">Summe der Kontostände je Monatsende <span class="muted">· Punkt anklicken = Stichtag</span></div><div class="kg-c"><canvas id="c-konten-verlauf"></canvas></div></div>
       <div class="kg kg-vert"><div class="fix-grafik-t">Verteilung der Guthaben am ${dde(tag)}</div>
@@ -1187,7 +1323,9 @@ function tabelle(conds) {
   el.querySelectorAll('[data-fixbezug]').forEach((b) => b.onclick = () => { fixBezug = b.dataset.fixbezug; try { localStorage.setItem('fd.fixbezug', fixBezug); } catch {} tabelle(conds); });
   el.querySelectorAll('.fix-zeile[data-fix]').forEach((tr) => tr.onclick = () => setze({ q: `"${tr.dataset.fix}"${tr.dataset.sig ? ' ' + tr.dataset.sig : ''}`, tab: 'buchungen' }));
   el.querySelectorAll('.fix-kopfzeile[data-fixgruppe]').forEach((b) => b.onclick = () => fixGruppeUmschalten(b.dataset.fixgruppe));
-  el.querySelectorAll('.fa-zeile[data-fixgruppe]').forEach((b) => b.onclick = () => fixGruppeUmschalten(b.dataset.fixgruppe, true));
+  el.querySelectorAll('.fa-zeile[data-fixgruppe], .kb-fix[data-fixgruppe]').forEach((b) => b.onclick = () => fixGruppeUmschalten(b.dataset.fixgruppe, true));
+  el.querySelector('.fix-vertraege')?.addEventListener('toggle', (e) => { fixListeAuf = e.target.open; });
+  el.querySelector('.fix-grundlage')?.addEventListener('toggle', (e) => { fixGrundlageAuf = e.target.open; });
   el.querySelectorAll('.ks[data-fix]').forEach((b) => b.onclick = () => setze({ q: `"${b.dataset.fix}"${b.dataset.sig ? ' ' + b.dataset.sig : ''}`, tab: 'buchungen' }));
   el.querySelectorAll('[data-leben]').forEach((b) => b.onclick = () => {
     lebenWahl = b.dataset.leben;
@@ -1447,6 +1585,10 @@ function fixTitel(f, art) {
 }
 
 let fixOffen = new Set();   // aufgeklappte Gruppen
+let fixListeAuf = false, fixGrundlageAuf = false;   // „Alle Verträge im Detail“ und „Rechengrundlage“ aufgeklappt
+const FIX_BLAU = '#2a78d6';
+const FIX_KURZ = { 'Haushalt (Gemeinschaftskonto)': 'Haushalt', 'Abos & Mitgliedschaften': 'Abos', 'Kinder & Betreuung': 'Kinder', 'Steuern & Gebühren': 'Steuern',
+  'Telefon & Internet': 'Telefon', Trennungsunterhalt: 'Trennungs&shy;unterhalt', Kindesunterhalt: 'Kindes&shy;unterhalt', Versicherungen: 'Versiche&shy;rungen' };
 let fixGrafik = null;       // Daten für den Verlauf (wird nach dem Rendern gezeichnet)
 let fixKontext = null;      // Grundlage für den Rechner „Kann ich mir das leisten?“
 
@@ -1547,8 +1689,7 @@ function tabFixkosten(conds) {
     return [...g.values()].sort((a, b) => b.summe - a.summe || a.art.localeCompare(b.art, 'de'));
   };
   const ueber = nachArt(lauf), arten = nachArt(liste);
-  const farbe = new Map();
-  for (const a of [...ueber.map((g) => g.art), ...alleV.map(fixArt)]) if (!farbe.has(a)) farbe.set(a, ART_FARBEN[farbe.size % ART_FARBEN.length]);
+  const farbe = new Map(alleV.map((f) => [fixArt(f), FIX_BLAU]));
   [...ueber, ...arten].forEach((g) => { g.farbe = farbe.get(g.art); });
   fixGrafik = { verlauf: fixVerlauf(alleV, farbe), B, bz, ek };
   fixKontext = { B, bz, pm, L, lauf, ruecklage: ruecklagen() };
@@ -1556,21 +1697,32 @@ function tabFixkosten(conds) {
   const knopf = (attr, k, an, t, wert) => `<button ${attr}="${k}" class="${an ? 'an' : ''}">${t}${wert != null ? ` <small>${eur0(wert)}</small>` : ''}</button>`;
   const lebenText = lebenWahl === 'eigen' ? 'dein eigener Wert' : lebenWahl === 'typisch' ? `typischer Monat (Median) ${monatsText(lh.monate)}` : `Ø ${monatsText(lh.monate)}`;
   const quoteOk = pm <= B * 0.5;
-  let h = `<div class="fix-kopf">
-    <div class="fix-einst">
-      <div class="fix-bezug-zeile"><span>Einkommen</span><div class="seg fix-bezug">${['aktuell', 'schnitt', 'einnahmen'].filter((k) => ek[k].wert).map((k) => `<button data-fixbezug="${k}" class="${fixBezug === k ? 'an' : ''}" title="${esc(ek[k].zeit)}">${esc(ek[k].knopf)} <small>${eur0(ek[k].wert)}</small></button>`).join('')}</div></div>
-      <div class="fix-bezug-zeile"><span>Lebenshaltung</span><div class="seg fix-bezug">${knopf('data-leben', 'schnitt', lebenWahl === 'schnitt', 'Ø 12 Monate', lh.schnitt)}${knopf('data-leben', 'typisch', lebenWahl === 'typisch', 'typischer Monat', lh.typisch)}${knopf('data-leben', 'eigen', lebenWahl === 'eigen', 'eigener Wert')}</div>
-        ${lebenWahl === 'eigen' ? `<label class="fix-eigen"><input type="number" id="leben-eigen" min="0" step="50" inputmode="numeric" value="${Math.round(L / 100)}"> € / Monat</label>` : ''}</div>
-    </div>
-    <div class="fix-blick">
-      <div class="fb"><span class="l"><i class="fb-punkt bb-fix"></i>Fixkosten</span><b>${eur0(pm)}</b><span class="u">pro Monat · ${NUM.format(lauf.length)} Verträge · ${eur0(pm * 12)} im Jahr</span></div>
-      <div class="fb"><span class="l">Fixkostenquote</span><b>${pct(pm)}</b><span class="u">${esc(bz.vom)} · <span class="${quoteOk ? 'pos' : 'neg'}">${quoteOk ? '✓' : '✗'} Faustregel höchstens 50&nbsp;%</span></span></div>
-      <div class="fb"><span class="l"><i class="fb-punkt bb-leben"></i>Lebenshaltung</span><b>${eur0(L)}</b><span class="u">pro Monat · alles außer Fixkosten · ${esc(lebenText)}</span></div>
-      <div class="fb fb-ergebnis ${rest >= 0 ? 'gut' : 'schlecht'}"><span class="l"><i class="fb-punkt ${rest >= 0 ? 'bb-rest' : 'bb-minus'}"></i>${rest >= 0 ? 'Spielraum' : 'Fehlbetrag'}</span><b>${rest < 0 ? '−' : ''}${eur0(Math.abs(rest))}</b>
-        <span class="u">${rest >= 0 ? `pro Monat frei (${pct(rest)}) – zum Sparen oder für Neues` : `pro Monat mehr, als ${esc(bz.name)} hergibt`}${lh.spar > 0 ? ` · aufs Sparkonto/Depot gehen derzeit Ø ${eur0(lh.spar)}` : ''}</span></div>
-    </div>
-    <div class="fix-budget"><div class="fix-grafik-t">So verteilt sich ${esc(bz.name)} (${eur0(B)} = 100 %)</div>${budgetBalken([{ fk: pm, l: L }], B)}
-      <div class="bb-leg"><span><i class="bb-fix"></i>Fixkosten ${pct(pm)}</span><span><i class="bb-leben"></i>Lebenshaltung ${pct(L)}</span><span>${rest >= 0 ? `<i class="bb-rest"></i>bleibt ${pct(rest)}` : `<i class="bb-minus"></i>fehlt ${eur0(-rest)} (${pct(-rest)})`}</span></div></div>
+  const deinem = bz.reihe === 'lohn' ? `deinem ${esc(bz.name)}` : `deinen ${esc(bz.name)}`;
+  const satz = `Von ${deinem} (${eur0(B)}) sind <b>${eur0(pm)}</b> fest verplant. ${rest >= 0
+    ? `Nach der Lebenshaltung bleiben dir <b class="pos">${eur0(rest)}</b> im Monat.`
+    : `Mit der Lebenshaltung fehlen dir <b class="neg">${eur0(-rest)}</b> im Monat.`}`;
+  // Ein Balken für alles: Fixkosten je Art (blau) | Lebenshaltung | was bleibt – rot schraffiert, was fehlt
+  const max = Math.max(B, pm + L), w = (c) => (Math.max(0, c) / max) * 100;
+  const segs = ueber.filter((g) => g.summe > 0).map((g) => `<i class="kb-fix" data-fixgruppe="${esc(g.art)}" style="width:${w(g.summe)}%" title="${esc(g.art)}: ${eur0(g.summe)} pro Monat · ${pct(g.summe)} – anklicken: Verträge">${w(g.summe) >= 7 ? `<span>${FIX_KURZ[g.art] || esc(g.art)}</span><b>${eur0(g.summe)}</b>` : ''}</i>`).join('');
+  const balken = `<div class="kb">
+    <div class="kb-klammern"><div class="kb-k kb-k-fix" style="width:${w(pm)}%"><b>Fixkosten ${eur0(pm)}</b><span>${pct(pm)}${quoteOk ? '' : ' · Faustregel: höchstens 50&nbsp;%'}</span></div>
+      <div class="kb-k kb-k-leben" style="width:${w(L)}%"><b>Lebenshaltung ${eur0(L)}</b><span>${pct(L)}</span></div>
+      ${rest > 0 ? `<div class="kb-k kb-k-rest" style="width:${w(rest)}%"><b>bleibt ${eur0(rest)}</b><span>${pct(rest)}</span></div>` : ''}</div>
+    <div class="kb-balken">${segs}<i class="kb-leben" style="width:${w(L)}%" title="Lebenshaltung ${eur0(L)} · ${pct(L)}">${w(L) >= 7 ? `<span>Lebens&shy;haltung</span><b>${eur0(L)}</b>` : ''}</i>${rest > 0 ? `<i class="kb-rest" style="width:${w(rest)}%" title="bleibt ${eur0(rest)} · ${pct(rest)}">${w(rest) >= 7 ? `<span>bleibt</span><b>${eur0(rest)}</b>` : ''}</i>` : ''}
+      ${rest < 0 ? `<b class="kb-minus" style="left:${w(B)}%;width:${w(-rest)}%" title="fehlt ${eur0(-rest)}"></b>` : ''}${max > B ? `<b class="kb-linie" style="left:${w(B)}%"></b>` : ''}</div>
+    <div class="kb-unten"><span class="kb-100" style="right:${100 - w(B)}%">100 % = ${eur0(B)}</span>${rest < 0 ? `<span class="kb-fehlt">fehlt ${eur0(-rest)}</span>` : ''}</div>
+  </div>`;
+  let h = `<div class="fix-kopf fix-held">
+    <p class="fix-satz">${satz}</p>
+    ${balken}
+    <details class="fix-grundlage"${fixGrundlageAuf ? ' open' : ''}><summary>Gerechnet mit ${esc(bz.knopf)} (${eur0(B)}) und Lebenshaltung ${esc(lebenText)} (${eur0(L)}) · <span class="link">ändern</span></summary>
+      <div class="fix-einst">
+        <div class="fix-bezug-zeile"><span>Einkommen</span><div class="seg fix-bezug">${['aktuell', 'schnitt', 'einnahmen'].filter((k) => ek[k].wert).map((k) => `<button data-fixbezug="${k}" class="${fixBezug === k ? 'an' : ''}" title="${esc(ek[k].zeit)}">${esc(ek[k].knopf)} <small>${eur0(ek[k].wert)}</small></button>`).join('')}</div></div>
+        <div class="fix-bezug-zeile"><span>Lebenshaltung</span><div class="seg fix-bezug">${knopf('data-leben', 'schnitt', lebenWahl === 'schnitt', 'Ø 12 Monate', lh.schnitt)}${knopf('data-leben', 'typisch', lebenWahl === 'typisch', 'typischer Monat', lh.typisch)}${knopf('data-leben', 'eigen', lebenWahl === 'eigen', 'eigener Wert')}</div>
+          ${lebenWahl === 'eigen' ? `<label class="fix-eigen"><input type="number" id="leben-eigen" min="0" step="50" inputmode="numeric" value="${Math.round(L / 100)}"> € / Monat</label>` : ''}</div>
+      </div>
+      <p class="muted klein">Lebenshaltung = alle übrigen Ausgaben deiner Konten (Einkauf, Tanken, Freizeit, Urlaub, Anschaffungen) ohne Fixkosten und ohne Gemeinschaftskonto${lh.spar > 0 ? `. Aufs Sparkonto oder Depot gehen zusätzlich Ø ${eur0(lh.spar)} im Monat` : ''}.</p>
+    </details>
   </div>`;
 
   // Wofür und wann
@@ -1586,23 +1738,22 @@ function tabFixkosten(conds) {
     <div class="fix-leg-fuss">Je Monat: ${bz.reihe === 'lohn' ? 'eingegangenes Nettogehalt (Spitzen = Sonderzahlungen)' : 'alle Einnahmen'} und die Summe der damals laufenden Fixkosten (jährliche anteilig). Grün: was nach den Fixkosten bleibt; gestrichelt: ${esc(bz.name)}.</div></div>`;
 
   const seg = (v, t) => `<button data-fixansicht="${v}" class="${fixAnsicht === v ? 'an' : ''}">${t}</button>`;
-  h += `<div class="fix-kopf fix-kopf-liste"><div class="fix-leiste"><div class="fix-feld-t">Alle Verträge${gefiltertAn ? ' <span class="muted">· gefiltert</span>' : ''}</div>
-      <div class="fix-leiste-r"><div class="seg fix-seg">${seg('laufend', `Laufend (${aktiv.length})`)}${nFrueher ? seg('frueher', `+ frühere seit 2020 (${nFrueher})`) : ''}${nFrueher + nAelter ? seg('alle', `alle (${alle.length})`) : ''}</div>
-      ${arten.length ? `<button class="link" id="fix-alle-auf">${arten.every((g) => fixOffen.has(g.art)) ? 'Alle zuklappen' : 'Alle aufklappen'}</button>` : ''}</div></div></div>`;
-  if (!liste.length) return h + '<div class="leer">Keine regelmäßigen Zahlungen gefunden.</div>';
+  let v = `<div class="fix-leiste fix-leiste-innen"><div class="fix-leiste-r"><div class="seg fix-seg">${seg('laufend', `Laufend (${aktiv.length})`)}${nFrueher ? seg('frueher', `+ frühere seit 2020 (${nFrueher})`) : ''}${nFrueher + nAelter ? seg('alle', `alle (${alle.length})`) : ''}</div>
+      ${arten.length ? `<button class="link" id="fix-alle-auf">${arten.every((g) => fixOffen.has(g.art)) ? 'Alle zuklappen' : 'Alle aufklappen'}</button>` : ''}</div></div>`;
+  if (!liste.length) v += '<div class="leer">Keine regelmäßigen Zahlungen gefunden.</div>';
 
   const hl = highlightWords(conds);
   const re = hl.length ? new RegExp('(' + hl.map(escRe).join('|') + ')', 'gi') : null;
   const mk = (s) => (re ? esc(s).replace(re, '<mark>$1</mark>') : esc(s));
   const offen = (a) => fixOffen.has(a) || conds.some((c) => c.kind === 'text');   // bei einer Suche alles offen
-  h += `<div class="fix-liste"><div class="fix-liste-kopf"><span>Beträge pro Monat</span><span>% = Anteil ${esc(bz.am)} (${eur0(B)} = 100 %)</span></div>`;
+  v += `<div class="fix-liste"><div class="fix-liste-kopf"><span>Beträge pro Monat</span><span>% = Anteil ${esc(bz.am)} (${eur0(B)} = 100 %)</span></div>`;
+  if (liste.length) {
   for (const g of arten) {
     const auf = offen(g.art);
     const frueher = g.fs.length - g.laufend;
-    h += `<div class="fix-gruppe${auf ? ' offen' : ''}">
+    v += `<div class="fix-gruppe${auf ? ' offen' : ''}">
       <button class="fix-kopfzeile" data-fixgruppe="${esc(g.art)}" aria-expanded="${auf}">
         <svg class="pfeil" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
-        <span class="punkt" style="background:${g.farbe}"></span>
         <span class="name">${esc(g.art)}</span>
         <span class="anzahl">${g.laufend ? `${g.laufend} ${g.laufend === 1 ? 'Zahlung' : 'Zahlungen'}` : ''}${frueher ? `${g.laufend ? ', ' : ''}${frueher} früher` : ''}</span>
         <span class="betrag">${g.summe ? eur0(g.summe) : '–'}</span>
@@ -1614,7 +1765,7 @@ function tabFixkosten(conds) {
         const titel = fixTitel(f, g.art), vt = verlaufText(f);
         const teile = [titel !== f.name ? `an ${f.name}` : '', f.rh.name, f.aktiv ? `seit ${dde(f.seit).slice(3)}` : `${dde(f.seit).slice(3)} – ${dde(f.zuletzt).slice(3)}, beendet`, vt].filter(Boolean);
         const vtip = f.stufen.map((x) => `${EUR.format(x.betrag / 100)} ${dde(x.von).slice(3)}–${dde(x.bis).slice(3)}`).join('\n');
-        h += `<div class="fix-zeile${f.aktiv ? '' : ' beendet'}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="Alle Zahlungen anzeigen${vtip ? '\n' + esc(vtip) : ''}">
+        v += `<div class="fix-zeile${f.aktiv ? '' : ' beendet'}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="Alle Zahlungen anzeigen${vtip ? '\n' + esc(vtip) : ''}">
           <div class="text"><div class="titel">${mk(titel)}</div><div class="unter">${teile.map(esc).join(' · ')}</div>
             ${f.aktiv && B ? `<div class="anteilsbalken"><i style="width:${Math.min(100, Math.max(1, (f.proMonat / B) * 100))}%;background:${g.farbe}"></i></div>` : ''}</div>
           <div class="zahlen"><div class="betrag">${e2(f.betrag)}${f.rh.proJahr !== 12 ? `<small> ${f.rh.name}</small>` : ''}</div>
@@ -1622,16 +1773,19 @@ function tabFixkosten(conds) {
         </div>`;
       }
     }
-    h += '</div>';
+    v += '</div>';
   }
-  h += `<div class="fix-summe"><span>Summe laufend${gefiltertAn ? ' (gefiltert)' : ''}</span><span class="betrag">${eur0(pmListe)} / Monat</span><span class="muted">${eur0(pmListe * 12)} im Jahr · ${pct(pmListe)} ${esc(bz.vom)}</span></div></div>`;
+  v += `<div class="fix-summe"><span>Summe laufend${gefiltertAn ? ' (gefiltert)' : ''}</span><span class="betrag">${eur0(pmListe)} / Monat</span><span class="muted">${eur0(pmListe * 12)} im Jahr · ${pct(pmListe)} ${esc(bz.vom)}</span></div></div>`;
   if (vomGemeinsamen.length) {
     const gs = vomGemeinsamen.filter((f) => f.aktiv).reduce((s, f) => s + f.proMonat, 0);
-    h += `<div class="fix-gemeinsam"><div class="fix-gemeinsam-t"><b>Vom Gemeinschaftskonto bezahlt</b> <span class="muted">– nicht mitgezählt, weil ihr sie aus euren Einzahlungen deckt${gs ? ` (laufend ${eur0(gs)} pro Monat)` : ''}</span></div>
+    v += `<div class="fix-gemeinsam"><div class="fix-gemeinsam-t"><b>Vom Gemeinschaftskonto bezahlt</b> <span class="muted">– nicht mitgezählt, weil ihr sie aus euren Einzahlungen deckt${gs ? ` (laufend ${eur0(gs)} pro Monat)` : ''}</span></div>
       ${vomGemeinsamen.map((f) => `<div class="fix-zeile${f.aktiv ? '' : ' beendet'}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}">
         <div class="text"><div class="titel">${esc(f.name)}</div><div class="unter">${esc(schoen(f.ukat))} · ${esc(D.konten[f.k].name)} · ${f.rh.name}${f.aktiv ? '' : ' · beendet'}</div></div>
         <div class="zahlen"><div class="betrag muted">${e2(f.betrag)}</div></div></div>`).join('')}</div>`;
   }
+  }
+  const suche = conds.some((c) => c.kind === 'text');
+  h += `<details class="fix-vertraege"${fixListeAuf || suche ? ' open' : ''}><summary><b>Alle Verträge im Detail</b> <span class="muted">· ${aktiv.length} laufend · ${eur0(pmListe)} pro Monat${gefiltertAn ? ' · gefiltert' : ''}</span></summary>${v}</details>`;
   h += `<p class="muted klein fix-fuss">So wird gerechnet: Einkommen − Fixkosten − Lebenshaltung = Spielraum. Fixkosten: automatisch erkannte regelmäßige Zahlungen (gleicher Empfänger und Verwendungszweck, regelmäßiger Abstand; jährliche anteilig). Deine Überweisungen aufs Gemeinschaftskonto zählen mit, was von dort abgeht, nicht noch einmal. Lebenshaltung: alle übrigen Ausgaben deiner Konten (Einkauf, Tanken, Freizeit, Urlaub, Anschaffungen) der letzten 12 abgeschlossenen Monate. Die Überblicksgrafiken und der Rechner nutzen immer alle Verträge, auch wenn oben gefiltert ist. Stand ${dde(D.bis)}.${zeit}</p>`;
   return h;
 }
@@ -1643,7 +1797,7 @@ function artenHtml(arten, pct) {
   const max = Math.max(...da.map((g) => g.summe));
   return `<div class="fa"><div class="fa-kopf"><span></span><span></span><span>pro Monat</span><span>${esc(fixKontext.bz.spalte)}</span></div>
     ${da.map((g) => `<button class="fa-zeile" data-fixgruppe="${esc(g.art)}" title="${esc(g.art)}: ${g.laufend} ${g.laufend === 1 ? 'Vertrag' : 'Verträge'} – anklicken zum Aufklappen">
-      <span class="fa-name"><span class="punkt" style="background:${g.farbe}"></span><span>${esc(g.art)}</span></span>
+      <span class="fa-name"><span>${esc(g.art)}</span></span>
       <span class="fa-balken"><i style="width:${Math.max(1.5, (g.summe / max) * 100)}%;background:${g.farbe}"></i></span>
       <span class="fa-betrag">${eur0(g.summe)}</span><span class="fa-anteil">${pct(g.summe)}</span></button>`).join('')}</div>`;
 }
@@ -1879,6 +2033,7 @@ function fixVerlauf(vertraege, farbe) {
 }
 
 function fixGruppeUmschalten(art, nurAuf = false) {
+  if (nurAuf) fixListeAuf = true;
   if (fixOffen.has(art) && !nurAuf) fixOffen.delete(art); else fixOffen.add(art);
   tabelle(parse(S.q));
   document.querySelector(`.fix-kopfzeile[data-fixgruppe="${CSS.escape(art)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -2034,7 +2189,11 @@ function aktualisieren(hist = 'ersetzen') {
   // jede Grafik für sich: ein Fehler in einer soll die anderen nicht leer lassen
   const sicher = (f) => { try { return f(); } catch (e) { console.error(e); return null; } };
   if (!$('#kpis').hidden) sicher(() => kennzahlen(conds));
-  if (t === 'start') { sicher(verlauf); sicher(kategorien); }
+  if (t === 'start') {
+    const vgl = vergleichsModus();
+    $('#kat-card').hidden = !vgl; $('#start-grid').classList.toggle('eins', !vgl);
+    sicher(() => geldfluss(conds)); sicher(verlauf); if (vgl) sicher(kategorien);
+  }
   else if (t === 'kennzahlen') { const x = sicher(durchschnitte); sicher(() => wohinDasGeldGeht(x)); sicher(jahresschnitt); sicher(ergebnis); sicher(topEmpfaenger); sicher(() => katSchnitt(x)); }
   else tabelle(conds);
 }
@@ -2294,6 +2453,7 @@ function events() {
   $('#beispiele').querySelectorAll('button').forEach((b) => b.onclick = () => { $('#dlg-hilfe').close(); setze({ q: b.textContent }); });
   $('#f-jahr').onclick = () => jahrMenu();
   document.addEventListener('click', (e) => { if (!$('#f-jahr-box').contains(e.target)) jahrMenu(false); });
+  $('#f-mehr-knopf').onclick = () => { filterMehr = !filterMehr; try { localStorage.setItem('fd.filtermehr', filterMehr ? '1' : ''); } catch {} filterZeigen(parse(S.q)); };
   $('#f-konto').onchange = (e) => setze({ konto: e.target.value });
   $('#f-kat').onchange = (e) => setze({ kat: e.target.value, ukat: '' });
   $('#f-umb').onchange = (e) => setze({ umb: e.target.checked });
@@ -2348,6 +2508,11 @@ function events() {
     clearTimeout(breiteT);
     breiteT = setTimeout(() => { const w = $('#tab-inhalt').clientWidth; if (D && S.tab === 'uebersicht' && Math.abs(w - breiteAlt) > 20) { breiteAlt = w; tabelle(parse(S.q)); } }, 150);
   }).observe($('#tab-inhalt'));
+  let flussT, flussAlt = 0;
+  new ResizeObserver(() => {
+    clearTimeout(flussT);
+    flussT = setTimeout(() => { const w = $('#geldfluss').clientWidth; if (D && S.tab === 'start' && Math.abs(w - flussAlt) > 20) { flussAlt = w; geldfluss(parse(S.q)); } }, 150);
+  }).observe($('#geldfluss'));
   matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => themeSetzen());
 }
 
