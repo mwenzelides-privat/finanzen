@@ -1344,3 +1344,14 @@ button.ue-kz:hover { background: var(--surface-2); }
 .fix-zk { overflow-x: hidden; }
 @media (max-width: 640px) { .zk-s small { display: none; } }
 .ab-v { max-width: 100%; white-space: normal; text-align: left; }
+
+/* Handy und kleine Fenster: Startseite normal untereinander und scrollbar – die Ein-Seiten-Regeln gelten nur am PC */
+@media (max-width: 900px), (max-height: 500px) {
+  .ue, .uem { height: auto !important; min-height: 0 !important; grid-template-rows: none !important; }
+  .ue-mitte, .ue-unten, .uem-haupt, .uem-unten { grid-template-columns: 1fr !important; min-height: 0; }
+  .ue-karte { overflow: visible; }
+  .ue-chart { flex: none !important; height: 260px; }
+  .ue-kat, .ue-termine, .ue-blick, .uem-auswahl { overflow: visible; flex: none; }
+  .uem-schnell { display: flex !important; flex-wrap: wrap; }
+  body.ue-modus main { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
+}
