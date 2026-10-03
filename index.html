@@ -21,6 +21,7 @@
 <body>
   <header class="top">
     <div class="brand"><img src="icons/icon.svg" alt="" width="26" height="26"><span>Finanzen</span></div>
+    <button class="btn sm kopf-zurueck" id="btn-zurueck" title="Zurück: die letzte Aktion rückgängig machen (auch Maustaste „Zurück“ oder Alt + ←)" hidden><svg viewBox="0 0 24 24" aria-hidden="true" width="16" height="16"><path d="M15 18l-6-6 6-6"/></svg><span>Zurück</span></button>
     <nav class="nav" id="tabs" role="tablist" aria-label="Bereiche" hidden>
       <button role="tab" data-tab="start"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/></svg><span>Übersicht</span></button>
       <button role="tab" data-tab="kennzahlen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Kennzahlen</span></button>
@@ -73,7 +74,7 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6 7.5V19l-4 1.5v-8z"/></svg><span>Filter</span><span class="f-zahl" id="f-mehr-n" hidden></span>
           <svg class="pfeil-unten" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
         <div class="filter-mehr" id="f-mehr" hidden>
-        <select id="f-konto" aria-label="Konto"></select>
+        <div id="f-konto-wahl" class="kw-platz"></div>
         <select id="f-kat" aria-label="Kategorie"></select>
         <div class="seg" id="f-art" role="group" aria-label="Art">
           <button data-v="alle">Alle</button><button data-v="aus">Ausgaben</button><button data-v="ein">Einnahmen</button>
