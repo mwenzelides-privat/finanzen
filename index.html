@@ -89,6 +89,7 @@
       </div>
       <div class="jahre monate" id="monate" role="group" aria-label="Monate wählen"></div>
       <div class="chips" id="chips"></div>
+      <div class="schnell" id="schnell" hidden></div>
       </div>
 
       <div class="kpis" id="kpis"></div>
@@ -125,39 +126,7 @@
         </div>
       </div>
       </div>
-      <div class="seite" id="seite-kennzahlen" hidden>
-      <div class="card schnitt-card">
-        <div class="card-h"><h2>Durchschnitt und Quoten</h2><span class="hint" id="h-schnitt"></span></div>
-        <div class="schnitt" id="schnitt"></div>
-      </div>
-      <div class="grid2 zwei">
-        <div class="card">
-          <div class="card-h"><h2>Wohin das Geld geht</h2><span class="hint" id="h-wohin"></span></div>
-          <div class="wohin" id="wohin"></div>
-        </div>
-        <div class="card">
-          <div class="card-h"><h2 id="t-jahre">Monatsdurchschnitt je Jahr</h2><span class="hint" id="h-jahre"></span>
-            <button class="icon-btn sm" data-bild="c-jahre" title="Grafik als Bild speichern"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg></button></div>
-          <div class="chart"><canvas id="c-jahre"></canvas></div>
-        </div>
-      </div>
-      <div class="grid2 zwei">
-        <div class="card">
-          <div class="card-h"><h2 id="t-ergebnis">Überschuss / Fehlbetrag</h2><span class="hint" id="h-ergebnis"></span>
-            <button class="icon-btn sm" data-bild="c-ergebnis" title="Grafik als Bild speichern"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg></button></div>
-          <div class="chart"><canvas id="c-ergebnis"></canvas></div>
-        </div>
-        <div class="card">
-          <div class="card-h"><h2 id="t-top">Größte Empfänger</h2><span class="hint" id="h-top"></span>
-            <button class="icon-btn sm" data-bild="c-top" title="Grafik als Bild speichern"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg></button></div>
-          <div class="chart" id="chart-top"><canvas id="c-top"></canvas></div>
-        </div>
-      </div>
-      <div class="card kat-schnitt-card">
-        <div class="card-h"><h2 id="t-katschnitt">Kategorien: Anteil und Durchschnitt</h2><span class="hint" id="h-katschnitt"></span></div>
-        <div id="kat-schnitt"></div>
-      </div>
-      </div>
+      <div class="seite" id="seite-kennzahlen" hidden><div id="k2"></div></div>
 
       <div class="card tabelle-card" id="tabelle-card">
         <div class="card-h">

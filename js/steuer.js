@@ -345,7 +345,11 @@ export function steuerZeigen(el, c) {
   const ring = `<svg class="st-ring" viewBox="0 0 84 84" aria-hidden="true"><circle cx="42" cy="42" r="${RR}" class="st-ring-spur"/>
     ${anteil > 0 ? `<circle cx="42" cy="42" r="${RR}" class="st-ring-wert" stroke-dasharray="${(U * anteil).toFixed(1)} ${U.toFixed(1)}" transform="rotate(-90 42 42)"/>` : ''}
     <text x="42" y="47" text-anchor="middle">${Math.round(anteil * 100)} %</text></svg>`;
-  let h = `<div class="st-kopf">
+  const Oj = offiziell(jahr);
+  const antwort = `${jahr}: ${zuGruppen ? `<b>${zuGruppen}</b> ${zuGruppen === 1 ? 'Entscheidung' : 'Entscheidungen'} offen` : '<b>alles entschieden</b>'}${Oj?.ergebnis?.est != null
+    ? ` · laut ${esc(offName(Oj))}: Steuer <b>${EUR0.format(Oj.ergebnis.est)}</b>${Oj.ergebnis.erstattung != null ? `, ${Oj.ergebnis.erstattung >= 0 ? 'Erstattung' : 'Nachzahlung'} <b class="${Oj.ergebnis.erstattung >= 0 ? 'pos' : 'neg'}">${EUR0.format(Math.abs(Oj.ergebnis.erstattung))}</b>` : ''}` : ''}.`;
+  let h = `<div class="sk-kopf"><div class="sk-kopf-t"><h1>Steuer</h1><p class="sk-antwort">${antwort}</p></div></div>
+  <div class="st-kopf">
     <div class="seg st-jahre">${jahre.map((y) => `<button data-sjahr="${y}" class="${y === jahr ? 'an' : ''}">${y}</button>`).join('')}</div>
     <div class="st-held">
       <div class="st-stand">${ring}<div><b>${zuGruppen ? `${zuGruppen} ${zuGruppen === 1 ? 'Entscheidung' : 'Entscheidungen'} offen` : 'Alles entschieden'}</b>
@@ -444,7 +448,7 @@ function offKachel(j) {
     f.zve != null ? `<div><span>zu versteuerndes Einkommen</span><b>${zahl(f.zve)}</b></div>` : '',
     O.veranlagung ? `<div><span>Veranlagung</span><b class="klein-b">${esc(O.veranlagung)}</b></div>` : '',
   ].join('');
-  return `<details class="st-off" open><summary><b>${esc(O.titel || offName(O))}</b> <span class="muted klein">· ${esc(O.untertitel || '')}</span></summary>
+  return `<details class="st-off"><summary><b>${esc(O.titel || offName(O))}</b> <span class="muted klein">· ${esc(O.untertitel || '')} · <span class="link">alle Zahlen und Hinweise</span></span></summary>
     <div class="st-off-kopf">${kopf}</div>
     ${O.zahlen?.length ? `<table class="st-off-t">${O.zahlen.map((z) => `<tr class="${z.sum ? 'sum' : ''}"><td>${esc(z.t)}</td><td class="r">${zahl(z.b)}</td><td class="muted">${esc(z.h || '')}</td></tr>`).join('')}</table>` : ''}
     ${O.hinweise?.length ? `<div class="st-off-h"><b>Was daraus folgt</b><ul class="st-off-l">${O.hinweise.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>` : ''}

@@ -203,6 +203,19 @@ export async function driveLaden(aktuell) {
   return v;
 }
 
+// Dateien, die im Eingang (Google Drive › 10 Finanzen › Eingang) auf den PC warten – übernommene liegen in „verarbeitet“
+export async function eingangDateien() {
+  const ordner = async (name, parent) => {
+    const q = encodeURIComponent(`name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parent ? ` and '${parent}' in parents` : ''}`);
+    return (await (await api(`${API}?q=${q}&spaces=drive&pageSize=5&fields=files(id)`)).json()).files?.[0]?.id;
+  };
+  const fin = await ordner('10 Finanzen'), ein = fin && (await ordner('Eingang', fin));
+  if (!ein) return null;
+  const q = encodeURIComponent(`'${ein}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'`);
+  const r = await api(`${API}?q=${q}&spaces=drive&orderBy=modifiedTime desc&pageSize=50&fields=files(name,modifiedTime,createdTime)`);
+  return ((await r.json()).files || []).filter((f) => !/^(desktop\.ini|\.)/i.test(f.name));
+}
+
 // Nur auf dem eigenen Rechner zum Testen: Daten aus dem Ordner daten/ (nie im Repository)
 export async function lokalLaden() {
   const r = await fetch('daten/' + CONFIG.dataFileName, { cache: 'no-store' });
