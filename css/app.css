@@ -1864,7 +1864,8 @@ button.kl-summe { cursor: pointer; }
 button.kl-summe:hover { background: var(--surface-2); }
 .gb-t[data-springe] { cursor: pointer; }
 .gb-t[data-springe]:hover { filter: brightness(1.08); }
-.s5-karte, .s5-details, .fv-g { scroll-margin-top: 84px; }
+/* Sprungziele nicht unter der festen Kopfzeile verstecken */
+.s5-karte, .s5-details, .fv-g, .vg, .vgs, .ko, main [id] { scroll-margin-top: 84px; }
 @keyframes blink5 { 0%, 60% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 3px transparent; } }
 .blink { animation: blink5 1.8s ease-out; }
 tr.blink td { animation: blink5td 1.8s ease-out; }
@@ -1897,7 +1898,8 @@ tr.blink td { animation: blink5td 1.8s ease-out; }
 .vg-summe { padding: 8px 12px 0; border-top: 1.5px solid var(--border-strong); font-weight: 700; }
 .vg-summe b { text-align: right; font-size: 16px; }
 .vg-summe span:last-child { text-align: right; font-size: 12.5px; color: var(--muted); }
-.vg.blink { animation: blink5 1.8s ease-out; }
+.vg.blink { animation: blink5 2.2s ease-out; }
+.vg.blink .vg-k { animation: blink5td 2.2s ease-out; }
 /* Wofür: ein Balken = 100 % Fixkosten, darunter die Arten */
 .wf5-b { display: flex; height: 22px; border-radius: 6px; overflow: hidden; gap: 2px; background: var(--surface); }
 .wf5-b i { min-width: 3px; cursor: pointer; }

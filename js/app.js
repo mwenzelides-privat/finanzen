@@ -1603,11 +1603,11 @@ function tabFixkosten() {
   const termine = naechsteTermine(aktiv), tSumme = termine.reduce((t, x) => t + x.f.betrag, 0);
   const jaehrl = aktiv.filter((f) => f.rh.proJahr < 12);
   const vertrZiel = S.fixtab === 'vertraege' ? (sel) => ({ springe: sel }) : () => ({ ziel: { fixtab: 'vertraege' } });
-  const vz = (inhalt, sel = '.fix5 .fv') => (S.fixtab === 'vertraege' ? zs(inhalt, sel) : zl(inhalt, { fixtab: 'vertraege' }));
+  const vz = (inhalt, sel = '.fix5 .vgs') => (S.fixtab === 'vertraege' ? zs(inhalt, sel) : zl(inhalt, { fixtab: 'vertraege' }));
   const satz = `Von deinem Gehalt (${zl(`<b>${eur0(G)}</b>`, zuGehalt())}) sind ${vz(`<b>${eur0(pm)}</b>`)} im Monat fest verplant – <b class="${pm <= G * 0.5 ? 'pos' : 'neg'}">${pct(pm)}</b>${pm > G * 0.5 ? ' (Faustregel: höchstens 50 %)' : ''}.
     ${rest >= 0 ? 'Nach' : 'Mit'} Lebenshaltung (${S.fixtab === 'vertraege' ? zs(eur0(L), '#fix-leben') : zl(eur0(L), { fixtab: 'vertraege', _springe: '#fix-leben' })}) und sonstigen Einnahmen (${zl(`+${eur0(R.sonst)}`, { tab: 'uebersicht', kart: 'ein', wahl: '', jahr: '' })}) ${rest >= 0 ? 'bleiben' : 'fehlen'} ${zl(`<b class="${rest >= 0 ? 'pos' : 'neg'}">${eur0(Math.abs(rest))}</b>`, { tab: 'start' })} im Monat.`;
   const zahlen = [
-    zahl5('Fixkosten im Monat', eur0(pm), `${aktiv.length} laufende Verträge · jährliche anteilig · Liste ↓`, vertrZiel('.fix5 .fv')),
+    zahl5('Fixkosten im Monat', eur0(pm), `${aktiv.length} laufende Verträge · jährliche anteilig · Liste ↓`, vertrZiel('.fix5 .vgs')),
     zahl5('Anteil am Gehalt', pct(pm), `von ${eur0(G)} netto (${monKurz(R.gehaltMonat)}) · Faustregel höchstens 50 % · Gehälter →`, { cls: pm <= G * 0.5 ? 'pos' : 'neg', ziel: zuGehalt() }),
     zahl5('Fixkosten im Jahr', eur0(pm * 12), jaehrl.length ? `davon ${eur0(jaehrl.reduce((t, f) => t + f.proJahr, 0))} nicht monatlich (${jaehrl.length} Verträge) · Kalender →` : 'alles monatlich', { ziel: { fixtab: 'kalender' } }),
     zahl5('Nächste 30 Tage', eur0(tSumme), `${termine.length} feste Abbuchungen · Kalender ansehen`, { ziel: { fixtab: 'kalender' } }),
