@@ -389,6 +389,9 @@ const STATUS = {
 };
 
 // ---------------------------------------------------------------- Anzeige
+// Gleiches Muster wie die übrigen Seiten: Antwortsatz, vier Kennzahlen, dann „Was du geltend machen kannst“ neben den
+// offiziellen Unterlagen, darunter die Entscheidungen (Abschnitt → Posten → Empfänger).
+const kachel = (t, w, u, { cls = '', id = '', knopf = '' } = {}) => `<${id ? `button id="${id}"` : 'div'} class="s5-z${id ? ' klick' : ''}"><span class="s5-z-t">${t}</span><b class="s5-z-w ${cls}">${w}</b><span class="s5-z-u">${u}</span>${knopf}</${id ? 'button' : 'div'}>`;
 export function steuerZeigen(el, c) {
   ctx = c;
   const jahre = [...new Set(D.rows.map((r) => r.y))].sort((a, b) => b - a).slice(0, 8);
@@ -404,59 +407,68 @@ export function steuerZeigen(el, c) {
   const klar = alle.filter((x) => x.klar);
   const imAbschnitt = (x) => !abschnittF || POSTEN_ID.get(x.p).abschnitt === abschnittF;
   const sichtbar = alle.filter((x) => imAbschnitt(x) && (filter === 'alle' || (filter === 'zu' ? ZU.includes(x.status) : istFertig(x))));
+  const O = offiziell(jahr), erg = O?.ergebnis || {};
 
-  // Fortschritt als Ring
-  const anteil = gesamtG ? fertigG / gesamtG : 1, RR = 34, U = 2 * Math.PI * RR;
-  const ring = `<svg class="st-ring" viewBox="0 0 84 84" aria-hidden="true"><circle cx="42" cy="42" r="${RR}" class="st-ring-spur"/>
-    ${anteil > 0 ? `<circle cx="42" cy="42" r="${RR}" class="st-ring-wert" stroke-dasharray="${(U * anteil).toFixed(1)} ${U.toFixed(1)}" transform="rotate(-90 42 42)"/>` : ''}
-    <text x="42" y="47" text-anchor="middle">${Math.round(anteil * 100)} %</text></svg>`;
-  const Oj = offiziell(jahr);
-  const antwort = `${jahr}: ${zuGruppen ? `<b>${zuGruppen}</b> ${zuGruppen === 1 ? 'Entscheidung' : 'Entscheidungen'} offen` : '<b>alles entschieden</b>'}${Oj?.ergebnis?.est != null
-    ? ` · laut ${esc(offName(Oj))}: Steuer <b>${EUR0.format(Oj.ergebnis.est)}</b>${Oj.ergebnis.erstattung != null ? `, ${Oj.ergebnis.erstattung >= 0 ? 'Erstattung' : 'Nachzahlung'} <b class="${Oj.ergebnis.erstattung >= 0 ? 'pos' : 'neg'}">${EUR0.format(Math.abs(Oj.ergebnis.erstattung))}</b>` : ''}` : ''}.`;
-  let h = `<div class="sk-kopf"><div class="sk-kopf-t"><h1>Steuer</h1><p class="sk-antwort">${antwort}</p></div></div>
-  <div class="st-kopf">
-    <div class="seg st-jahre">${jahre.map((y) => `<button data-sjahr="${y}" class="${y === jahr ? 'an' : ''}">${y}</button>`).join('')}</div>
-    <div class="st-held">
-      <div class="st-stand">${ring}<div><b>${zuGruppen ? `${zuGruppen} ${zuGruppen === 1 ? 'Entscheidung' : 'Entscheidungen'} offen` : 'Alles entschieden'}</b>
-        <span class="muted">${fertigG} von ${gesamtG} erledigt · Zahlungen an denselben Empfänger sind eine Entscheidung und gelten für alle Jahre</span></div></div>
-      <div class="st-held-knoepfe">
-        ${zu.length ? `<button class="btn primary st-los" id="st-pruefen" title="Eine Entscheidung nach der anderen – Tastatur: Enter = ja, X = nein">Jetzt durchgehen →</button>` : ''}
-        ${klar.length ? `<button class="btn" id="st-klar" title="Schließt aus, was eindeutig nicht absetzbar ist: Restaurants und Imbisse unter „Übernachtungen“, Einkäufe im Bau- oder Gartenmarkt unter „Handwerker“, Urlaub unter „Kinderbetreuung“. Mit Rückgängig.">${klar.length} eindeutige Fälle ausschließen</button>` : ''}
-      </div>
-      <div class="st-export"><span class="muted klein">Für die Steuerberaterin</span>
-        <div class="st-export-k"><button class="btn sm${zu.length ? '' : ' primary'}" id="st-pdf">PDF</button><button class="btn sm" id="st-xlsx">Excel</button></div>
-        <div class="klein muted"><button class="link" id="st-sichern" title="Deine Entscheidungen als Datei sichern">Sicherung speichern</button> · <button class="link" id="st-laden" title="Gesicherte Entscheidungen laden">laden</button></div></div>
-    </div>
-  </div>`;
-
-  h += offKachel(jahr);
   // Was du geltend machen kannst: je Abschnitt ein Balken, bei den Werbungskosten mit dem Pauschbetrag als Marke
   const abs = ABSCHNITTE.filter((a) => a.id !== 'einnahmen').map((a) => {
     const xs = wirksam.filter((x) => POSTEN_ID.get(x.p).abschnitt === a.id);
     return { a, xs, betrag: -summe(xs), offen: arbeitsGruppen(xs.filter((x) => ZU.includes(x.status))).length };
   }).filter((x) => x.xs.length);
+  const geltend = abs.reduce((t, x) => t + Math.max(0, x.betrag), 0);
+
+  // Antwort in einem Satz
+  const anteil = gesamtG ? fertigG / gesamtG : 1;
+  let satz = `${jahr}: ${zuGruppen ? `<b>${zuGruppen}</b> ${zuGruppen === 1 ? 'Entscheidung ist' : 'Entscheidungen sind'} noch offen` : '<b>alles entschieden</b>'}`;
+  satz += erg.est != null ? ` – laut ${esc(offName(O))} beträgt die Einkommensteuer <b>${EUR0.format(erg.est)}</b>${erg.erstattung != null ? `, ${erg.erstattung >= 0 ? 'Erstattung' : 'Nachzahlung'} <b class="${erg.erstattung >= 0 ? 'pos' : 'neg'}">${EUR0.format(Math.abs(erg.erstattung))}</b>` : ''}.`
+    : `. Laut Kontoauszügen kommen <b>${eur0(geltend)}</b> an absetzbaren Ausgaben in Frage.`;
+  satz += ' <span class="muted">Orientierung, keine Steuerberatung.</span>';
+
+  const zahlen = [
+    kachel('Offene Entscheidungen', zuGruppen ? String(zuGruppen) : '0', zuGruppen ? 'Jetzt durchgehen → eine nach der anderen (Enter = ja, X = nein)' : 'alles entschieden', { cls: zuGruppen ? 'neg' : 'pos', id: zuGruppen ? 'st-pruefen' : '' }),
+    kachel('Erledigt', `${Math.round(anteil * 100)} %`, `${fertigG} von ${gesamtG} · gleicher Empfänger = eine Entscheidung, gilt für alle Jahre`, { cls: anteil >= 1 ? 'pos' : '' }),
+    erg.erstattung != null ? kachel(erg.erstattung >= 0 ? 'Erstattung' : 'Nachzahlung', EUR0.format(Math.abs(erg.erstattung)), `laut ${esc(offName(O))}${erg.est != null ? ` · Steuer ${EUR0.format(erg.est)}` : ''}`, { cls: erg.erstattung >= 0 ? 'pos' : 'neg' })
+      : kachel('Absetzbar laut Konten', eur0(geltend), O ? `laut ${esc(offName(O))} siehe rechts` : 'Summe der Abschnitte unten · noch ohne Bescheid'),
+    `<div class="s5-z"><span class="s5-z-t">Für die Steuerberaterin</span><div class="st-export-k"><button class="btn sm${zu.length ? '' : ' primary'}" id="st-pdf">PDF</button><button class="btn sm" id="st-xlsx">Excel</button></div>
+      <span class="s5-z-u"><button class="link klein" id="st-sichern" title="Deine Entscheidungen als Datei sichern">Sicherung speichern</button> · <button class="link klein" id="st-laden" title="Gesicherte Entscheidungen laden">laden</button></span></div>`,
+  ].join('');
+
+  let geltendHtml = '<div class="leer klein">Keine steuerlich relevanten Ausgaben in diesem Jahr.</div>';
   if (abs.length) {
-    const O = offiziell(jahr), offB = (id) => (O?.abschnitte?.[id]?.b != null ? Math.round(O.abschnitte[id].b * 100) : null);
+    const offB = (id) => (O?.abschnitte?.[id]?.b != null ? Math.round(O.abschnitte[id].b * 100) : null);
     const maxB = Math.max(1, ...abs.map((x) => Math.max(x.betrag, offB(x.a.id) || 0)), abs.some((x) => x.a.id === 'wk') ? pausch(jahr) : 0);
     const w = (v) => (Math.max(0, v) / maxB) * 100;
-    h += `<div class="st-geltend"><div class="st-geltend-t"><b>Was du ${jahr} geltend machen kannst</b> <span class="muted klein">· laut Kontoauszügen, Offenes mitgezählt${O ? ' · <i class="st-offmarke-i"></i> = Betrag laut Unterlagen' : ''} · anklicken: nur diesen Bereich zeigen</span></div>
-      ${abs.map((x) => `<button class="st-ab${abschnittF === x.a.id ? ' an' : ''}" data-sabf="${abschnittF === x.a.id ? '' : x.a.id}">
+    geltendHtml = abs.map((x) => `<button class="st-ab${abschnittF === x.a.id ? ' an' : ''}" data-sabf="${abschnittF === x.a.id ? '' : x.a.id}">
         <span class="st-ab-n">${esc(x.a.name)}${x.offen ? ` <span class="st-offen">${x.offen} offen</span>` : ''}</span>
         <span class="st-ab-balken"><i style="width:${w(x.betrag)}%"></i>${x.a.id === 'wk' ? `<b class="st-pausch" style="left:${w(pausch(jahr))}%" title="Arbeitnehmer-Pauschbetrag ${eur(pausch(jahr))}"></b>` : ''}${offB(x.a.id) != null ? `<b class="st-offmarke" style="left:${w(offB(x.a.id))}%" title="laut ${esc(offName(O))}: ${eur(offB(x.a.id))}"></b>` : ''}</span>
         <span class="st-ab-b">${eur0(x.betrag)}</span>
-        <span class="st-ab-w">${offB(x.a.id) != null ? `<span class="st-offiz">laut ${esc(offName(O))}: ${eur0(offB(x.a.id))}${O.abschnitte[x.a.id].t ? ` – ${esc(O.abschnitte[x.a.id].t)}` : ''}</span>` : wirkung(x)}</span></button>`).join('')}
-    </div>`;
+        <span class="st-ab-w">${offB(x.a.id) != null ? `<span class="st-offiz">laut ${esc(offName(O))}: ${eur0(offB(x.a.id))}${O.abschnitte[x.a.id].t ? ` – ${esc(O.abschnitte[x.a.id].t)}` : ''}</span>` : wirkung(x)}</span></button>`).join('');
   }
 
   const knopf = (v, t) => `<button data-sfilter="${v}" class="${filter === v ? 'an' : ''}">${t}</button>`;
   const aName = abschnittF && ABSCHNITTE.find((x) => x.id === abschnittF)?.name;
-  h += `<div class="st-leiste"><div class="seg st-filter">${knopf('zu', `Offen (${zuGruppen})`)}${knopf('erledigt', `Erledigt (${fertigG})`)}${knopf('alle', 'Alle')}</div>
+  const leiste = `<div class="st-leiste"><div class="seg st-filter">${knopf('zu', `Offen (${zuGruppen})`)}${knopf('erledigt', `Erledigt (${fertigG})`)}${knopf('alle', 'Alle')}</div>
     ${aName ? `<button class="chip" data-sabf="">nur ${esc(aName)}<span class="x">×</span></button>` : ''}
-    <span class="muted klein st-leiste-hinweis">Orientierung, keine Steuerberatung.</span></div>`;
+    ${klar.length ? `<button class="btn sm" id="st-klar" title="Schließt aus, was eindeutig nicht absetzbar ist: Restaurants und Imbisse unter „Übernachtungen“, Einkäufe im Bau- oder Gartenmarkt unter „Handwerker“, Urlaub unter „Kinderbetreuung“. Mit Rückgängig.">${klar.length} eindeutige Fälle ausschließen</button>` : ''}</div>`;
+
+  let h = `<div class="s5 st5">
+    <div class="s5-kopf"><div class="s5-kopf-t"><h1>Steuer</h1><p class="s5-satz">${satz}</p></div>
+      <div class="s5-kopf-r"><div class="seg st-jahre">${jahre.map((y) => `<button data-sjahr="${y}" class="${y === jahr ? 'an' : ''}">${y}</button>`).join('')}</div></div></div>
+    <div class="s5-zahlen">${zahlen}</div>
+    <div class="s5-raster st5-oben">
+      <section class="card s5-karte s5-b2"><div class="s5-kt"><div class="s5-kt-t"><h2>Was du ${jahr} geltend machen kannst</h2>
+        <p class="s5-erkl">laut Kontoauszügen, Offenes mitgezählt${O ? ' · Marke = Betrag laut Unterlagen' : ''} · Strich bei den Werbungskosten = Pauschbetrag · anklicken: nur diesen Bereich zeigen</p></div></div>
+        <div class="st-geltend5">${geltendHtml}</div></section>
+      ${offKarte(jahr)}
+    </div>
+    <section class="card s5-karte st5-liste" id="st-entscheidungen"><div class="s5-kt"><div class="s5-kt-t"><h2>Entscheidungen</h2>
+      <p class="s5-erkl">nach Abschnitt und Posten · Zahlungen an denselben Empfänger sind eine Zeile · ✓ Ja = absetzbar, ✕ Nein = nicht relevant · Zeile anklicken: Einzelheiten</p></div></div>
+      ${leiste}`;
 
   if (!sichtbar.length) {
     const fertig = filter === 'zu' && wirksam.length;
-    return (el.innerHTML = h + `<div class="leer">${fertig ? `Alles entschieden${aName ? ` in „${esc(aName)}“` : ''}. Jetzt „PDF“ oder „Excel“ für die Steuerberaterin erstellen.` : 'Keine Buchungen in dieser Auswahl.'}</div>`), binden(el);
+    h += `<div class="leer">${fertig ? `Alles entschieden${aName ? ` in „${esc(aName)}“` : ''}. Jetzt „PDF“ oder „Excel“ für die Steuerberaterin erstellen.` : 'Keine Buchungen in dieser Auswahl.'}</div></section></div>`;
+    el.innerHTML = h;
+    return binden(el);
   }
 
   // Liste: Abschnitt → Posten → Buchungen
@@ -481,44 +493,46 @@ export function steuerZeigen(el, c) {
           ${offenP ? `<button class="link klein" data-salle="${p.id}">alle ${offenP} bestätigen</button>` : ''}<span class="betrag">${eur(a.id === 'einnahmen' ? psum : -psum)}</span></div>`;
         for (const g of gr) {
           if (g.length === 1) { h += zeileHtml(g[0]); continue; }
-          const auf = gruppeOffen.has(gKey(g[0]));
-          h += gruppeHtml(g, auf);
-          if (auf) h += `<div class="st-gruppe-einzeln">${g.map(zeileHtml).join('')}</div>`;
+          const auf2 = gruppeOffen.has(gKey(g[0]));
+          h += gruppeHtml(g, auf2);
+          if (auf2) h += `<div class="st-gruppe-einzeln">${g.map(zeileHtml).join('')}</div>`;
         }
         h += '</div>';
       }
     }
     h += '</div>';
   }
-  h += '</div>';
+  h += '</div></section></div>';
   el.innerHTML = h;
   binden(el);
 }
 
-// Offizielle Zahlen eines Jahres: Ergebnis, Eckdaten, Hinweise des Finanzamts bzw. der Steuerberaterin; ohne Unterlagen: was die Vorjahre lehren
-function offKachel(j) {
+// Offizielle Unterlagen eines Jahres als Karte: Eckdaten, Zahlen und Hinweise; ohne Unterlagen: was die Vorjahre lehren
+function offKarte(j) {
   const O = offiziell(j);
   const zahl = (b) => (b == null ? '–' : EUR0.format(b));
   if (!O) {
     const vj = offJahre().filter((y) => y < j);
     const L = D?.j?.steuer_offiziell?.kuenftig || [];
-    if (!vj.length || !L.length) return '';
-    return `<details class="st-off" open><summary><b>Was die Steuererklärungen ${vj[0]}–${vj.at(-1)} für ${j} bedeuten</b> <span class="muted klein">· ${L.length} Punkte</span></summary>
-      <ul class="st-off-l">${L.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></details>`;
+    if (!vj.length || !L.length) return `<section class="card s5-karte"><div class="s5-kt"><div class="s5-kt-t"><h2>Unterlagen</h2><p class="s5-erkl">Für ${j} liegen noch keine Bescheide oder Erklärungen vor.</p></div></div></section>`;
+    return `<section class="card s5-karte"><div class="s5-kt"><div class="s5-kt-t"><h2>Was die Vorjahre für ${j} bedeuten</h2><p class="s5-erkl">aus den Steuererklärungen ${vj[0]}–${vj.at(-1)}</p></div></div>
+      <ul class="st-off-l">${L.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></section>`;
   }
   const f = O.ergebnis || {};
-  const kopf = [
+  const eck = [
     f.est != null ? `<div><span>Einkommensteuer</span><b>${zahl(f.est)}</b></div>` : '',
     f.erstattung != null ? `<div><span>${f.erstattung >= 0 ? 'Erstattung' : 'Nachzahlung'}</span><b class="${f.erstattung >= 0 ? 'pos' : 'neg'}">${zahl(Math.abs(f.erstattung))}</b></div>` : '',
-    f.zve != null ? `<div><span>zu versteuerndes Einkommen</span><b>${zahl(f.zve)}</b></div>` : '',
+    f.zve != null ? `<div><span>zu versteuern</span><b>${zahl(f.zve)}</b></div>` : '',
     O.veranlagung ? `<div><span>Veranlagung</span><b class="klein-b">${esc(O.veranlagung)}</b></div>` : '',
   ].join('');
-  return `<details class="st-off"><summary><b>${esc(O.titel || offName(O))}</b> <span class="muted klein">· ${esc(O.untertitel || '')} · <span class="link">alle Zahlen und Hinweise</span></span></summary>
-    <div class="st-off-kopf">${kopf}</div>
-    ${O.zahlen?.length ? `<table class="st-off-t">${O.zahlen.map((z) => `<tr class="${z.sum ? 'sum' : ''}"><td>${esc(z.t)}</td><td class="r">${zahl(z.b)}</td><td class="muted">${esc(z.h || '')}</td></tr>`).join('')}</table>` : ''}
-    ${O.hinweise?.length ? `<div class="st-off-h"><b>Was daraus folgt</b><ul class="st-off-l">${O.hinweise.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>` : ''}
-    <div class="muted klein">Quelle: ${esc(O.quelle || '')}. Buchungen, die zu den Unterlagen passen, sind automatisch entschieden (✓ angesetzt bzw. ✕ nicht angesetzt) – deine eigenen Entscheidungen gehen immer vor.</div>
-  </details>`;
+  return `<section class="card s5-karte st5-off"><div class="s5-kt"><div class="s5-kt-t"><h2>${esc(O.titel || offName(O))}</h2><p class="s5-erkl">${esc(O.untertitel || '')}</p></div></div>
+    <div class="kd-stats st5-eck">${eck}</div>
+    ${O.hinweise?.length ? `<div class="st5-h"><b>Was daraus folgt</b><ul class="st-off-l">${O.hinweise.slice(0, 4).map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>` : ''}
+    ${O.zahlen?.length || (O.hinweise?.length || 0) > 4 ? `<details class="st5-mehr"><summary>Alle Zahlen und Hinweise</summary>
+      ${O.zahlen?.length ? `<table class="st-off-t">${O.zahlen.map((z) => `<tr class="${z.sum ? 'sum' : ''}"><td>${esc(z.t)}</td><td class="r">${zahl(z.b)}</td><td class="muted">${esc(z.h || '')}</td></tr>`).join('')}</table>` : ''}
+      ${(O.hinweise?.length || 0) > 4 ? `<ul class="st-off-l">${O.hinweise.slice(4).map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}</details>` : ''}
+    <p class="s5-erkl">Quelle: ${esc(O.quelle || '')}. Buchungen, die zu den Unterlagen passen, sind automatisch entschieden – deine eigenen Entscheidungen gehen immer vor.</p>
+  </section>`;
 }
 
 function zeileHtml(x) {

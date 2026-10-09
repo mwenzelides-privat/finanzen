@@ -1649,8 +1649,9 @@ button.s5-z:hover { border-color: var(--accent); }
 .s5-raster { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
 .s5-b2 { grid-column: span 2; }
 .s5-spalte { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+/* Nebeneinanderstehende Kästen sind immer gleich hoch: die Spalte rechts füllt die Höhe mit ihrer letzten Karte */
 .s5-spalte > .s5-karte { flex: 0 0 auto; }
-.fix5 { align-items: start; }
+.s5-spalte > .s5-karte:last-child { flex: 1 1 auto; }
 .s5-karte { padding: 14px 16px 15px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .s5-kt { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
 .s5-kt-t { min-width: 0; }
@@ -1757,7 +1758,7 @@ button.bl-z:hover { background: var(--surface-2); }
 .vd-n small { display: block; font-size: 11.5px; color: var(--muted); }
 .vd-z b { white-space: nowrap; }
 /* Kategorien: Liste und Einzelheiten */
-.kl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.kl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: stretch; }
 .kl-liste { gap: 2px; }
 .kl-liste .s5-kt { margin-bottom: 6px; }
 .kl-z, .kl-summe { display: grid; grid-template-columns: minmax(100px, 1.3fr) minmax(50px, 1fr) 74px 44px 66px; gap: 8px; align-items: center; padding: 5px 6px; border: 0; background: none; border-radius: 7px; text-align: left; font: inherit; font-size: 13.5px; color: inherit; width: 100%; }
@@ -1773,7 +1774,7 @@ button.bl-z:hover { background: var(--surface-2); }
 .kl-p, .kl-d { text-align: right; font-size: 12.5px; white-space: nowrap; }
 .kl-p { color: var(--muted); }
 .kl-summe { border-top: 1.5px solid var(--border-strong); border-radius: 0; font-weight: 700; margin-top: 4px; padding-top: 8px; }
-.kl-detail { position: sticky; top: calc(var(--kopf, 64px) + 10px); }
+.kl-detail .s5-chart.fuell { max-height: 380px; }   /* die Grafik nimmt die freie Höhe auf, wenn die Liste länger ist */
 .kl-d-kopf { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
 .kl-d-kopf h2 { margin: 0; font-size: 19px; }
 .kl-d-kopf b { font-size: 20px; white-space: nowrap; }
@@ -1930,7 +1931,6 @@ tr.blink td { animation: blink5td 1.8s ease-out; }
 .kg.fremd { border-style: dashed; border-left-style: solid; background: color-mix(in srgb, var(--surface-2) 40%, var(--surface)); }
 .kg.fremd .vg-k { background: transparent; }
 .kg.fremd .vg-w, .kg.fremd .vg-zw { color: var(--text-2); font-weight: 600; }
-.kon5 { align-items: start; }
 .vg-b.leer { background: none; }
 /* Monatsenden */
 .me { display: grid; }
@@ -2042,6 +2042,19 @@ button.vg-summe.kz:hover { background: var(--surface-2); }
   .bz-k small { display: none; }
   .bt-tag { top: 52px; }
 }
+/* Steuer im Muster der anderen Seiten */
+.st5 .st-export-k { display: flex; gap: 6px; margin: 4px 0 2px; }
+.st5 button.s5-z { cursor: pointer; }
+.st5 .s5-z .link { padding: 0; }
+.st-geltend5 { display: grid; gap: 2px; }
+.st5-eck .klein-b { font-size: 12.5px; white-space: normal; }
+.st5-h { font-size: 13px; }
+.st5-h .st-off-l { margin: 4px 0 0; }
+.st5-mehr > summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+.st5-mehr[open] > summary { margin-bottom: 6px; }
+.st5-liste { gap: 8px; }
+.st5-liste .st-leiste { margin: 0; }
+@media (max-width: 640px) { .st5 .st-jahre { flex-wrap: wrap; } }
 @media (max-width: 900px), (max-height: 500px) {
   .ue, .uem { height: auto !important; min-height: 0 !important; grid-template-rows: none !important; }
   .ue-mitte, .ue-unten, .uem-haupt, .uem-unten { grid-template-columns: 1fr !important; min-height: 0; }

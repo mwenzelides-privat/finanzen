@@ -987,7 +987,7 @@ function tabKategorien() {
       ${stat('ggü. Vorjahr', wd == null ? '–' : Math.abs(wd) < 1000 ? '≈ gleich' : plusMinus(wd), wd == null || Math.abs(wd) < 1000 ? '' : (wd > 0) === aus ? 'neg' : 'pos')}
     </div>
     <p class="s5-erkl">${eur0(wahl.c)} ${P.label} · ${NUM.format(wahl.rows.length)} Buchungen${wv != null ? ` · Vorjahr Ø ${eur0(wv)}` : ''}${tipp ? ` · ${tipp}` : ''}</p>
-    <div class="s5-chart klein"><canvas id="c-kat2"></canvas></div>
+    <div class="s5-chart klein fuell"><canvas id="c-kat2"></canvas></div>
     <div class="kl-d-grid">
       ${unter.length > 1 ? `<div class="s5-teil"><h3>Wofür genau</h3>${balkenListe(unter.slice(0, 6).map(([u, c]) => ({ n: esc(schoen(u)), c: c / a.n, p: `${Math.round((c / wahl.c) * 100)} %`, farbe: aus ? 'var(--variabel)' : 'var(--ein)', ziel: zuBuchungen({ art: 'aus', kat: wahl.k, ukat: u === 'ohne Unterkategorie' ? '' : u, ...zeit }) })))}</div>` : ''}
       <div class="s5-teil"><h3>${aus ? 'An wen' : 'Von wem'}</h3>${balkenListe(empf.map(([e, x]) => ({ n: esc(e), sub: `${x.n} Buchungen`, c: x.c / a.n, p: `${Math.round((x.c / wahl.c) * 100)} %`, farbe: 'var(--muted)', ziel: zuBuchungen({ q: `"${e}"`, art: aus ? 'aus' : 'ein', ...zeit }) })))}</div>
