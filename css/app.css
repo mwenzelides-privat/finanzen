@@ -1976,6 +1976,29 @@ button.fl-z:hover { border-color: var(--accent); }
   .jt-z { grid-template-columns: 50px 1fr 1fr 1fr; gap: 6px; font-size: 12.5px; }
   .fl { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 }
+/* Kategorien: Blöcke „überwiegend fest“ / „frei gestaltbar“ wie die Verträge, rechts Einzelheiten */
+.vgs .kz { grid-template-columns: minmax(110px, 1.3fr) minmax(50px, 1fr) 76px 44px 68px; }
+.vg-kopf.kz span:nth-child(n+3) { text-align: right; }
+.vg-kopf.kz span:nth-child(2) { font-weight: 400; }
+.vg-z.kz { border-radius: 0; }
+.vg-z.kz.an { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.vg-k.kz .kl-d { font-weight: 650; }
+.vgs .kz .kl-d { display: block; }   /* Veränderung zum Vorjahr auch auf dem Handy */
+.kb .kl-b i { background: var(--vg); }
+.kb .kl-b b { background: var(--text); }
+button.vg-summe.kz { width: 100%; background: none; border: 0; border-top: 1.5px solid var(--border-strong); font: inherit; font-weight: 700; color: inherit; cursor: pointer; text-align: left; border-radius: 0; margin-top: 2px; }
+button.vg-summe.kz:hover { background: var(--surface-2); }
+.vg-summe.kz > :nth-child(n+3) { text-align: right; }
+.kd-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.kd-stats > div { background: var(--surface-2); border-radius: 9px; padding: 7px 10px; display: grid; gap: 1px; min-width: 0; }
+.kd-stats span { font-size: 11.5px; color: var(--muted); font-weight: 600; }
+.kd-stats b { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kl-d-kopf .zl { font-size: 13px; color: var(--accent); }
+@media (max-width: 640px) {
+  .vgs .kz { grid-template-columns: minmax(0, 1fr) 70px 38px 62px; gap: 6px; }
+  .vgs .kz > .kl-b, .vg-kopf.kz > span:nth-child(2), .vg-k.kz > span:nth-child(2), .vg-summe.kz > span:nth-child(2) { display: none; }
+  .kd-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 @media (max-width: 900px), (max-height: 500px) {
   .ue, .uem { height: auto !important; min-height: 0 !important; grid-template-rows: none !important; }
   .ue-mitte, .ue-unten, .uem-haupt, .uem-unten { grid-template-columns: 1fr !important; min-height: 0; }

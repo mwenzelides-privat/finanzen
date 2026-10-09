@@ -893,6 +893,8 @@ function k5MonateZeichnen(P, a, R) {
 }
 
 // ---------------------------------------------------------------- Kategorien: Wofür geht mein Geld?
+// Ausgaben in zwei Blöcken: überwiegend feste Kosten (mindestens die Hälfte sind Verträge) und frei gestaltbare – dort
+// lässt sich am ehesten sparen. Einnahmen: Gehalt und sonstige. Rechts die Einzelheiten der gewählten Kategorie.
 let kat2Grafik = null;
 function tabKategorien() {
   const P = periode(), aus = S.kart !== 'ein';
@@ -905,46 +907,90 @@ function tabKategorien() {
   const anteil = (c) => Math.round((c / ges) * 100);
   const vorM = (x) => (v ? (v.g.get(x.k)?.c || 0) / v.n : null), dM = (x) => (v ? x.c / a.n - vorM(x) : null);
   const zeit = zeitZiel(P.monate), alleZiel = zuBuchungen({ art: aus ? 'aus' : 'ein', ...zeit });
+  const fx = fixIds();
+  for (const x of liste) x.fest = aus ? x.rows.filter((r) => fx.has(r.i)).reduce((t, r) => t - r.c, 0) : 0;
   const top = liste.slice(0, 3).map((x) => `${zl(`<b>${esc(schoen(x.k))}</b>`, { wahl: x.k })} (${anteil(x.c)} %)`);
   const verb = top.length > 1 ? `${top.slice(0, -1).join(', ')} und ${top.at(-1)}` : top[0];
   const gesZ = zl(`<b>${eur0(ges / a.n)}</b>`, alleZiel);
   let satz = aus ? `${P.label[0].toUpperCase()}${P.label.slice(1)} gingen im Schnitt ${gesZ} im Monat raus – am meisten für ${verb}.`
     : `${P.label[0].toUpperCase()}${P.label.slice(1)} kamen im Schnitt ${gesZ} im Monat herein – vor allem aus ${verb}.`;
+  let s2 = null;
   if (v) {
-    const s2 = [...liste].filter((x) => Math.abs(dM(x)) >= 3000).sort((x, y) => (aus ? dM(y) - dM(x) : dM(x) - dM(y)))[0];
+    s2 = [...liste].filter((x) => Math.abs(dM(x)) >= 3000).sort((x, y) => (aus ? dM(y) - dM(x) : dM(x) - dM(y)))[0];
     if (s2 && (aus ? dM(s2) > 0 : dM(s2) < 0)) satz += ` Am stärksten ${aus ? 'gestiegen' : 'gesunken'}: ${zl(`<b>${esc(schoen(s2.k))}</b>`, { wahl: s2.k })} (<span class="neg">${plusMinus(dM(s2))}</span> im Monat ggü. Vorjahr).`;
+    else s2 = null;
   }
+
+  // Blöcke
+  const bloecke = aus
+    ? [{ titel: 'Überwiegend feste Kosten', erkl: 'mindestens die Hälfte sind Verträge: Unterhalt, Miete, Versicherungen … – kurzfristig kaum veränderbar', farbe: 'var(--fest)', l: liste.filter((x) => x.fest >= x.c * 0.5) },
+      { titel: 'Frei gestaltbar', erkl: 'Einkauf, Freizeit, Anschaffungen … – hier lässt sich am ehesten sparen', farbe: 'var(--variabel)', l: liste.filter((x) => x.fest < x.c * 0.5) }]
+    : [{ titel: 'Gehalt', erkl: 'netto vom Arbeitgeber', farbe: 'var(--ein)', l: liste.filter((x) => x.k === 'Lohn / Gehalt') },
+      { titel: 'Sonstige Einnahmen', erkl: 'Erstattungen, Zinsen, Kapitalerträge, Steuern …', farbe: 'color-mix(in srgb, var(--ein) 55%, var(--surface))', l: liste.filter((x) => x.k !== 'Lohn / Gehalt') }];
+  const festS = aus ? bloecke[0].l.reduce((t, x) => t + x.c, 0) : 0, freiS = aus ? ges - festS : 0;
+
+  const vgesamt = v ? [...v.g.values()].reduce((t, x) => t + Math.max(0, x.c), 0) / v.n : null;
+  const zahlen = aus ? [
+    zahl5('Ausgaben im Monat', eur0(ges / a.n), `Ø ${esc(monatsText(P.monate))}${vgesamt != null ? ` · Vorjahr ${eur0(vgesamt)}` : ''}`, { cls: 'neg', ziel: alleZiel }),
+    zahl5('Davon überwiegend fest', eur0(festS / a.n), `${Math.round((festS / ges) * 100)} % · ${bloecke[0].l.length} Kategorien · Liste ↓`, { springe: '#kb-0' }),
+    zahl5('Davon frei gestaltbar', eur0(freiS / a.n), `${Math.round((freiS / ges) * 100)} % · ${bloecke[1].l.length} Kategorien · Liste ↓`, { springe: '#kb-1' }),
+    s2 ? zahl5('Am stärksten gestiegen', esc(schoen(s2.k)), `${plusMinus(dM(s2))} im Monat ggü. Vorjahr`, { cls: 'neg', ziel: { wahl: s2.k } })
+      : zahl5('Größter Posten', esc(schoen(liste[0].k)), `${eur0(liste[0].c / a.n)} im Monat · ${anteil(liste[0].c)} %`, { ziel: { wahl: liste[0].k } }),
+  ].join('') : [
+    zahl5('Einnahmen im Monat', eur0(ges / a.n), `Ø ${esc(monatsText(P.monate))}${vgesamt != null ? ` · Vorjahr ${eur0(vgesamt)}` : ''}`, { cls: 'pos', ziel: alleZiel }),
+    zahl5('Davon Gehalt', eur0(bloecke[0].l.reduce((t, x) => t + x.c, 0) / a.n), `${Math.round((bloecke[0].l.reduce((t, x) => t + x.c, 0) / ges) * 100)} % der Einnahmen`, { ziel: { wahl: 'Lohn / Gehalt' } }),
+    zahl5('Davon sonstige', eur0(bloecke[1].l.reduce((t, x) => t + x.c, 0) / a.n), `${bloecke[1].l.length} Quellen · Liste ↓`, { springe: '#kb-1' }),
+    zahl5('Größte sonstige Quelle', bloecke[1].l[0] ? esc(schoen(bloecke[1].l[0].k)) : '–', bloecke[1].l[0] ? `${eur0(bloecke[1].l[0].c / a.n)} im Monat` : '', bloecke[1].l[0] ? { ziel: { wahl: bloecke[1].l[0].k } } : {}),
+  ].join('');
+
   const wahl = liste.find((x) => x.k === S.wahl) || liste[0];
   const max = Math.max(liste[0].c / a.n, ...liste.map((x) => vorM(x) || 0));
+  const dZelle = (d) => `<span class="kl-d ${d == null || Math.abs(d) < 1000 ? 'muted' : (d > 0) === aus ? 'neg' : 'pos'}">${d == null ? '' : Math.abs(d) < 1000 ? '≈' : plusMinus(d)}</span>`;
   const zeile = (x) => {
-    const d = dM(x), vm = vorM(x);
-    return `<button class="kl-z${x === wahl ? ' an' : ''}" data-k2kat="${esc(x.k)}" title="${esc(schoen(x.k))}: Ø ${eur0(x.c / a.n)} im Monat${vm != null ? ` · Vorjahr ${eur0(vm)}` : ''} – anklicken: Einzelheiten">
-      <span class="kl-n">${esc(schoen(x.k))}</span>
+    const vm = vorM(x);
+    return `<button class="vg-z kz kl-z${x === wahl ? ' an' : ''}" data-k2kat="${esc(x.k)}" title="${esc(schoen(x.k))}: Ø ${eur0(x.c / a.n)} im Monat${vm != null ? ` · Vorjahr ${eur0(vm)}` : ''}${aus ? ` · ${Math.round((x.fest / x.c) * 100)} % Verträge` : ''} – anklicken: Einzelheiten">
+      <span class="vg-zn">${esc(schoen(x.k))}</span>
       <span class="kl-b"><i style="width:${Math.max(1, (x.c / a.n / max) * 100)}%"></i>${vm ? `<b style="left:${(vm / max) * 100}%"></b>` : ''}</span>
-      <span class="kl-w">${eur0(x.c / a.n)}</span><span class="kl-p">${anteil(x.c)} %</span>
-      <span class="kl-d ${d == null || Math.abs(d) < 1000 ? 'muted' : (d > 0) === aus ? 'neg' : 'pos'}">${d == null ? '' : Math.abs(d) < 1000 ? '≈' : plusMinus(d)}</span></button>`;
+      <b class="vg-zw">${eur0(x.c / a.n)}</b><span class="vg-zp">${anteil(x.c)} %</span>${dZelle(dM(x))}</button>`;
   };
+  const block = (b, i) => {
+    if (!b.l.length) return '';
+    const s = b.l.reduce((t, x) => t + x.c, 0), sv = v ? b.l.reduce((t, x) => t + (vorM(x) || 0), 0) : null;
+    return `<section class="vg kb" id="kb-${i}" style="--vg:${b.farbe}">
+      <div class="vg-k kz"><span class="vg-n"><b>${b.titel}</b><small>${b.erkl}</small></span><span></span><b class="vg-w">${eur0(s / a.n)}</b><span class="vg-p">${anteil(s)} %</span>${dZelle(sv == null ? null : s / a.n - sv)}</div>
+      <div class="vg-l">${b.l.map(zeile).join('')}</div></section>`;
+  };
+  const listeHtml = `<div class="vgs"><div class="vg-kopf kz"><span>${aus ? 'Kategorie' : 'Herkunft'}</span><span>${v ? 'Strich = Vorjahr' : ''}</span><span>Ø / Monat</span><span>Anteil</span><span>${v ? 'ggü. Vorjahr' : ''}</span></div>
+    ${bloecke.map(block).join('')}
+    <button class="vg-summe kz kl-summe"${geh(alleZiel)} title="Anklicken: alle Buchungen im Zeitraum"><span>Summe</span><span></span><b>${eur0(ges / a.n)}</b><span>100 %</span>${dZelle(vgesamt == null ? null : ges / a.n - vgesamt)}</button></div>`;
+
   // Einzelheiten der gewählten Kategorie
-  const wd = dM(wahl);
+  const wd = dM(wahl), wv = vorM(wahl);
   const unter = [...(aus ? wahl.unter : new Map())].filter(([, c]) => c > 0).sort((x, y) => y[1] - x[1]);
   const empf = [...wahl.empf].filter(([, x]) => x.c > 0).sort((x, y) => y[1].c - x[1].c).slice(0, 5);
   const katZiel = (z) => zuBuchungen(aus ? { art: 'aus', kat: wahl.k, ...z } : { art: 'ein', kat: 'Einnahmen', ukat: wahl.k, ...z });
   kat2Grafik = { monate: P.monate, werte: P.monate.map((k) => (wahl.mon.get(k) || 0) / 100), schnitt: wahl.c / a.n / 100, aus, ziel: (k) => katZiel(monatZiel(k)) };
-  // Ausblick: aufs Jahr gerechnet; bei Ausgaben, die nicht überwiegend aus Verträgen bestehen, was 10 % weniger brächten
-  const fx = fixIds(), festAnteil = aus ? wahl.rows.filter((r) => fx.has(r.i)).reduce((t, r) => t - r.c, 0) / wahl.c : 0;
-  const jahrText = P.jahr && P.monate.length < 12 ? `Hochgerechnet aufs Jahr ${P.jahr}: <b>≈ ${eur0((wahl.c / a.n) * 12)}</b> (bisher ${eur0(wahl.c)}).` : `Aufs Jahr gerechnet: <b>≈ ${eur0((wahl.c / a.n) * 12)}</b>.`;
-  const hoch = `<p class="s5-tipp">${jahrText} ${!aus ? '' : festAnteil >= 0.5 ? `${Math.round(festAnteil * 100)} % davon sind feste Verträge (Unterhalt, Versicherungen …).` : `10 % weniger brächten dir ${eur0((wahl.c / a.n) * 1.2)} im Jahr.`}</p>`;
+  const festAnteil = aus ? wahl.fest / wahl.c : 0;
+  const jahrWert = (wahl.c / a.n) * 12;
+  const stat = (t, w, cls_ = '') => `<div><span>${t}</span><b class="${cls_}">${w}</b></div>`;
+  const tipp = aus ? (festAnteil >= 0.5 ? `${Math.round(festAnteil * 100)} % davon sind feste Verträge (Unterhalt, Versicherungen …) – kurzfristig kaum veränderbar.`
+    : `10 % weniger brächten dir ${eur0(jahrWert * 0.1)} im Jahr.`) : '';
   const detail = `<section class="card s5-karte kl-detail">
-    <div class="kl-d-kopf"><h2>${esc(schoen(wahl.k))}</h2>${zl(`<b>${eur0(wahl.c / a.n)} <small>im Monat</small></b>`, katZiel(zeit))}</div>
-    <p class="s5-erkl">${anteil(wahl.c)} % deiner ${aus ? 'Ausgaben' : 'Einnahmen'} · ${eur0(wahl.c)} ${P.label} · ${NUM.format(wahl.rows.length)} Buchungen${wd != null && Math.abs(wd) >= 1000 ? ` · <span class="${(wd > 0) === aus ? 'neg' : 'pos'}">${plusMinus(wd)} im Monat</span> ggü. Vorjahr` : ''}</p>
+    <div class="kl-d-kopf"><h2>${esc(schoen(wahl.k))}</h2>${zl('Alle Buchungen →', katZiel(zeit))}</div>
+    <div class="kd-stats">
+      ${stat('Ø im Monat', eur0(wahl.c / a.n))}
+      ${stat('Anteil', `${anteil(wahl.c)} %`)}
+      ${stat(P.jahr && P.monate.length < 12 ? `Hochrechnung ${P.jahr}` : 'aufs Jahr', `≈ ${eur0(jahrWert)}`)}
+      ${stat('ggü. Vorjahr', wd == null ? '–' : Math.abs(wd) < 1000 ? '≈ gleich' : plusMinus(wd), wd == null || Math.abs(wd) < 1000 ? '' : (wd > 0) === aus ? 'neg' : 'pos')}
+    </div>
+    <p class="s5-erkl">${eur0(wahl.c)} ${P.label} · ${NUM.format(wahl.rows.length)} Buchungen${wv != null ? ` · Vorjahr Ø ${eur0(wv)}` : ''}${tipp ? ` · ${tipp}` : ''}</p>
     <div class="s5-chart klein"><canvas id="c-kat2"></canvas></div>
     <div class="kl-d-grid">
       ${unter.length > 1 ? `<div class="s5-teil"><h3>Wofür genau</h3>${balkenListe(unter.slice(0, 6).map(([u, c]) => ({ n: esc(schoen(u)), c: c / a.n, p: `${Math.round((c / wahl.c) * 100)} %`, farbe: aus ? 'var(--variabel)' : 'var(--ein)', ziel: zuBuchungen({ art: 'aus', kat: wahl.k, ukat: u === 'ohne Unterkategorie' ? '' : u, ...zeit }) })))}</div>` : ''}
       <div class="s5-teil"><h3>${aus ? 'An wen' : 'Von wem'}</h3>${balkenListe(empf.map(([e, x]) => ({ n: esc(e), sub: `${x.n} Buchungen`, c: x.c / a.n, p: `${Math.round((x.c / wahl.c) * 100)} %`, farbe: 'var(--muted)', ziel: zuBuchungen({ q: `"${e}"`, art: aus ? 'aus' : 'ein', ...zeit }) })))}</div>
     </div>
-    ${hoch}
-    <button class="btn sm kl-buch"${geh(katZiel(zeit))}>Alle Buchungen ${esc(schoen(wahl.k))} →</button>
   </section>`;
+
   // Monat für Monat je Kategorie (aufklappbar; ältere Monate fallen auf schmalen Bildschirmen weg)
   const nM = P.monate.length;
   const reihen = liste.map((x) => {
@@ -954,10 +1000,8 @@ function tabKategorien() {
   const monSum = P.monate.map((k) => liste.reduce((t, x) => t + (x.mon.get(k) || 0), 0));
   const tabelle = `<div class="t3-rahmen"><table class="t3 t3-eng"><thead><tr><th>${aus ? 'Kategorie' : 'Einnahme'}</th>${P.monate.map((k, i) => `<th class="r${i < nM - 3 ? ' m-alt' : ''}">${monKurz(k)}</th>`).join('')}<th class="r">Ø</th></tr></thead><tbody>${reihen}</tbody>
     <tfoot><tr><td>Summe</td>${monSum.map((c, i) => `<td class="r${i < nM - 3 ? ' m-alt' : ''}">${NUM.format(Math.round(c / 100))}</td>`).join('')}<td class="r">${NUM.format(Math.round(ges / a.n / 100))}</td></tr></tfoot></table></div>`;
-  return kopf5('Kategorien', satz, rechts) + `<div class="kl${aus ? '' : ' ein'}">
-    <section class="card s5-karte kl-liste"><div class="s5-kt"><div class="s5-kt-t"><h2>${aus ? 'Ausgaben' : 'Einnahmen'} nach ${aus ? 'Kategorie' : 'Herkunft'}</h2><p class="s5-erkl">Ø je Monat und Anteil${v ? ' · Strich im Balken: Vorjahr · rechts: Veränderung' : ''} · anklicken: Einzelheiten</p></div></div>
-      ${liste.map(zeile).join('')}
-      <button class="kl-summe"${geh(alleZiel)} title="Anklicken: alle Buchungen im Zeitraum"><span>Summe</span><span></span><span>${eur0(ges / a.n)}</span><span>100 %</span><span>${v ? plusMinus(ges / a.n - [...v.g.values()].reduce((t, x) => t + Math.max(0, x.c), 0) / v.n) : ''}</span></button></section>
+  return kopf5('Kategorien', satz, rechts) + `<div class="s5-zahlen">${zahlen}</div><div class="kl${aus ? '' : ' ein'}">
+    ${karte5(`${aus ? 'Ausgaben' : 'Einnahmen'} nach ${aus ? 'Kategorie' : 'Herkunft'}`, `Ø je Monat ${esc(monatsText(P.monate))} · Zeile anklicken: Einzelheiten rechts`, listeHtml, 'kl-liste')}
     ${detail}</div>
     <details class="card s5-details"><summary>Monat für Monat je ${aus ? 'Kategorie' : 'Einnahme'} <span class="muted">· in Euro · rot: deutlich über dem eigenen Ø · Zahl anklicken: Buchungen</span></summary>${tabelle}</details>`;
 }
