@@ -107,12 +107,14 @@ const MARKT = /\bobi\b|hagebau|bauhaus|hornbach|toom|baywa|dehner|globus|hellweg
 
 // Plausibilitätsprüfung: { art: 'pruefen' | 'info', text (Einschätzung), rat (Empfehlung), aktionen: [{ t, p ('x' = ausschließen), notiz }] }
 const AUS = { t: '✕ Ausschließen – nicht absetzbar', p: 'x' };
+// Empfänger (auch frühere Namen) und Verwendungszweck als Suchtext
+const text = (r) => norm(`${r.g} ${(r.ga || []).join(' ')} ${r.z}`);
 function pruefung(r, p) {
-  const t = norm(`${r.g} ${r.z}`);
+  const t = text(r);
   if (p === 'wk-uebernachtung' && (RESTAURANT.test(t) || r.kat === 'Essen & Trinken')) return { art: 'pruefen',
     text: 'Das ist ein Restaurantbesuch, keine Übernachtung. Essen ist steuerlich fast nie absetzbar – auch auf Dienstreisen gibt es dafür nur Verpflegungspauschalen, keine Belege.',
     rat: 'Privates Essen → ausschließen. Nur eine Hotelrechnung auf beruflicher Reise gehört hierher.', klar: 'Restaurant', aktionen: [AUS, { t: 'Ist eine Hotelrechnung (Dienstreise) – behalten', p: 'wk-uebernachtung' }] };
-  if ((p === 'ha-handwerker' || p === 'ha-dienstleistung') && MARKT.test(norm(r.g))) return { art: 'pruefen',
+  if ((p === 'ha-handwerker' || p === 'ha-dienstleistung') && MARKT.test(norm(`${r.g} ${(r.ga || []).join(' ')}`))) return { art: 'pruefen',
     text: 'Einkauf im Bau- oder Gartenmarkt = Material. Nach § 35a zählen nur die Arbeitskosten eines Handwerkers laut Rechnung, nicht selbst gekauftes Material.',
     rat: 'Ausschließen.', klar: 'Baumarkt', aktionen: [AUS] };
   if (p === 'ha-nebenkosten') return { art: 'pruefen',
@@ -158,6 +160,57 @@ export async function steuerDaten(d) {
     const n = (zaehler.get(k) || 0) + 1; zaehler.set(k, n);
     r.skey = n > 1 ? `${k}|${n}` : k;
   }
+  if (umbenennungUebertragen()) speichern();
+}
+
+// Finanzguru benennt Empfänger in neueren Exporten manchmal um (z. B. „Riedl, Uta Und Alexander“ → „Riedl Uta“). Deine
+// Entscheidungen hängen am Namen – deshalb hier auf die neuen Namen übertragen, mit Hilfe der früheren Namen je Buchung
+// (r.ga). Gibt es mehrere Kandidaten, gewinnt der mit den meisten gemeinsamen Wörtern; bei Gleichstand bleibt es offen.
+const woerter = (s) => new Set(norm(s).split(/[^a-z0-9]+/).filter((w) => w.length >= 3));
+const aehnlich = (a, b) => { const B = woerter(b); let n = 0; for (const w of woerter(a)) if (B.has(w)) n++; return n; };
+function besterKandidat(alt, kandidaten, name) {
+  if (kandidaten.length === 1) return kandidaten[0];
+  const punkte = kandidaten.map((x) => aehnlich(alt, name(x))), max = Math.max(...punkte);
+  const beste = kandidaten.filter((_, i) => punkte[i] === max);
+  if (max > 0 && beste.length === 1) return beste[0];
+  // nicht zu unterscheiden (gleicher Tag, Betrag und heutiger Name): gleichwertig, also die erste
+  return new Set(beste.map(name)).size === 1 ? beste[0] : null;
+}
+function umbenennungUebertragen() {
+  const aktuell = new Set(D.rows.map((r) => r.skey)), frueher = new Map();
+  for (const r of D.rows) for (const a of r.ga || []) {
+    const k = `${r.d}|${D.konten[r.k].name}|${r.c}|${norm(a).slice(0, 24)}`;
+    (frueher.get(k) || frueher.set(k, []).get(k)).push(r);
+  }
+  let n = 0;
+  // einzelne Buchungen
+  for (const [k, e] of Object.entries(entscheidungen)) {
+    if (k.startsWith('regel:') || aktuell.has(k)) continue;
+    const teile = k.split('|'), basis = teile.slice(0, 4).join('|'), altName = teile[3] || '';
+    const kand = (frueher.get(basis) || []).filter((r) => !entscheidungen[r.skey]);
+    const r = kand.length ? besterKandidat(altName, kand, (x) => x.g) : null;
+    if (!r) continue;
+    entscheidungen[r.skey] = e; delete entscheidungen[k]; n++;
+  }
+  // Regeln für einen Empfänger
+  const grpAktuell = new Map();
+  for (const r of D.rows) if (!grpAktuell.has(grpName(r))) grpAktuell.set(grpName(r), r);
+  const grpFrueher = new Map();   // früherer Name → heutige Empfänger
+  for (const r of D.rows) for (const a of r.ga || []) {
+    const ag = grpName({ g: a }), ng = grpName(r);
+    if (ag !== ng && !grpAktuell.has(ag)) (grpFrueher.get(ag) || grpFrueher.set(ag, new Set()).get(ag)).add(ng);
+  }
+  for (const [k, e] of Object.entries(entscheidungen)) {
+    const m = k.match(/^regel:(.*)\|([^|]+?)(\|pruefen)?$/);
+    if (!m || grpAktuell.has(m[1])) continue;
+    const ziele = [...(grpFrueher.get(m[1]) || [])], ng = ziele.length ? besterKandidat(m[1], ziele, (x) => x) : null;
+    if (!ng) continue;
+    const nk = regelKey(grpAktuell.get(ng), m[2]);
+    if (!entscheidungen[nk]) entscheidungen[nk] = e;
+    delete entscheidungen[k]; n++;
+  }
+  if (n) console.info(`Steuer: ${n} Entscheidungen auf umbenannte Empfänger übertragen`);
+  return n;
 }
 const speichern = () => kvSchreiben(KV, entscheidungen).catch(() => {});
 
@@ -169,7 +222,7 @@ function automatisch(r) {
     quelle = 'vorschlag';
     p = FG_VORSCHLAG[r.ukat] || null;
     grund = p ? `Finanzguru-Kategorie „${r.ukat}“` : '';
-    const t = norm(`${r.g} ${r.z}`);
+    const t = text(r);
     if (!p) { const w = WORT_VORSCHLAG.find(([re]) => re.test(t)); if (w) { p = w[1]; grund = `Stichwort im Empfänger oder Verwendungszweck (${(t.match(w[0]) || [''])[0]})`; } }
     // Tierarzt, Tierbedarf: nicht absetzbar
     if (p === 'agb-krankheit' && (/tierarzt|tieraerzt|tierklinik|veterinaer/.test(t) || r.kat === 'Haustiere')) p = null;
@@ -187,7 +240,7 @@ const offJahre = () => Object.keys(OFF()).map(Number).sort((a, b) => a - b);
 const offName = (O) => O.kurz || `${O.art} ${O.jahr}`;
 // angesetzter Einzelposten zu einer Buchung: gleicher Betrag (±1 Cent), passendes Datum (falls bekannt) und gleicher Posten oder Empfänger
 function offBeleg(O, r, p) {
-  const b = Math.abs(r.c), t = norm(`${r.g} ${r.z}`), ab = POSTEN_ID.get(p)?.abschnitt;
+  const b = Math.abs(r.c), t = text(r), ab = POSTEN_ID.get(p)?.abschnitt;
   const empf = (x) => x.e && new RegExp(x.e, 'i').test(t);
   return (O.belege || []).find((x) => {
     if (x.p && x.p !== p) return false;
@@ -213,7 +266,7 @@ function offEinordnung(r, p) {
   // Jahre ohne Unterlagen: was in den Vorjahren nie bzw. immer angesetzt wurde
   const vj = offJahre().filter((y) => y < r.y);
   if (!vj.length) return null;
-  const jt0 = vj.length > 1 ? `${vj[0]}–${vj.at(-1)}` : `${vj[0]}`, tx = norm(`${r.g} ${r.z}`);
+  const jt0 = vj.length > 1 ? `${vj[0]}–${vj.at(-1)}` : `${vj[0]}`, tx = text(r);
   // derselbe Empfänger wurde in einem Vorjahr als Einzelposten angesetzt
   const frueher = vj.flatMap((y) => OFF()[y].belege || []).find((x) => (!x.p || x.p === p) && x.e && new RegExp(x.e, 'i').test(tx));
   if (frueher) return { art: 'vj-ja', text: `In den Steuererklärungen ${jt0} angesetzt${frueher.t ? ` (${frueher.t})` : ''}` };
@@ -231,6 +284,18 @@ const empfName = (r) => r.g || r.z || '–';
 const grpName = (r) => norm(empfName(r)).replace(/\d{4,}/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
 const regelKey = (r, p) => `regel:${grpName(r)}|${p}${pruefung(r, p)?.art === 'pruefen' ? '|pruefen' : ''}`;
 const eigen = (e) => !!(e && (e.x || e.ok || e.p));
+// Regel für eine Buchung – auch eine Regel, die noch unter einem früheren Namen des Empfängers gespeichert ist
+// (ältere Buchungen tragen oft noch den alten Namen, neuere den neuen)
+function regelFuer(r, p) {
+  const rg = entscheidungen[regelKey(r, p)];
+  if (rg) return rg;
+  for (const a of r.ga || []) {
+    const g = grpName({ g: a });
+    const alt = entscheidungen[`regel:${g}|${p}|pruefen`] || entscheidungen[`regel:${g}|${p}`];
+    if (alt) return alt;
+  }
+  return null;
+}
 
 // Alle Buchungen eines Jahres mit Posten, Status und Hinweis
 function einordnen(j) {
@@ -240,7 +305,7 @@ function einordnen(j) {
     const e = entscheidungen[r.skey];
     const a = automatisch(r);
     if (!a && !e?.p) continue;
-    const rg = !eigen(e) && a ? entscheidungen[regelKey(r, a.p)] : null;
+    const rg = !eigen(e) && a ? regelFuer(r, a.p) : null;
     const regelText = `Regel: alle Zahlungen an „${empfName(r)}“`;
     if (e?.x || rg?.x) { out.push({ r, p: e?.p || a?.p, status: 'ausgeschlossen', hinweis: '', notiz: e?.n || '', regel: !!rg, grund: rg ? `${regelText} ausschließen` : 'von dir ausgeschlossen' }); continue; }
     const p = e?.p || rg?.p || a.p;
@@ -554,7 +619,7 @@ export function steuerPosten(r) {
   if (e?.p) return e.p;
   const a = automatisch(r);
   if (!a) return '';
-  const rg = entscheidungen[regelKey(r, a.p)];
+  const rg = regelFuer(r, a.p);
   return rg?.x ? 'x' : rg?.p || a.p;
 }
 
@@ -659,7 +724,7 @@ function binden(el) {
   el.querySelector('#st-laden').onclick = () => {
     const inp = Object.assign(document.createElement('input'), { type: 'file', accept: '.json' });
     inp.onchange = async () => {
-      try { const j = JSON.parse(await inp.files[0].text()); Object.assign(entscheidungen, j); speichern(); ctx.toast(`${Object.keys(j).length} Zuordnungen geladen.`); neu(); }
+      try { const j = JSON.parse(await inp.files[0].text()); Object.assign(entscheidungen, j); umbenennungUebertragen(); speichern(); ctx.toast(`${Object.keys(j).length} Zuordnungen geladen.`); neu(); }
       catch { ctx.toast('Die Datei konnte nicht gelesen werden.'); }
     };
     inp.click();

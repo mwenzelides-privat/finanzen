@@ -37,10 +37,11 @@ const charts = {};
 function aufbereiten(j) {
   const K = j.kategorien, U = j.unterkategorien, A = j.arten, konten = j.konten, ST = j.steuerkategorien || [];
   const rows = j.buchungen.map((b, i) => {
-    const [d, k, c, g, z, kat, ukat, art, v, t, n, st] = b;
+    const [d, k, c, g, z, kat, ukat, art, v, t, n, st, frueher] = b;
     const r = { i, d, y: +d.slice(0, 4), m: +d.slice(5, 7), k, c, g, z, kat: K[kat], ukat: U[ukat], art: A[art], v, t, n };
+    r.ga = frueher || [];   // frühere Namen der Gegenseite (Finanzguru benennt Empfänger manchmal um)
     r.st = ST[st] || '';
-    r.s = norm(`${g} ${z} ${r.kat} ${r.ukat} ${konten[k].name} ${v} ${t} ${n} ${r.st}`);
+    r.s = norm(`${g} ${r.ga.join(' ')} ${z} ${r.kat} ${r.ukat} ${konten[k].name} ${v} ${t} ${n} ${r.st}`);
     return r;
   });
   const emp = new Map(), ukatZu = new Map();
@@ -53,7 +54,7 @@ function aufbereiten(j) {
     e.n++; e.c += r.c;
   }
   return {
-    j, konten, rows, von: j.von, bis: j.bis,
+    j, konten, rows, von: j.von, bis: j.bis > new Date().toISOString().slice(0, 10) ? new Date().toISOString().slice(0, 10) : j.bis,   // Valuta in der Zukunft verschiebt „heute“ nicht
     jahre: [...new Set(rows.map((r) => r.y))].sort((a, b) => a - b),
     kats: K.filter(Boolean).sort((a, b) => a.localeCompare(b, 'de')),
     ukatZu, emp: [...emp.values()].sort((a, b) => b.n - a.n),
@@ -969,19 +970,28 @@ function kat2Zeichnen() {
 }
 
 // ---------------------------------------------------------------- Konten: Wie viel habe ich wo?
+// Alle Konten in einer Liste, nach Zweck gruppiert: was du ausgeben kannst, Kreditkarte, Gebundenes – und zur
+// Information die gemeinsamen Konten mit Kathrin und die der Kinder (zählen in keiner Summe).
+const KONTO_GRUPPEN = [
+  { id: 'frei', titel: 'Zum Ausgeben', erkl: 'Girokonten und Zahlungsdienste – zählen in deinen Summen', test: (k) => !fremd(k) && !/kaution|easybank|barclays|visa|kredit/i.test(k.name) },
+  { id: 'karte', titel: 'Kreditkarte', erkl: 'minus = offener Betrag, wird vom Girokonto ausgeglichen', test: (k) => !fremd(k) && /easybank|barclays|visa|kredit/i.test(k.name) },
+  { id: 'gebunden', titel: 'Gebunden', erkl: 'gehört dir, ist aber nicht frei verfügbar', test: (k) => !fremd(k) && /kaution/i.test(k.name) },
+  { id: 'gemeinsam', titel: 'Gemeinsam mit Kathrin', erkl: 'zählt nicht mit – bei dir zählen nur deine Einzahlungen dorthin', test: (k) => k.gemeinsam, fremd: true },
+  { id: 'kinder', titel: 'Konten der Kinder', erkl: 'zählt nicht mit – nur zur Information', test: (k) => k.kind, fremd: true },
+];
 let kontenGrafik = null;
 function tabKonten() {
   const tag = stichtag(), ks = kontoSet(), drin = (i) => !ks || ks.has(i);
-  const stand = kontostaende(D, tag).filter((x) => !fremd(x.k) && !['nicht_eroeffnet', 'geschlossen'].includes(x.status));
+  const offen = kontostaende(D, tag).filter((x) => !['nicht_eroeffnet', 'geschlossen'].includes(x.status));
+  const stand = offen.filter((x) => !fremd(x.k));
   const vj = +D.bis.slice(0, 4) - 1;
   const schnell = [[D.bis, 'Heute'], [`${vj}-12-31`, `31.12.${vj}`], [`${vj - 1}-12-31`, `31.12.${vj - 1}`]];
   const rechts = `${kontoWahlHtml()}<div class="kon5-tag"><label for="stichtag" class="muted klein">Stand am</label><input type="date" id="stichtag" value="${tag}" min="${D.von}" max="${D.bis}">
     <div class="seg">${schnell.map(([d, t]) => `<button class="${d === tag ? 'an' : ''}" data-st="${d}">${t}</button>`).join('')}</div></div>`;
   kontenGrafik = { tag };
-  const m = stand.filter((x) => x.status !== 'unbekannt').sort((a, b) => (drin(b.i) - drin(a.i)) || ((b.c ?? -1e12) - (a.c ?? -1e12)));
-  const unbekannt = stand.filter((x) => x.status === 'unbekannt');
-  const anhang = gemeinsamKontenHtml(tag) + kinderKontenHtml(tag) + eingangHtml();
-  if (!m.length) return kopf5('Konten', 'Am gewählten Tag gab es keine passenden Konten.', rechts) + anhang;
+  const m = stand.filter((x) => x.status !== 'unbekannt');
+  const unbekannt = offen.filter((x) => x.status === 'unbekannt');
+  if (!m.length) return kopf5('Konten', 'Am gewählten Tag gab es keine passenden Konten.', rechts) + eingangHtml();
   const jb = `${+tag.slice(0, 4) - 1}-12-31`;
   const anfang = new Map(kontostaende(D, jb < D.von ? D.von : jb).map((x) => [x.i, x.c]));
   const gew = m.filter((x) => drin(x.i) && x.c != null);
@@ -1000,32 +1010,56 @@ function tabKonten() {
     ende ? zahl5(`Prognose Ende ${MONAT[+ende.k.slice(5) - 1]}`, `≈ ${eur0(ende.stand)}`, `wenn alles läuft wie ein normaler Monat (${plusMinus(V.R.erg)})`, { cls: ende.stand < 0 ? 'neg' : '', ziel: { tab: 'start' } })
       : zahl5('Konten', NUM.format(gew.length), unbekannt.length ? `${unbekannt.length} ohne Daten für diesen Tag` : 'mit Daten zu diesem Tag', { springe: '.kon5 .ko' }),
   ].join('');
-  // Konten als Balken: Stand und Veränderung seit Jahresbeginn
-  const maxC = Math.max(1, ...m.map((x) => Math.abs(x.c || 0)));
-  const zeile = (x) => {
+
+  // Letzte Buchung je Konto (bis zum Stichtag)
+  const letzte = new Map();
+  for (const r of D.rows) if (r.d <= tag && (!letzte.has(r.k) || r.d > letzte.get(r.k))) letzte.set(r.k, r.d);
+  const maxC = Math.max(1, ...offen.filter((x) => x.status !== 'unbekannt').map((x) => Math.abs(x.c || 0)));
+  const zeile = (x, g) => {
     const a0 = anfang.get(x.i), d = x.c != null && a0 != null ? x.c - a0 : null;
     const zusatz = { geschaetzt: 'geschätzt', ungefaehr: `± ${eur0(Math.round((x.abw || 0) * 100))}` }[x.status];
     const wert = x.status === 'unsicher' ? `<span class="muted" title="${esc(STATUS_TEXT.unsicher)}">?</span>` : `${zusatz ? '≈ ' : ''}${eur0(x.c)}`;
-    return `<button class="ko-z${drin(x.i) ? '' : ' aus'}${x.c < 0 ? ' minus' : ''}"${geh(zuBuchungen({ konto: x.k.name, jahr: tag.slice(0, 4) }))} title="Klick: Buchungen von ${esc(x.k.name)}">
-      <span class="ko-n">${esc(x.k.name)}<small>${x.k.vollstaendig ? '✓ lückenlos' : `Daten ab ${dde(x.k.von).slice(3)}`}${zusatz ? ` · ${zusatz}` : ''}</small></span>
+    const unter = [x.k.vollstaendig ? '✓ lückenlos' : `Daten ab ${dde(x.k.von).slice(3)}`, letzte.has(x.i) ? `letzte Buchung ${dde(letzte.get(x.i)).slice(0, 6)}` : '', zusatz].filter(Boolean).join(' · ');
+    return `<button class="vg-z ko-z${g.fremd || drin(x.i) ? '' : ' aus'}${x.c < 0 ? ' minus' : ''}"${geh(zuBuchungen({ konto: x.k.name, jahr: tag.slice(0, 4) }))} title="Anklicken: Buchungen von ${esc(x.k.name)}">
+      <span class="vg-zn">${esc(x.k.name)}<small>${esc(unter)}</small></span>
       <span class="ko-b"><i style="width:${Math.max(0.5, (Math.abs(x.c || 0) / maxC) * 100)}%"></i></span>
-      <b class="ko-w ${x.c < 0 ? 'neg' : ''}">${wert}</b><span class="ko-d ${d == null ? 'muted' : d >= 0 ? 'pos' : 'neg'}">${d == null ? '–' : plusMinus(d)}</span></button>`;
+      <b class="vg-zw ${x.c < 0 ? 'neg' : ''}">${wert}</b><span class="vg-zp ${d == null || g.fremd ? 'muted' : d >= 0 ? 'pos' : 'neg'}">${d == null ? '–' : plusMinus(d)}</span></button>`;
   };
-  // Kontostände der letzten 6 Monatsenden (aufklappbar)
+  const gruppen = KONTO_GRUPPEN.map((g) => {
+    const l = offen.filter((x) => x.status !== 'unbekannt' && g.test(x.k)).sort((a, b) => (b.c ?? -1e12) - (a.c ?? -1e12));
+    if (!l.length) return '';
+    const summe = l.filter((x) => g.fremd || drin(x.i)).reduce((t, x) => t + (x.c || 0), 0);
+    const farbe = g.fremd ? 'var(--muted)' : g.id === 'frei' ? 'var(--accent)' : g.id === 'karte' ? 'var(--aus)' : 'color-mix(in srgb, var(--accent) 45%, var(--surface))';
+    return `<section class="vg kg${g.fremd ? ' fremd' : ''}" id="kg-${g.id}" style="--vg:${farbe}">
+      <div class="vg-k"><span class="vg-n"><b>${g.titel}</b><small>${g.erkl}</small></span><span class="vg-b leer"></span><b class="vg-w ${summe < 0 ? 'neg' : ''}">${eur0(summe)}</b><span class="vg-p">${l.length} ${l.length === 1 ? 'Konto' : 'Konten'}</span></div>
+      <div class="vg-l">${l.map((x) => zeile(x, g)).join('')}</div></section>`;
+  }).join('');
+
+  // Monatsenden: Summe deiner (gewählten) Konten und die Veränderung zum Vormonat
   const enden = [];
-  { let [y, mo] = tag.slice(0, 7).split('-').map(Number); for (let i = 0; i < 6; i++) { if (--mo === 0) { mo = 12; y--; } const d = monatsletzter(`${mkey(y, mo)}-01`); if (d >= D.von) enden.unshift(d); } }
+  { let [y, mo] = tag.slice(0, 7).split('-').map(Number); for (let i = 0; i < 7; i++) { if (--mo === 0) { mo = 12; y--; } const d = monatsletzter(`${mkey(y, mo)}-01`); if (d >= D.von) enden.unshift(d); } }
   const st = enden.map((d) => new Map(kontostaende(D, d).map((x) => [x.i, x.c])));
+  const sumAm = (s2) => gew.reduce((t, x) => t + (s2.get(x.i) || 0), 0);
+  const reihe = [...enden.map((d, i) => ({ d, c: sumAm(st[i]) })), { d: tag, c: saldo, jetzt: true }];
+  const monatsenden = `<div class="me">${reihe.slice(1).reverse().map((x, i, a) => {
+    const vor = reihe[reihe.length - 2 - i], diff = x.c - vor.c;
+    return `<button class="me-z" data-st="${x.d}" title="Anklicken: Kontostände an diesem Tag"><span>${x.jetzt ? (heute ? 'heute' : dde(x.d).slice(0, 6)) : `Ende ${monKurz(x.d.slice(0, 7))}`}</span><b>${eur0(x.c)}</b><span class="${diff >= 0 ? 'pos' : 'neg'}">${plusMinus(diff)}</span></button>`;
+  }).join('')}</div>`;
   const alt = (i) => (i < enden.length - 3 ? ' m-alt' : '');
   const tabelle = `<div class="t3-rahmen"><table class="t3 t3-eng"><thead><tr><th>Konto</th>${enden.map((d, i) => `<th class="r${alt(i)}">${monKurz(d.slice(0, 7))}</th>`).join('')}<th class="r">${dde(tag).slice(0, 6)}</th></tr></thead><tbody>
     ${gew.map((x) => `<tr><td class="t3-n">${esc(x.k.name)}</td>${st.map((s2, i) => `<td class="r${alt(i)}">${s2.get(x.i) == null ? '<span class="muted">–</span>' : NUM.format(Math.round(s2.get(x.i) / 100))}</td>`).join('')}<td class="r"><b>${NUM.format(Math.round(x.c / 100))}</b></td></tr>`).join('')}</tbody>
-    <tfoot><tr><td>Zusammen</td>${st.map((s2, i) => `<td class="r${alt(i)}">${NUM.format(Math.round(gew.reduce((t, x) => t + (s2.get(x.i) || 0), 0) / 100))}</td>`).join('')}<td class="r">${NUM.format(Math.round(saldo / 100))}</td></tr></tfoot></table></div>`;
+    <tfoot><tr><td>Zusammen</td>${st.map((s2, i) => `<td class="r${alt(i)}">${NUM.format(Math.round(sumAm(s2) / 100))}</td>`).join('')}<td class="r">${NUM.format(Math.round(saldo / 100))}</td></tr></tfoot></table></div>`;
   return kopf5('Konten', satz, rechts) + `<div class="s5-zahlen">${zahlen}</div>
     <div class="s5-raster kon5">
-      ${karte5('Deine Konten', `Stand ${dde(tag)} · rechts: Veränderung seit 1.1. · anklicken: Buchungen${ks ? ' · grau: nicht gewählt' : ''}`, `<div class="ko"><div class="ko-z ko-kopf"><span>Konto</span><span></span><span>Stand</span><span>seit 1.1.</span></div>${m.map(zeile).join('')}</div>
-        ${unbekannt.length ? `<p class="s5-erkl">Für diesen Tag noch ohne Daten: ${unbekannt.map((x) => `${esc(x.k.name)} (ab ${dde(x.k.von)})`).join(', ')}.</p>` : ''}`)}
-      ${karte5('Verlauf', `Summe ${ks ? 'der gewählten Konten' : 'deiner Konten'} am Monatsende${V ? ' · gestrichelt: Prognose' : ''} · Punkt anklicken: Stand an diesem Tag`, '<div class="s5-chart fuell"><canvas id="c-konten-verlauf"></canvas></div>', 's5-b2')}
+      ${karte5('Alle Konten', `Stand ${dde(tag)} · nach Zweck gruppiert · rechts: Veränderung seit 1.1. · anklicken: Buchungen${ks ? ' · blass: nicht gewählt' : ''}`,
+        `<div class="ko vgs"><div class="vg-kopf"><span>Konto</span><span></span><span>Stand</span><span>seit 1.1.</span></div>${gruppen}</div>
+        ${unbekannt.length ? `<p class="s5-erkl">Für diesen Tag noch ohne Daten: ${unbekannt.map((x) => `${esc(x.k.name)} (ab ${dde(x.k.von)})`).join(', ')}.</p>` : ''}`, 's5-b2')}
+      <div class="s5-spalte">
+        ${karte5('Verlauf', `Summe ${ks ? 'der gewählten Konten' : 'deiner Konten'} am Monatsende${V ? ' · gestrichelt: Prognose' : ''} · Punkt anklicken: Stand an diesem Tag`, '<div class="s5-chart klein"><canvas id="c-konten-verlauf"></canvas></div>')}
+        ${karte5('Monatsenden', 'Summe am Monatsende und Veränderung zum Vormonat · anklicken: Stand an diesem Tag', monatsenden, '', zs('je Konto ↓', '#kon-tab'))}
+      </div>
     </div>
-    <details class="card s5-details" id="kon-tab"><summary>Kontostände der letzten Monatsenden <span class="muted">· in Euro, jeweils am Monatsende</span></summary>${tabelle}</details>` + anhang;
+    <details class="card s5-details" id="kon-tab"><summary>Kontostände je Konto an den Monatsenden <span class="muted">· in Euro</span></summary>${tabelle}</details>` + eingangHtml();
 }
 
 // Summe der Kontostände je Monatsende (24 Monate), ohne Kontenauswahl zusätzlich die Prognose
@@ -1135,30 +1169,6 @@ function tabBuchungen(conds) {
 
 // Stichtag für die Kontostände: selbst gewählt, sonst der letzte Datenstand
 const stichtag = () => S.stichtag || D.bis;
-
-// Gemeinsame Konten mit Kathrin: nur zur Information – bei dir zählen nur deine Einzahlungen
-function gemeinsamKontenHtml(tag) {
-  const k = kontostaende(D, tag).filter((x) => x.k.gemeinsam && !['nicht_eroeffnet', 'geschlossen'].includes(x.status));
-  if (!k.length) return '';
-  const summe = k.reduce((t, x) => t + (x.c || 0), 0);
-  return `<details class="eingang kinder-konten"><summary><b>Gemeinsame Konten mit Kathrin</b> <span class="muted">· ${k.length} Konten · zusammen ${eur(summe)} · zählen nicht zu deinen Finanzen</span></summary>
-    <p class="muted klein">Bei dir zählen nur deine Einzahlungen dorthin – als Ausgabe in der Kategorie „Gemeinschaftskonto“. Was von dort bezahlt wird (Einkäufe, akf Bank …) und was Kathrin einzahlt, steht nicht in deinen Summen. Zeile anklicken: Buchungen des Kontos.</p>
-    <div class="tab-scroll"><table class="t fix"><thead><tr><th class="erste">Konto</th><th class="r" style="width:150px">Stand ${dde(tag)}</th><th class="sp-m" style="width:230px">Daten</th></tr></thead><tbody>
-    ${k.map((x) => `<tr class="klick" data-konto="${esc(x.k.name)}"><td class="erste">${esc(x.k.name)}</td><td class="r">${x.c == null ? '<span class="muted">unbekannt</span>' : eur(x.c)}</td><td class="klein sp-m">ab ${dde(x.k.von)}</td></tr>`).join('')}
-    </tbody></table></div></details>`;
-}
-
-// Konten der Kinder: nur zur Information, zählen in keiner Summe
-function kinderKontenHtml(tag) {
-  const stand = kontostaende(D, tag);
-  const k = stand.filter((x) => x.k.kind && !['nicht_eroeffnet', 'geschlossen'].includes(x.status));
-  if (!k.length) return '';
-  return `<details class="eingang kinder-konten"><summary><b>Konten der Kinder</b> <span class="muted">· ${k.length} Konten · zählen nicht zu deinen Finanzen (nicht in Summen, Durchschnitten und Grafiken)</span></summary>
-    <p class="muted klein">Was du den Kindern überweist (Taschengeld, „Sparen Leo/Mara“, Geschenke), ist bei dir eine Ausgabe in der Kategorie Kinder; Erstattungen von Auslagen sind Einnahmen; Darlehen bleiben neutral. Zeile anklicken: Buchungen des Kontos.</p>
-    <div class="tab-scroll"><table class="t fix"><thead><tr><th class="erste">Konto</th><th class="r" style="width:150px">Stand ${dde(tag)}</th><th class="sp-m" style="width:230px">Daten</th></tr></thead><tbody>
-    ${k.map((x) => `<tr class="klick" data-konto="${esc(x.k.name)}"><td class="erste">${esc(x.k.name)}</td><td class="r">${x.c == null ? '<span class="muted">unbekannt</span>' : eur(x.c)}</td><td class="klein sp-m">ab ${dde(x.k.von)}</td></tr>`).join('')}
-    </tbody></table></div></details>`;
-}
 
 // Dateien im Eingang: was erkannt, übernommen und als doppelt erkannt wurde (je Datei zusammengefasst)
 function eingangHtml() {
