@@ -69,9 +69,6 @@ const jahreWahl = () => (S.jahr ? String(S.jahr).split(',').map(Number).filter(B
 const einJahr = () => { const j = jahreWahl(); return j.length === 1 ? j[0] : 0; };
 // Gewählte Monate: S.monat ist „3“ oder „1,2,3“
 const monateWahl = () => (S.monat ? String(S.monat).split(',').map(Number).filter((m) => m >= 1 && m <= 12).sort((a, b) => a - b) : []);
-const JAHRES_FARBEN = ['--accent', '--aus', '--ein', '#9085e9', '#eda100', '#e87ba4', '#4a3aa7', '--muted'];
-// Farbe je Jahr im Vergleich: das neueste Jahr in Blau, davor Orange, Grün, …
-function jahresFarbe(idx, anzahl) { const f = JAHRES_FARBEN[(anzahl - 1 - idx) % JAHRES_FARBEN.length]; return f.startsWith('--') ? css(f) : f; }
 
 // Prüffunktion für alle Filter; mitJahr = false lässt Jahr und Zeitangaben der Suche weg (für den Vorjahresvergleich),
 // mitArt = false den Filter „nur Einnahmen/Ausgaben“ (für die Kennzahlen, die immer beide Seiten zeigen)
@@ -206,9 +203,7 @@ function filterZeigen(conds) {
   $('#chips').querySelector('[data-nf]')?.addEventListener('click', () => setze({ nf: '' }));
   $('#chips').querySelectorAll('[data-mehr]').forEach((b) => b.onclick = () => setze(({ konto: { konto: '' }, kat: { kat: '', ukat: '' }, art: { art: 'alle' }, umb: { umb: false } })[b.dataset.mehr]));
   const aktiv = S.q || S.jahr || S.monat || S.zr || S.nf || S.konto || S.kat || S.ukat || S.art !== 'alle' || S.umb;
-  $('#f-reset').hidden = true;   // ersetzt durch „Zurücksetzen“ in der Kopfzeile
   $('#btn-reset').hidden = !abweichend();
-  $('#f-zurueck').hidden = true;
   $('#btn-zurueck').hidden = stufe <= 0;
 }
 
@@ -295,7 +290,6 @@ const saeulenWerteMit = (opt) => ({
 
 // Ist der Monat (bzw. das Jahr) mit dem Datenstand noch nicht abgeschlossen? Dann fehlen oft noch Gehalt oder Abbuchungen.
 const monatsletzter = (iso) => new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7), 0)).toISOString().slice(0, 10);
-const laufendText = () => `noch nicht abgeschlossen – Daten bis ${dde(D.bis).slice(0, 6)}`;
 
 // ======================================================================= Seiten: einfach erklärt, mit Ausblick
 // Alle Seiten folgen demselben Muster: Überschrift mit einem Satz als Antwort, drei bis vier Kennzahlen mit einer Zeile
@@ -652,13 +646,18 @@ function startSeite() {
     zahl5(`Prognose Ende ${monatE}`, `≈ ${eur0(letzte.stand)}`, `auf deinen Konten · ${plusMinus(letzte.stand - heute)} ggü. heute`, { cls: letzte.stand < 0 ? 'neg' : '', ziel: { tab: 'konten', stichtag: '', konto: '' } }),
   ].join('');
 
-  // Ein normaler Monat ab jetzt – jede Zeile führt zu den Einzelheiten
-  const rechnung = balkenListe([
-    { n: 'Gehalt', sub: `netto, ${gMon} · alle Gehälter →`, c: R.gehalt, w: `+${eur0(R.gehalt)}`, farbe: 'var(--ein)', ziel: zuGehalt() },
-    { n: 'Sonstige Einnahmen', sub: 'typisch: Erstattungen, Zinsen … →', c: R.sonst, w: `+${eur0(R.sonst)}`, farbe: 'var(--ein)', ziel: { tab: 'uebersicht', kart: 'ein', wahl: '', jahr: '', konto: '' } },
-    { n: 'Fixkosten', sub: `${R.vertraege.length} laufende Verträge →`, c: R.fix, w: `−${eur0(R.fix)}`, farbe: 'var(--fest)', ziel: { tab: 'fix', fixtab: 'vertraege', konto: '' } },
-    { n: 'Lebenshaltung', sub: `${lebenName()}: Einkauf, Tanken, Freizeit … →`, c: R.leben, w: `−${eur0(R.leben)}`, farbe: 'var(--variabel)', ziel: { tab: 'fix', fixtab: 'vertraege', konto: '', _springe: '#fix-leben' } },
-  ], { max: Math.max(R.ein, R.aus) }) + `<button class="s5-summe ${R.erg >= 0 ? 'pos' : 'neg'}"${geh({ tab: 'fix', fixtab: 'vertraege', konto: '' })} title="Anklicken: Fixkosten und der Monat in einem Balken"><span>= ${R.erg >= 0 ? 'bleibt' : 'fehlt'} im Monat</span><b>${plusMinus(R.erg)}</b></button>`;
+  // Ein normaler Monat ab jetzt – als Blöcke wie bei Kennzahlen und Fixkosten; jede Zeile führt zu den Einzelheiten
+  const nmZeile = (n, sub, c, vz, ziel, kopf = false, cls_ = '') => `<button class="${kopf ? 'vg-k' : 'vg-z'} nm-z"${geh(ziel)} title="Anklicken: Einzelheiten">
+      <span class="${kopf ? 'vg-n' : 'vg-zn'}">${kopf ? `<b>${n}</b>` : n}${sub ? `<small>${sub}</small>` : ''}</span><b class="nm-w ${cls_}">${vz}${eur0(Math.abs(c))}</b></button>`;
+  const rechnung = `<div class="vgs nm">
+    <section class="vg" style="--vg:var(--ein)">${nmZeile('Einnahmen', 'je Monat', R.ein, '+', zuGehalt(), true)}<div class="vg-l">
+      ${nmZeile('Gehalt', `netto, ${gMon} · alle Gehälter →`, R.gehalt, '+', zuGehalt())}
+      ${nmZeile('Sonstige Einnahmen', 'typisch: Erstattungen, Zinsen …', R.sonst, '+', { tab: 'uebersicht', kart: 'ein', wahl: '', jahr: '', konto: '' })}</div></section>
+    <section class="vg" style="--vg:var(--aus)">${nmZeile('Ausgaben', 'je Monat', R.aus, '−', { tab: 'fix', fixtab: 'vertraege', konto: '' }, true)}<div class="vg-l">
+      ${nmZeile('Fixkosten', `${R.vertraege.length} laufende Verträge`, R.fix, '−', { tab: 'fix', fixtab: 'vertraege', konto: '' })}
+      ${nmZeile('Lebenshaltung', `${lebenName()}: Einkauf, Tanken, Freizeit …`, R.leben, '−', { tab: 'fix', fixtab: 'vertraege', konto: '', _springe: '#fix-leben' })}</div></section>
+    <section class="vg" style="--vg:${R.erg >= 0 ? 'var(--ein-text)' : 'var(--aus-text)'}">${nmZeile(R.erg >= 0 ? '= bleibt im Monat' : '= fehlt im Monat', 'Einnahmen minus Ausgaben', R.erg, R.erg >= 0 ? '+' : '−', { tab: 'fix', fixtab: 'vertraege', konto: '' }, true, R.erg >= 0 ? 'pos' : 'neg')}</section>
+  </div>`;
   const tipp = R.erg < 0 && R.leben > 0
     ? `<p class="s5-tipp">Für ±0 müsstest du ${eur0(-R.erg)} im Monat weniger ausgeben – ${Math.round((-R.erg / R.leben) * 100)} % der Lebenshaltung.${lk ? ` Größter Posten dort: ${zl(`<b>${esc(schoen(lk.kat))}</b>`, zuBuchungen({ konto: '', art: 'aus', kat: lk.kat, nf: '1', zr: `${R.lh.monate[0]}_${R.lh.monate[R.lh.monate.length - 1]}` }))} (Ø ${eur0(lk.c)}).` : ''}</p>`
     : R.erg > 0 ? `<p class="s5-tipp">Das sind ${Math.round((R.erg / R.ein) * 100)} % deines Einkommens, die du sparen könntest.</p>` : '';
@@ -1338,13 +1337,10 @@ function tabelle(conds) {
   el.querySelectorAll('[data-zeit]').forEach((b) => b.onclick = () => setze({ jahr: b.dataset.zeit, monat: '' }));
   el.querySelectorAll('[data-k2art]').forEach((b) => b.onclick = () => setze({ kart: b.dataset.k2art, wahl: '' }));
   el.querySelectorAll('.kl-z[data-k2kat]').forEach((b) => b.onclick = () => { setze({ wahl: b.dataset.k2kat }); if (matchMedia('(max-width: 1180px)').matches) $('.kl-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
-  const katWahlJetzt = () => el.querySelector('.kl-z.an')?.dataset.k2kat || S.wahl;
-  const katBuchungen = (extra) => setze({ tab: 'buchungen', q: '', monat: '', art: S.kart, ...(S.kart === 'aus' ? { kat: katWahlJetzt(), ukat: '' } : { kat: 'Einnahmen', ukat: katWahlJetzt() }), ...extra });
   el.querySelectorAll('[data-k2zelle]').forEach((td) => td.onclick = () => {
     const [k, m] = td.dataset.k2zelle.split('|');
     setze({ tab: 'buchungen', q: '', jahr: m.slice(0, 4), monat: String(+m.slice(5)), zr: '', art: S.kart, ...(S.kart === 'aus' ? { kat: k, ukat: '' } : { kat: 'Einnahmen', ukat: k }) });
   });
-  el.querySelector('[data-k2buch]')?.addEventListener('click', () => katBuchungen({}));
   el.querySelectorAll('[data-fixtab]').forEach((b) => b.onclick = () => setze({ fixtab: b.dataset.fixtab }));
   el.querySelectorAll('[data-sort]').forEach((th) => th.onclick = () => {
     const k = th.dataset.sort;
@@ -1363,11 +1359,6 @@ function tabelle(conds) {
   });
   $('#mehr')?.addEventListener('click', () => { limit += 500; tabelle(conds); });
   el.querySelectorAll('[data-fixansicht]').forEach((b) => b.onclick = () => { fixAnsicht = b.dataset.fixansicht; tabelle(conds); $('#btn-reset').hidden = !abweichend(); });
-  el.querySelectorAll('[data-fixbezug]').forEach((b) => b.onclick = () => { fixBezug = b.dataset.fixbezug; try { localStorage.setItem('fd.fixbezug2', fixBezug); } catch {} tabelle(conds); });
-  el.querySelectorAll('.fix-zeile[data-fix]').forEach((tr) => tr.onclick = () => setze({ q: `"${tr.dataset.fix}"${tr.dataset.sig ? ' ' + tr.dataset.sig : ''}`, tab: 'buchungen' }));
-  el.querySelectorAll('.fix-kopfzeile[data-fixgruppe]').forEach((b) => b.onclick = () => fixGruppeUmschalten(b.dataset.fixgruppe));
-  el.querySelectorAll('.fa-zeile[data-fixgruppe], .kb-fix[data-fixgruppe]').forEach((b) => b.onclick = () => fixGruppeUmschalten(b.dataset.fixgruppe, true));
-  el.querySelector('.fix-vertraege')?.addEventListener('toggle', (e) => { fixListeAuf = e.target.open; });
   el.querySelector('.fix-grundlage')?.addEventListener('toggle', (e) => { fixGrundlageAuf = e.target.open; });
   el.querySelectorAll('[data-leben]').forEach((b) => b.onclick = () => {
     lebenWahl = b.dataset.leben;
@@ -1384,11 +1375,6 @@ function tabelle(conds) {
     tabelle(conds);
   });
   if (S.tab === 'fix') planBinden();
-  $('#fix-alle-auf')?.addEventListener('click', () => {
-    const alleArten = [...el.querySelectorAll('.fix-kopfzeile')].map((b) => b.dataset.fixgruppe);
-    fixOffen = alleArten.every((a) => fixOffen.has(a)) ? new Set() : new Set(alleArten);
-    tabelle(conds);
-  });
   if (S.tab === 'konten') kontenGrafikZeichnen();
   if (S.tab === 'buchungen') buchGrafikZeichnen();
   if (S.tab === 'uebersicht') kat2Zeichnen();
@@ -1569,9 +1555,6 @@ let fixAnsicht = 'laufend';   // laufend | frueher (beendet seit 2020) | alle
 const FRUEHER_AB = '2020-01-01';
 const fixSichtbar = (alle) => alle.filter((f) => f.aktiv || fixAnsicht === 'alle' || (fixAnsicht === 'frueher' && f.zuletzt >= FRUEHER_AB));
 
-// Bezugsgröße für die Prozente: aktuelles Nettogehalt, Ø Gehalt der letzten 12 Monate oder Ø aller Einnahmen.
-// Die 12 Monate enden mit dem letzten Monat, in dem Gehalt eingegangen ist.
-let fixBezug = (() => { try { return localStorage.getItem('fd.fixbezug2') || 'aktuell'; } catch { return 'aktuell'; } })();
 function einkommen() {
   if (D.einkommen) return D.einkommen;
   const lohn = new Map(), ein = new Map();
@@ -1633,9 +1616,7 @@ function fixTitel(f, art) {
   return f.name;
 }
 
-let fixOffen = new Set();   // aufgeklappte Gruppen
-let fixListeAuf = false, fixGrundlageAuf = false;   // „Alle Verträge im Detail“ und „Rechengrundlage“ aufgeklappt
-const FIX_BLAU = '#2a78d6';
+let fixGrundlageAuf = false;   // „Rechengrundlage“ aufgeklappt
 const FIX_KURZ = { 'Haushalt (Gemeinschaftskonto)': 'Haushalt', 'Abos & Mitgliedschaften': 'Abos', 'Kinder & Betreuung': 'Kinder', 'Steuern & Gebühren': 'Steuern',
   'Telefon & Internet': 'Telefon', Trennungsunterhalt: 'Trennungs&shy;unterhalt', Kindesunterhalt: 'Kindes&shy;unterhalt', Versicherungen: 'Versiche&shy;rungen' };
 let fixKontext = null;      // Grundlage für den Rechner „Kann ich mir das leisten?“
@@ -1909,21 +1890,6 @@ function zahlungskalenderHtml(lauf) {
     </div>`;
 }
 
-// Abbuchungen je Tag (gleich in jedem Monat), mit dem Gehalt an seinem Tag; ✓ = in diesem Monat schon abgebucht
-function tageslisteHtml(lauf) {
-  const Z = zahlungsDaten(lauf), zeilen = [];
-  Z.tag1.forEach((t, i) => {
-    const d = i + 1;
-    if (Z.gt === d) zeilen.push(`<div class="ab-tag ab-gtag"><span class="ab-d">${d}.</span><span class="ab-vs"><span class="ab-g">Gehalt kommt (zuletzt ${eur0(Z.lohn)})</span></span><span class="ab-s pos">+${eur0(Z.lohn)}</span></div>`);
-    if (!t.c) return;
-    const fs = [...t.fs].sort((x, y) => y.betrag - x.betrag);
-    const bezahlt = (f) => f.zuletzt.slice(0, 7) === Z.jetzt;
-    zeilen.push(`<div class="ab-tag${fs.every(bezahlt) ? ' ab-bezahlt' : ''}"><span class="ab-d">${d}.</span>
-      <span class="ab-vs">${fs.map((f) => `<button class="ab-v${bezahlt(f) ? ' ok' : ''}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="${bezahlt(f) ? `im ${MONAT[+Z.jetzt.slice(5) - 1]} schon abgebucht – ` : ''}alle Zahlungen anzeigen">${bezahlt(f) ? '<i>✓</i>' : ''}${esc(vertragName(f))} <b>${eur0(f.betrag)}</b></button>`).join('')}</span>
-      <span class="ab-s">${eur0(t.c)}</span></div>`);
-  });
-  return `<div class="ab-liste">${zeilen.join('')}</div>`;
-}
 
 // ---------- Rechner „Kann ich mir das leisten?“
 const PLAN_VORLAGEN = [
@@ -2078,12 +2044,6 @@ function planBinden() {
   });
 }
 
-function fixGruppeUmschalten(art, nurAuf = false) {
-  if (nurAuf) fixListeAuf = true;
-  if (fixOffen.has(art) && !nurAuf) fixOffen.delete(art); else fixOffen.add(art);
-  tabelle(parse(S.q));
-  document.querySelector(`.fix-kopfzeile[data-fixgruppe="${CSS.escape(art)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-}
 
 // ======================================================================= Herunterladen
 function dateiname(teil) {
@@ -2190,7 +2150,6 @@ function aktualisieren(hist = 'ersetzen') {
   document.querySelectorAll('#tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === t)));
   $('#tab-n').textContent = NUM.format(F.length);
   $('#werkzeug').hidden = t !== 'buchungen';
-  $('#kpis').hidden = true;
   schnellSuche();
   $('#fuss').hidden = t === 'start';
   $('#seite-start').hidden = t !== 'start';
@@ -2516,8 +2475,6 @@ function events() {
   $('#f-kat').onchange = (e) => setze({ kat: e.target.value, ukat: '' });
   $('#f-umb').onchange = (e) => setze({ umb: e.target.checked });
   document.querySelectorAll('#f-art button').forEach((b) => b.onclick = () => setze({ art: b.dataset.v }));
-  $('#f-reset').onclick = () => zuruecksetzen();
-  $('#f-zurueck').onclick = zurueck;
   document.querySelectorAll('#tabs button').forEach((b) => b.onclick = () => setze({ tab: b.dataset.tab }));
   $('#dl-xlsx').onclick = () => exportieren('xlsx');
   $('#dl-csv').onclick = () => exportieren('csv');
@@ -2571,7 +2528,7 @@ function events() {
 
 async function start() {
   events();
-  chatStart({ setze: (p) => setze(p), fixkosten: () => fixkostenErkennen() });
+  chatStart({ setze: (p) => setze(p), fixkosten: () => fixkostenErkennen(), normalerMonat: () => (D ? monatsRechnung() : null) });
   themeSetzen();
   let v = null;
   if (LOKAL) v = await Q.lokalLaden().catch(() => null);

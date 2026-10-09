@@ -29,6 +29,8 @@ let verlauf = [];      // Nachrichten für die API
 let laeuft = false;
 
 export const chatDaten = (d) => { D = d; };
+// zum Testen der Werkzeuge ohne KI (nur lesend)
+export const chatWerkzeuge = { buchungen: (a) => buchungenAuswerten(a), kontostaende: (a) => kontostaendeAm(a), fixkosten: (a) => fixkostenListe(a || {}), system: () => systemText(), knopfZiel: (a) => { const d = document.createElement('div'); knopf(d, a); return d; } };
 export function chatVergessen() { ls.del(K.key); ls.del(K.modell); verlauf = []; }
 
 // ======================================================================= Werkzeuge
@@ -87,7 +89,7 @@ const TOOLS = [
         beschriftung: { type: 'string', description: 'z. B. „Alle Versicherungen 2025 anzeigen“' },
         suche: { type: 'string' }, jahr: { type: 'integer' }, monat: { type: 'integer' }, konto: { type: 'string' },
         kategorie: { type: 'string' }, unterkategorie: { type: 'string' }, art: { type: 'string', enum: ['alle', 'aus', 'ein'] },
-        tab: { type: 'string', enum: ['buchungen', 'uebersicht', 'fix', 'konten'] },
+        tab: { type: 'string', enum: ['buchungen', 'start', 'kennzahlen', 'uebersicht', 'fix', 'konten', 'steuer'], description: 'buchungen = Liste, start = Übersicht, kennzahlen, uebersicht = Kategorien, fix = Fixkosten, konten, steuer' },
       },
       required: ['beschriftung'],
     },
@@ -131,7 +133,7 @@ function buchungenAuswerten(a) {
     if (a.sortierung === 'datum_absteigend') rs = [...rows].reverse();
     if (a.sortierung === 'betrag_groesste_zuerst') rs = [...rows].sort((x, y) => Math.abs(y.c) - Math.abs(x.c));
     out.buchungen = rs.slice(0, max).map((r) => ({
-      datum: r.d, konto: D.konten[r.k].name, empfaenger: r.g, zweck: r.z.length > 140 ? r.z.slice(0, 140) + '…' : r.z,
+      datum: r.d, konto: D.konten[r.k].name, empfaenger: r.g, ...(r.ga?.length ? { frueher_genannt: r.ga } : {}), zweck: r.z.length > 140 ? r.z.slice(0, 140) + '…' : r.z,
       kategorie: r.kat, unterkategorie: r.ukat, art: r.art, betrag_euro: e2(r.c), ...(r.v ? { vertrag: r.v } : {}), ...(r.n ? { notiz: r.n } : {}), ...(r.st ? { steuerkategorie: r.st } : {}),
     }));
     if (rows.length > max) out.hinweis = `Nur ${max} von ${rows.length} Buchungen gezeigt. Für mehr: gruppieren oder enger filtern.`;
@@ -168,9 +170,13 @@ function systemText() {
   const kat = new Map();
   for (const [u, k] of D.ukatZu) { if (!kat.has(k)) kat.set(k, []); kat.get(k).push(u); }
   const konten = D.konten.map((k) => `- ${k.name}${k.kind ? ' (Konto eines Kindes – gehört nicht zu den Finanzen des Nutzers, Art „Kinderkonto“, zählt in keiner Summe)' : k.gemeinsam ? ' (gemeinsames Konto mit Kathrin, je zur Hälfte befüllt – Buchungen dort haben die Art „Gemeinschaftskonto“ und zählen nicht; beim Nutzer zählen nur seine Einzahlungen dorthin als Ausgabe, Kategorie „Gemeinschaftskonto“)' : ''}: Buchungen ${k.von} bis ${k.bis}${k.saldo != null ? `, Kontostand ${EUR.format(k.saldo)} am ${k.saldoAm}` : ''}${k.vollstaendig ? ', lückenlos seit Eröffnung' : ''}`).join('\n');
+  const nm = app.normalerMonat?.();
+  const eurC = (c) => EUR.format(Math.round(c) / 100);
+  const monat = nm ? `Aktuelles Nettogehalt: ${eurC(nm.gehalt)} (letzter Gehaltsmonat ${nm.gehaltMonat}). Ein normaler Monat ab jetzt, so wie die App ihn zeigt: Gehalt ${eurC(nm.gehalt)} + typische sonstige Einnahmen ${eurC(nm.sonst)} − laufende Fixkosten ${eurC(nm.fix)} (${nm.vertraege.length} Verträge) − Lebenshaltung ${eurC(nm.leben)} = ${eurC(nm.erg)} im Monat. Wenn nach dem Gehalt, dem Spielraum oder dem „normalen Monat“ gefragt wird, nimm diese Werte – das aktuelle Gehalt ist immer die Grundlage, Durchschnitte nur zum Vergleich.
+` : '';
   return `Du bist der Finanz-Assistent in der privaten App „Finanzen“ des Nutzers. Heute ist der ${new Date().toISOString().slice(0, 10)}.
 Die Daten: ${D.rows.length} Buchungen vom ${D.von} bis ${D.bis} (Stand der Datei ${D.j.erstellt}).
-
+${monat}
 Konten:
 ${konten}
 
@@ -277,8 +283,9 @@ function knopf(ziel, a) {
   const b = document.createElement('button');
   b.className = 'btn sm chat-aktion';
   b.textContent = '→ ' + a.beschriftung;
-  const f = { q: a.suche || '', jahr: a.jahr ? String(a.jahr) : '', monat: a.monat ? String(a.monat) : '', konto: a.konto || '', kat: a.kategorie || '',
-    ukat: a.unterkategorie || '', art: a.art || 'alle', tab: a.tab || 'buchungen' };
+  // alle Filter neu setzen – auch Zeitraum (zr) und „ohne feste Verträge“ (nf), sonst wirkte ein alter Filter weiter
+  const f = { q: a.suche || '', jahr: a.jahr ? String(a.jahr) : '', monat: a.monat ? String(a.monat) : '', zr: '', nf: '', konto: a.konto || '', kat: a.kategorie || '',
+    ukat: a.unterkategorie || '', art: a.art || 'alle', tab: a.tab || 'buchungen', wahl: '' };
   b.onclick = () => { app.setze(f); if (matchMedia('(max-width: 760px)').matches) schliessen(); };
   ziel.append(b);
   nachUnten();
