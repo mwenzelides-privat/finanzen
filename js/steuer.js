@@ -444,6 +444,18 @@ export function steuerZeigen(el, c) {
         <span class="st-ab-w">${offB(x.a.id) != null ? `<span class="st-offiz">laut ${esc(offName(O))}: ${eur0(offB(x.a.id))}${O.abschnitte[x.a.id].t ? ` – ${esc(O.abschnitte[x.a.id].t)}` : ''}</span>` : wirkung(x)}</span></button>`).join('');
   }
 
+  // Für freie Fläche: dieselben Bereiche im Vergleich der Jahre und die größten Einzelposten (nur, wenn Platz ist)
+  const vjahre = jahre.filter((y) => y <= jahr).slice(0, 4).reverse();
+  const jeJahr = new Map(vjahre.map((y) => [y, y === jahr ? wirksam : einordnen(y).filter((x) => x.status !== 'ausgeschlossen')]));
+  const absBetrag = (y, id) => -summe(jeJahr.get(y).filter((x) => POSTEN_ID.get(x.p).abschnitt === id));
+  const vergleich = vjahre.length > 1 ? `<div class="s5-teil fuell-aus" data-fuell="1"><h3>Im Vergleich der Jahre</h3>
+    <div class="t3-rahmen"><table class="t3 t3-eng st5-vgl"><thead><tr><th>laut Kontoauszügen</th>${vjahre.map((y) => `<th class="r${y === jahr ? ' an' : ''}"><button class="link" data-sjahr="${y}">${y}</button></th>`).join('')}</tr></thead><tbody>
+    ${ABSCHNITTE.filter((a) => a.id !== 'einnahmen' && vjahre.some((y) => absBetrag(y, a.id))).map((a) => `<tr><td>${esc(a.name)}</td>${vjahre.map((y) => `<td class="r${y === jahr ? ' an' : ''}">${absBetrag(y, a.id) ? eur0(absBetrag(y, a.id)) : '<span class="muted">–</span>'}</td>`).join('')}</tr>`).join('')}
+    <tr class="st5-erg"><td>Erstattung (+) / Nachzahlung (−) laut Unterlagen</td>${vjahre.map((y) => { const e = offiziell(y)?.ergebnis?.erstattung; return `<td class="r${y === jahr ? ' an' : ''}">${e == null ? '<span class="muted">–</span>' : `<b class="${e >= 0 ? 'pos' : 'neg'}">${e >= 0 ? '+' : '−'}${EUR0.format(Math.abs(e))}</b>`}</td>`; }).join('')}</tr>
+    </tbody></table></div></div>` : '';
+  const gross = wirksam.filter((x) => POSTEN_ID.get(x.p).abschnitt !== 'einnahmen' && x.r.c < 0).sort((a, b) => a.r.c - b.r.c).slice(0, 5);
+  const groesste = gross.length ? `<div class="s5-teil fuell-aus" data-fuell="2"><h3>Größte Einzelposten ${jahr}</h3><div class="nt">${gross.map((x, i) => `<div class="nt-z st5-gz${i ? ' fuell-aus' : ''}"${i ? ` data-fuell="${2 + i}" data-stopp` : ''}><span class="nt-n">${dde(x.r.d).slice(0, 6)} ${esc(x.r.g || x.r.z || '–')} <small>${esc(POSTEN_ID.get(x.p).name)}</small></span><b>${eur0(-x.r.c)}</b></div>`).join('')}</div></div>` : '';
+
   const knopf = (v, t) => `<button data-sfilter="${v}" class="${filter === v ? 'an' : ''}">${t}</button>`;
   const aName = abschnittF && ABSCHNITTE.find((x) => x.id === abschnittF)?.name;
   const leiste = `<div class="st-leiste"><div class="seg st-filter">${knopf('zu', `Offen (${zuGruppen})`)}${knopf('erledigt', `Erledigt (${fertigG})`)}${knopf('alle', 'Alle')}</div>
@@ -457,7 +469,7 @@ export function steuerZeigen(el, c) {
     <div class="s5-raster st5-oben">
       <section class="card s5-karte s5-b2"><div class="s5-kt"><div class="s5-kt-t"><h2>Was du ${jahr} geltend machen kannst</h2>
         <p class="s5-erkl">laut Kontoauszügen, Offenes mitgezählt${O ? ' · Marke = Betrag laut Unterlagen' : ''} · Strich bei den Werbungskosten = Pauschbetrag · anklicken: nur diesen Bereich zeigen</p></div></div>
-        <div class="st-geltend5">${geltendHtml}</div></section>
+        <div class="st-geltend5">${geltendHtml}</div>${vergleich}${groesste}</section>
       ${offKarte(jahr)}
     </div>
     <section class="card s5-karte st5-liste" id="st-entscheidungen"><div class="s5-kt"><div class="s5-kt-t"><h2>Entscheidungen</h2>
@@ -468,6 +480,7 @@ export function steuerZeigen(el, c) {
     const fertig = filter === 'zu' && wirksam.length;
     h += `<div class="leer">${fertig ? `Alles entschieden${aName ? ` in „${esc(aName)}“` : ''}. Jetzt „PDF“ oder „Excel“ für die Steuerberaterin erstellen.` : 'Keine Buchungen in dieser Auswahl.'}</div></section></div>`;
     el.innerHTML = h;
+    freiFuellen(el);
     return binden(el);
   }
 
@@ -504,7 +517,22 @@ export function steuerZeigen(el, c) {
   }
   h += '</div></section></div>';
   el.innerHTML = h;
+  freiFuellen(el);
   binden(el);
+}
+// Freie Fläche nutzen (wie in app.js): [data-fuell] der Reihe nach zeigen, solange der Kasten nicht höher wird
+function freiFuellen(root) {
+  const karten = new Set([...root.querySelectorAll('[data-fuell]')].map((e) => e.closest('.s5-karte')).filter(Boolean));
+  for (const k of karten) {
+    let reiheVoll = false;
+    for (const el of [...k.querySelectorAll('[data-fuell]')].sort((a, b) => a.dataset.fuell - b.dataset.fuell)) {
+      if (reiheVoll && 'stopp' in el.dataset) continue;
+      if (el.parentElement.closest('.fuell-aus')) { el.classList.add('fuell-aus'); continue; }   // liegt in einem Zusatz, der nicht passt
+      const vorher = k.getBoundingClientRect().height;
+      el.classList.remove('fuell-aus');
+      if (k.getBoundingClientRect().height > vorher + 0.5) { el.classList.add('fuell-aus'); if ('stopp' in el.dataset) reiheVoll = true; }
+    }
+  }
 }
 
 // Offizielle Unterlagen eines Jahres als Karte: Eckdaten, Zahlen und Hinweise; ohne Unterlagen: was die Vorjahre lehren

@@ -414,6 +414,23 @@ function balkenListe(items, { max, kopf = null } = {}) {
 }
 // Klicks: data-geh = Ziel als JSON (Reiter, Filter), data-fix = alle Zahlungen eines Vertrags
 // data-springe = Ziel auf derselben Seite (aufklappen, hinscrollen, kurz hervorheben)
+// Freie Fläche nutzen: Elemente mit [data-fuell] sind zunächst verborgen und werden der Reihe nach (Zahl in data-fuell)
+// gezeigt, solange ihr Kasten dadurch nicht höher wird – so entsteht neben einem höheren Nachbarn keine Leerfläche.
+// data-stopp: fortlaufende Zeilen – passt eine nicht, folgen keine weiteren dieser Reihe.
+function freiFuellen(root) {
+  const karten = new Set([...root.querySelectorAll('[data-fuell]')].map((e) => e.closest('.s5-karte')).filter(Boolean));
+  for (const k of karten) {
+    const els = [...k.querySelectorAll('[data-fuell]')].sort((a, b) => a.dataset.fuell - b.dataset.fuell);
+    let reiheVoll = false;   // fortlaufende Zeilen (data-stopp): nach der ersten, die nicht passt, keine weitere
+    for (const el of els) {
+      if (reiheVoll && 'stopp' in el.dataset) continue;
+      if (el.parentElement.closest('.fuell-aus')) { el.classList.add('fuell-aus'); continue; }   // liegt in einem Zusatz, der nicht passt
+      const vorher = k.getBoundingClientRect().height;
+      el.classList.remove('fuell-aus');
+      if (k.getBoundingClientRect().height > vorher + 0.5) { el.classList.add('fuell-aus'); if ('stopp' in el.dataset) reiheVoll = true; }
+    }
+  }
+}
 function gehBinden(el) {
   el.querySelectorAll('[data-geh]').forEach((b) => b.onclick = (e) => {
     e.stopPropagation();
@@ -810,12 +827,20 @@ function k5Seite() {
 
   // Was sich verändert hat (Kategorien je Monat ggü. Vorjahr)
   let veraendert = '<div class="leer klein">Für diesen Zeitraum gibt es kein Vorjahr zum Vergleich.</div>';
+  let dAus = [];
   if (v) {
-    const d = [...new Set([...a.g.keys(), ...v.g.keys()])].map((k) => ({ k, jetzt: (a.g.get(k)?.c || 0) / a.n, vorher: (v.g.get(k)?.c || 0) / v.n }))
+    const d = dAus = [...new Set([...a.g.keys(), ...v.g.keys()])].map((k) => ({ k, jetzt: (a.g.get(k)?.c || 0) / a.n, vorher: (v.g.get(k)?.c || 0) / v.n }))
       .map((x) => ({ ...x, d: x.jetzt - x.vorher })).filter((x) => Math.abs(x.d) >= 3000).sort((x, y) => Math.abs(y.d) - Math.abs(x.d)).slice(0, 8);
     veraendert = d.length ? `<div class="vd">${d.map((x) => `<button class="vd-z"${geh({ tab: 'uebersicht', kart: 'aus', wahl: x.k })} title="Klick: Einzelheiten zur Kategorie">
         <span class="vd-p ${x.d > 0 ? 'neg' : 'pos'}">${x.d > 0 ? '▲' : '▼'}</span><span class="vd-n">${esc(schoen(x.k))}<small>${eur0(x.vorher)} → ${eur0(x.jetzt)} im Monat</small></span><b class="${x.d > 0 ? 'neg' : 'pos'}">${plusMinus(x.d)}</b></button>`).join('')}</div>`
       : '<div class="leer klein">Kaum Veränderungen gegenüber dem Vorjahr.</div>';
+    // nur wenn Platz ist: die Einnahmen-Seite und der größte Hebel
+    const dEin = [...new Set([...ein.g.keys(), ...einV.g.keys()])].map((k) => ({ k, jetzt: (ein.g.get(k)?.c || 0) / a.n, vorher: (einV.g.get(k)?.c || 0) / v.n }))
+      .map((x) => ({ ...x, d: x.jetzt - x.vorher })).filter((x) => Math.abs(x.d) >= 3000).sort((x, y) => Math.abs(y.d) - Math.abs(x.d)).slice(0, 4);
+    if (dEin.length) veraendert += `<div class="s5-teil fuell-aus" data-fuell="2"><h3>Bei den Einnahmen</h3><div class="vd">${dEin.map((x, i) => `<button class="vd-z${i ? ' fuell-aus' : ''}"${i ? ` data-fuell="${2 + i}" data-stopp` : ''}${geh({ tab: 'uebersicht', kart: 'ein', wahl: x.k })} title="Klick: Einzelheiten">
+        <span class="vd-p ${x.d > 0 ? 'pos' : 'neg'}">${x.d > 0 ? '▲' : '▼'}</span><span class="vd-n">${esc(schoen(x.k))}<small>${eur0(x.vorher)} → ${eur0(x.jetzt)} im Monat</small></span><b class="${x.d > 0 ? 'pos' : 'neg'}">${plusMinus(x.d)}</b></button>`).join('')}</div></div>`;
+    const hebel = dAus.filter((x) => x.d > 0)[0];
+    if (hebel) veraendert += `<p class="s5-tipp fuell-aus" data-fuell="1">Größter Hebel: ${zl(`<b>${esc(schoen(hebel.k))}</b>`, { tab: 'uebersicht', kart: 'aus', wahl: hebel.k })} kostet ${eur0(hebel.d)} mehr im Monat als im Vorjahr – zurück aufs Vorjahresniveau wären ${eur0(hebel.d * 12)} im Jahr.</p>`;
   }
 
   // Jahr für Jahr als Tabelle (neuestes oben), Zeile anklicken = Jahr wählen
@@ -860,6 +885,7 @@ function k5Seite() {
     </div>
     ${leiste}
     <details class="card s5-details" id="k5-tab"><summary>Alle Monate als Tabelle <span class="muted">· Zeile anklicken: Buchungen des Monats</span></summary><div class="t3-rahmen">${tabelle}</div></details>`;
+  freiFuellen(box);
   gehBinden(box);
   kennzahlenBinden(box);
   k5MonateZeichnen(P, a, R);
@@ -1090,18 +1116,34 @@ function tabKonten() {
 
   // Monatsenden: Summe deiner (gewählten) Konten und die Veränderung zum Vormonat
   const enden = [];
-  { let [y, mo] = tag.slice(0, 7).split('-').map(Number); for (let i = 0; i < 7; i++) { if (--mo === 0) { mo = 12; y--; } const d = monatsletzter(`${mkey(y, mo)}-01`); if (d >= D.von) enden.unshift(d); } }
+  { let [y, mo] = tag.slice(0, 7).split('-').map(Number); for (let i = 0; i < 13; i++) { if (--mo === 0) { mo = 12; y--; } const d = monatsletzter(`${mkey(y, mo)}-01`); if (d >= D.von) enden.unshift(d); } }
   const st = enden.map((d) => new Map(kontostaende(D, d).map((x) => [x.i, x.c])));
   const sumAm = (s2) => gew.reduce((t, x) => t + (s2.get(x.i) || 0), 0);
   const reihe = [...enden.map((d, i) => ({ d, c: sumAm(st[i]) })), { d: tag, c: saldo, jetzt: true }];
   const monatsenden = `<div class="me">${reihe.slice(1).reverse().map((x, i, a) => {
     const vor = reihe[reihe.length - 2 - i], diff = x.c - vor.c;
-    return `<button class="me-z" data-st="${x.d}" title="Anklicken: Kontostände an diesem Tag"><span>${x.jetzt ? (heute ? 'heute' : dde(x.d).slice(0, 6)) : `Ende ${monKurz(x.d.slice(0, 7))}`}</span><b>${eur0(x.c)}</b><span class="${diff >= 0 ? 'pos' : 'neg'}">${plusMinus(diff)}</span></button>`;
+    return `<button class="me-z${i >= 6 ? ' fuell-aus' : ''}"${i >= 6 ? ` data-fuell="${i}" data-stopp` : ''} data-st="${x.d}" title="Anklicken: Kontostände an diesem Tag"><span>${x.jetzt ? (heute ? 'heute' : dde(x.d).slice(0, 6)) : `Ende ${monKurz(x.d.slice(0, 7))}`}</span><b>${eur0(x.c)}</b><span class="${diff >= 0 ? 'pos' : 'neg'}">${plusMinus(diff)}</span></button>`;
   }).join('')}</div>`;
-  const alt = (i) => (i < enden.length - 3 ? ' m-alt' : '');
-  const tabelle = `<div class="t3-rahmen"><table class="t3 t3-eng"><thead><tr><th>Konto</th>${enden.map((d, i) => `<th class="r${alt(i)}">${monKurz(d.slice(0, 7))}</th>`).join('')}<th class="r">${dde(tag).slice(0, 6)}</th></tr></thead><tbody>
-    ${gew.map((x) => `<tr><td class="t3-n">${esc(x.k.name)}</td>${st.map((s2, i) => `<td class="r${alt(i)}">${s2.get(x.i) == null ? '<span class="muted">–</span>' : NUM.format(Math.round(s2.get(x.i) / 100))}</td>`).join('')}<td class="r"><b>${NUM.format(Math.round(x.c / 100))}</b></td></tr>`).join('')}</tbody>
-    <tfoot><tr><td>Zusammen</td>${st.map((s2, i) => `<td class="r${alt(i)}">${NUM.format(Math.round(sumAm(s2) / 100))}</td>`).join('')}<td class="r">${NUM.format(Math.round(saldo / 100))}</td></tr></tfoot></table></div>`;
+  // Verteilung nach Zweck und größte Bewegungen des Monats – nur wenn neben der Kontenliste Platz ist
+  const gruppenSumme = KONTO_GRUPPEN.filter((g) => !g.fremd).map((g) => ({ g, c: gew.filter((x) => g.test(x.k)).reduce((t, x) => t + x.c, 0) })).filter((x) => x.c);
+  const positiv = gruppenSumme.filter((x) => x.c > 0), posS = positiv.reduce((t, x) => t + x.c, 0) || 1;
+  const gFarbe = { frei: 'var(--accent)', gebunden: 'color-mix(in srgb, var(--accent) 45%, var(--surface))', karte: 'var(--aus)' };
+  const verteilung = `<div class="s5-teil fuell-aus" data-fuell="20"><h3>Wo dein Geld liegt</h3>
+    <div class="wf5-b">${positiv.map((x) => `<i style="width:${(x.c / posS) * 100}%;background:${gFarbe[x.g.id]}" data-springe="#kg-${x.g.id}" title="${x.g.titel}: ${eur0(x.c)}"></i>`).join('')}</div>
+    <div class="wf5">${gruppenSumme.map((x) => `<button class="wf5-z" data-springe="#kg-${x.g.id}"><i style="background:${gFarbe[x.g.id]}"></i><span class="wf5-n">${x.g.titel}</span><b class="${x.c < 0 ? 'neg' : ''}">${eur0(x.c)}</b><span class="wf5-p">${x.c > 0 ? `${Math.round((x.c / posS) * 100)} %` : ''}</span></button>`).join('')}</div></div>`;
+  const monatK = tag.slice(0, 7), eigene = new Set(gew.map((x) => x.i));
+  const bewegt = D.rows.filter((r) => r.d.startsWith(monatK) && r.d <= tag && eigene.has(r.k) && r.art !== 'Umbuchung').sort((a, b) => Math.abs(b.c) - Math.abs(a.c)).slice(0, 5);
+  const bewegungen = bewegt.length ? `<div class="s5-teil fuell-aus" data-fuell="21"><h3>Größte Bewegungen im ${MONAT[+monatK.slice(5) - 1]}</h3><div class="nt">${bewegt.map((r) => `<button class="nt-z bw-z"${geh(zuBuchungen({ q: r.g ? `"${r.g}"` : '', ...monatZiel(monatK) }))} title="Anklicken: Buchungen"><span class="nt-n">${dde(r.d).slice(0, 6)} ${esc(r.g || r.z || '–')}</span><b class="${cls(r.c)}">${eur0(r.c)}</b></button>`).join('')}</div></div>` : '';
+  const r12 = reihe.slice(-13), hoch = r12.reduce((m, x) => (x.c > m.c ? x : m), r12[0]), tief = r12.reduce((m, x) => (x.c < m.c ? x : m), r12[0]), vorJahr = reihe.length >= 13 ? reihe[reihe.length - 13] : null;
+  const ecken = `<dl class="s5-dl fuell-aus" data-fuell="22">
+    <div class="klick" data-st="${hoch.d}"><dt>Höchster Stand (12 Monate)</dt><dd>${eur0(hoch.c)} <small class="inl">${hoch.jetzt ? 'heute' : `Ende ${monKurz(hoch.d.slice(0, 7))}`}</small></dd></div>
+    <div class="klick" data-st="${tief.d}"><dt>Tiefster Stand (12 Monate)</dt><dd>${eur0(tief.c)} <small class="inl">${tief.jetzt ? 'heute' : `Ende ${monKurz(tief.d.slice(0, 7))}`}</small></dd></div>
+    ${vorJahr ? `<div class="klick" data-st="${vorJahr.d}"><dt>Vor einem Jahr</dt><dd>${eur0(vorJahr.c)} <small class="inl ${saldo - vorJahr.c >= 0 ? 'pos' : 'neg'}">${plusMinus(saldo - vorJahr.c)} bis heute</small></dd></div>` : ''}</dl>`;
+  const endenT = enden.slice(-6), stT = st.slice(-6);
+  const alt = (i) => (i < endenT.length - 3 ? ' m-alt' : '');
+  const tabelle = `<div class="t3-rahmen"><table class="t3 t3-eng"><thead><tr><th>Konto</th>${endenT.map((d, i) => `<th class="r${alt(i)}">${monKurz(d.slice(0, 7))}</th>`).join('')}<th class="r">${dde(tag).slice(0, 6)}</th></tr></thead><tbody>
+    ${gew.map((x) => `<tr><td class="t3-n">${esc(x.k.name)}</td>${stT.map((s2, i) => `<td class="r${alt(i)}">${s2.get(x.i) == null ? '<span class="muted">–</span>' : NUM.format(Math.round(s2.get(x.i) / 100))}</td>`).join('')}<td class="r"><b>${NUM.format(Math.round(x.c / 100))}</b></td></tr>`).join('')}</tbody>
+    <tfoot><tr><td>Zusammen</td>${stT.map((s2, i) => `<td class="r${alt(i)}">${NUM.format(Math.round(sumAm(s2) / 100))}</td>`).join('')}<td class="r">${NUM.format(Math.round(saldo / 100))}</td></tr></tfoot></table></div>`;
   return kopf5('Konten', satz, rechts) + `<div class="s5-zahlen">${zahlen}</div>
     <div class="s5-raster kon5">
       ${karte5('Alle Konten', `Stand ${dde(tag)} · nach Zweck gruppiert · rechts: Veränderung seit 1.1. · anklicken: Buchungen${ks ? ' · blass: nicht gewählt' : ''}`,
@@ -1109,7 +1151,7 @@ function tabKonten() {
         ${unbekannt.length ? `<p class="s5-erkl">Für diesen Tag noch ohne Daten: ${unbekannt.map((x) => `${esc(x.k.name)} (ab ${dde(x.k.von)})`).join(', ')}.</p>` : ''}`, 's5-b2')}
       <div class="s5-spalte">
         ${karte5('Verlauf', `Summe ${ks ? 'der gewählten Konten' : 'deiner Konten'} am Monatsende${V ? ' · gestrichelt: Prognose' : ''} · Punkt anklicken: Stand an diesem Tag`, '<div class="s5-chart klein"><canvas id="c-konten-verlauf"></canvas></div>')}
-        ${karte5('Monatsenden', 'Summe am Monatsende und Veränderung zum Vormonat · anklicken: Stand an diesem Tag', monatsenden, '', zs('je Konto ↓', '#kon-tab'))}
+        ${karte5('Monatsenden', 'Summe am Monatsende und Veränderung zum Vormonat · anklicken: Stand an diesem Tag', monatsenden + verteilung + bewegungen + ecken, '', zs('je Konto ↓', '#kon-tab'))}
       </div>
     </div>
     <details class="card s5-details" id="kon-tab"><summary>Kontostände je Konto an den Monatsenden <span class="muted">· in Euro</span></summary>${tabelle}</details>` + eingangHtml();
@@ -1332,6 +1374,7 @@ function tabelle(conds) {
   }
   $('.dl').hidden = false;
   el.innerHTML = S.tab === 'buchungen' ? tabBuchungen(conds) : `<div class="s5">${S.tab === 'uebersicht' ? tabKategorien() : S.tab === 'konten' ? tabKonten() : tabFixkosten()}</div>`;
+  freiFuellen(el);
   gehBinden(el);
   // Zeitraum, Kategorien, Fixkosten-Ansicht
   el.querySelectorAll('[data-zeit]').forEach((b) => b.onclick = () => setze({ jahr: b.dataset.zeit, monat: '' }));
@@ -1757,6 +1800,29 @@ function tabFixkosten() {
 }
 
 // Verträge nach Art gruppiert (Art als Kopf, die Verträge eingerückt darunter), daneben Wofür, Lebenshaltung und die nächsten Abbuchungen
+// Für freie Fläche neben den Verträgen: feste Abbuchungen der nächsten 12 Monate als Säulen (außer der Reihe hervorgehoben)
+// und ein paar Eckdaten
+function fixJahrHtml(aktiv) {
+  const Z = zahlungsDaten(aktiv), max = Math.max(1, ...Z.monate.map((m) => m.summe));
+  const normal = Z.tag1.reduce((t, x) => t + x.c, 0), teuer = [...Z.monate].sort((a, b) => b.summe - a.summe)[0];
+  const extra = Z.monate.reduce((t, m) => t + m.extra.reduce((s, f) => s + f.betrag, 0), 0);
+  const maxX = Math.max(1, ...Z.monate.map((m) => m.summe - normal));
+  const saeulen = `<div class="s5-teil fuell-aus" data-fuell="1"><h3>Außer der Reihe – die nächsten 12 Monate</h3>
+    <div class="mj">${Z.monate.map((m) => { const ex = Math.max(0, m.summe - normal); return `<button class="mj-s" data-fixtab="kalender" title="${monLang(m.k)}: ${eur0(m.summe)} feste Abbuchungen${m.extra.length ? ` – außer der Reihe: ${m.extra.map((f) => `${vertragName(f)} ${eur0(f.betrag)}`).join(', ')}` : ' – nichts außer der Reihe'}">
+      <span class="mj-w">${ex ? eur0(ex) : ''}</span><span class="mj-b"><i class="mj-x" style="height:${(ex / maxX) * 100}%"></i></span><span class="mj-m">${MON[+m.k.slice(5) - 1].slice(0, 1)}</span></button>`; }).join('')}</div>
+    <p class="s5-erkl">zusätzlich zu ${eur0(normal)}, die jeden Monat gleich abgehen · Säule anklicken: Kalender</p></div>`;
+  const fakten = `<dl class="s5-dl fuell-aus" data-fuell="2">
+    <div><dt>Teuerster Monat</dt><dd>${teuer ? `${monKurz(teuer.k)} · ${eur0(teuer.summe)}` : '–'}</dd></div>
+    <div><dt>Außer der Reihe im Jahr</dt><dd>${eur0(extra)}</dd></div>
+    ${Z.gt ? `<div><dt>Gehalt kommt um den</dt><dd>${Z.gt}.</dd></div>` : ''}</dl>`;
+  // kürzlich beendete Verträge (letzte 12 Monate): was weggefallen ist und wie viel das im Monat spart
+  const seit = plusTage(D.bis, -365);
+  // ohne Verträge, bei denen an denselben Empfänger weiter gezahlt wird (umgestellt, nicht beendet – z. B. Unterhalt je Kind statt gesamt)
+  const laufendAn = new Set(aktiv.map((f) => empfaengerKey(f.name)));
+  const weg = fixkostenErkennen().filter((f) => !f.aktiv && !f.gemeinsam && f.zuletzt >= seit && !laufendAn.has(empfaengerKey(f.name))).sort((a, b) => b.proMonat - a.proMonat);
+  const beendet = weg.length ? `<div class="s5-teil fuell-aus" data-fuell="3"><h3>In den letzten 12 Monaten beendet</h3><div class="nt">${weg.map((f, i) => `<button class="nt-z bw-z${i ? ' fuell-aus' : ''}"${i ? ` data-fuell="${3 + i}" data-stopp` : ''} data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="Anklicken: alle Zahlungen"><span class="nt-n">${esc(vertragName(f))} <small>bis ${dde(f.zuletzt).slice(3)}</small></span><b>${eur0(f.proMonat)}/Monat</b></button>`).join('')}</div></div>` : '';
+  return saeulen + fakten + beendet;
+}
 const fvId = (art) => `fv-${norm(art).replace(/[^a-z]+/g, '-')}`;
 // Farbe je Art: von dunkel (größter Posten) nach hell, alle im Ton der Fixkosten
 const fvFarbe = (i, n) => `color-mix(in srgb, var(--fest) ${Math.round(100 - (i / Math.max(1, n - 1)) * 58)}%, var(--surface))`;
@@ -1796,7 +1862,7 @@ function fixVertraegeAnsicht(o) {
     <div class="s5-spalte">
       ${karte5('Wofür', `Anteil an deinen Fixkosten (${eur0(pm)} im Monat) · anklicken: die Verträge`, wofuer)}
       ${lebenKarte(R)}
-      ${karte5('Nächste 30 Tage', 'Feste Abbuchungen je Tag, dazwischen das erwartete Gehalt · anklicken: alle Zahlungen', termineHtml(termine, 14), '', zl(`<span class="s5-wert">${eur0(tSumme)}</span>`, { fixtab: 'kalender' }))}
+      ${karte5('Nächste 30 Tage', 'Feste Abbuchungen je Tag, dazwischen das erwartete Gehalt · anklicken: alle Zahlungen', termineHtml(termine, 14) + fixJahrHtml(aktiv), '', zl(`<span class="s5-wert">${eur0(tSumme)}</span>`, { fixtab: 'kalender' }))}
     </div>
   </div>`;
 }
