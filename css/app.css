@@ -1833,6 +1833,34 @@ button.bl-z:hover { background: var(--surface-2); }
   .gb-t span { display: none; }
 }
 
+/* Kopfzeile: links Name und Zurück, in der Mitte die Reiter, rechts Datenstand und Knöpfe */
+.top-l, .top-r { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.top-r { justify-content: flex-end; }
+@media (min-width: 901px) {
+  .top { display: grid; grid-template-columns: 1fr auto 1fr; }
+  .top .nav { margin: 0; }
+}
+/* Verweise: Zahlen im Text, Zeilen und Summen führen zu den Einzelheiten */
+.s5-kt-r { flex: none; white-space: nowrap; font-size: 13px; }
+.zl { display: inline; border: 0; background: none; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; text-decoration: underline dotted 1.5px; text-decoration-color: color-mix(in srgb, currentColor 45%, transparent); text-underline-offset: 3px; border-radius: 3px; }
+.zl:hover { background: var(--accent-soft); text-decoration-color: var(--accent); }
+.s5-dl > .klick { cursor: pointer; border-radius: 6px; }
+.s5-dl > .klick:hover { background: var(--surface-2); }
+.s5-dl > .klick { padding-left: 4px; padding-right: 4px; }
+button.s5-summe { width: 100%; background: none; border: 0; border-top: 1.5px solid var(--border-strong); font: inherit; font-weight: 700; color: inherit; cursor: pointer; text-align: left; }
+button.s5-summe:hover { background: var(--surface-2); }
+button.mb { display: grid; gap: 5px; width: 100%; padding: 4px; margin: -4px; width: calc(100% + 8px); background: none; border: 0; border-radius: 8px; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+button.mb:hover { background: var(--surface-2); }
+.mb-b { display: block; }
+button.kl-summe { cursor: pointer; }
+button.kl-summe:hover { background: var(--surface-2); }
+.gb-t[data-springe] { cursor: pointer; }
+.gb-t[data-springe]:hover { filter: brightness(1.08); }
+.s5-karte, .s5-details, .fv-g { scroll-margin-top: 84px; }
+@keyframes blink5 { 0%, 60% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 3px transparent; } }
+.blink { animation: blink5 1.8s ease-out; }
+tr.blink td { animation: blink5td 1.8s ease-out; }
+@keyframes blink5td { 0%, 60% { background: var(--accent-soft); } 100% { background: transparent; } }
 @media (max-width: 900px), (max-height: 500px) {
   .ue, .uem { height: auto !important; min-height: 0 !important; grid-template-rows: none !important; }
   .ue-mitte, .ue-unten, .uem-haupt, .uem-unten { grid-template-columns: 1fr !important; min-height: 0; }

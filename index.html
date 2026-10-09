@@ -20,8 +20,10 @@
 </head>
 <body>
   <header class="top">
+    <div class="top-l">
     <div class="brand"><img src="icons/icon.svg" alt="" width="26" height="26"><span>Finanzen</span></div>
     <button class="btn sm kopf-zurueck" id="btn-zurueck" title="Zurück: die letzte Aktion rückgängig machen (auch Maustaste „Zurück“ oder Alt + ←)" hidden><svg viewBox="0 0 24 24" aria-hidden="true" width="16" height="16"><path d="M15 18l-6-6 6-6"/></svg><span>Zurück</span></button>
+    </div>
     <nav class="nav" id="tabs" role="tablist" aria-label="Bereiche" hidden>
       <button role="tab" data-tab="start"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/></svg><span>Übersicht</span></button>
       <button role="tab" data-tab="kennzahlen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Kennzahlen</span></button>
@@ -31,6 +33,7 @@
       <button role="tab" data-tab="konten"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9.5 12 4l9 5.5"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8"/><path d="M3 20.5h18"/></svg><span>Konten</span></button>
       <button role="tab" data-tab="steuer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2.5h12v19l-3-2-3 2-3-2-3 2z"/><path d="m9 14 6-6"/><circle cx="9.5" cy="8.5" r=".8"/><circle cx="14.5" cy="13.5" r=".8"/></svg><span>Steuer</span></button>
     </nav>
+    <div class="top-r">
     <div class="stand" id="stand"></div>
     <button class="einlesen-knopf" id="btn-neu" title="Neue Dateien aus dem Eingang einlesen und die neuesten Daten laden" hidden>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg><span>Daten einlesen</span>
@@ -38,6 +41,7 @@
     <button class="icon-btn" id="btn-menu" title="Datenquelle und Darstellung">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
     </button>
+    </div>
   </header>
 
   <main>
