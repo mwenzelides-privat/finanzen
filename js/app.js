@@ -1149,7 +1149,8 @@ function kontenGrafikZeichnen() {
 
 // ======================================================================= Tabellen
 function sortiert() {
-  const f = S.sort === 'betrag' ? (a, b) => a.c - b.c : S.sort === 'wer' ? (a, b) => (a.g || a.z).localeCompare(b.g || b.z, 'de') : (a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : a.i - b.i);
+  const f = S.sort === 'betrag' ? (a, b) => Math.abs(a.c) - Math.abs(b.c) || a.c - b.c :   // nach Höhe des Betrags, egal ob rein oder raus
+    S.sort === 'wer' ? (a, b) => (a.g || a.z).localeCompare(b.g || b.z, 'de') : (a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : a.i - b.i);
   const out = F.slice().sort(f);
   if (S.dir < 0) out.reverse();
   return out;
@@ -1183,42 +1184,94 @@ function keineTreffer(conds) {
   return leer;
 }
 
+// Buchungen: oben die Treffer in Zahlen und eine kleine Monatsgrafik, darunter die Liste – nach Datum je Tag gruppiert
+// (mit Tagessumme), nach Betrag oder Empfänger als einfache Liste. Zeile anklicken: Einzelheiten.
+let buchGrafik = null;
 function tabBuchungen(conds) {
   const rows = sortiert();
+  buchGrafik = null;
   if (!rows.length) return keineTreffer(conds);
   const w = highlightWords(conds);
   const re = w.length ? new RegExp('(' + w.map(escRe).join('|') + ')', 'gi') : null;
   const mk = (s) => (re ? esc(s).replace(re, '<mark>$1</mark>') : esc(s));
-  const pf = (k) => (S.sort === k ? `<span class="pfeil">${S.dir < 0 ? '↓' : '↑'}</span>` : '');
   const kn = (r) => D.konten[r.k].name;
-  let h = `<div class="tab-scroll"><table class="t fix"><thead><tr>
-    <th class="sort" data-sort="datum" style="width:96px">Datum ${pf('datum')}</th><th class="sort" data-sort="wer">Empfänger / Zweck ${pf('wer')}</th>
-    <th class="kat-sp" style="width:190px">Kategorie</th><th class="konto-sp" style="width:180px">Konto</th><th class="sort r" data-sort="betrag" style="width:118px">Betrag ${pf('betrag')}</th></tr></thead><tbody>`;
-  for (const r of rows.slice(0, limit)) {
-    const auf = offen.has(r.i);
-    h += `<tr class="klick${auf ? ' offen' : ''}" data-i="${r.i}"><td class="datum">${dde(r.d)}</td>
-      <td><div class="wer">${mk(r.g || r.z || '–')}</div>${r.g && r.z ? `<div class="zweck">${mk(r.z)}</div>` : ''}</td>
-      <td class="kat kat-sp">${esc(schoen(r.kat))}<small>${esc(schoen(r.ukat))}</small></td><td class="konto konto-sp">${esc(kn(r))}</td>
-      <td class="r betrag ${cls(r.c)}">${eur(r.c)}</td></tr>`;
-    if (auf) {
-      const dd = [['Verwendungszweck', r.z], ['Kategorie', `${r.kat}${r.ukat ? ' · ' + r.ukat : ''}`], ['Konto', kn(r)], ['Art', r.art],
-        ['Vertrag', r.v], ['Tags', r.t], ['Notiz', r.n], ['Steuerkategorie (Buhl)', r.st]].filter(([, v]) => v);
-      h += `<tr class="detail"><td colspan="5"><dl>${dd.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
-        ${r.g ? `<button class="btn sm" data-alle="${esc(r.g)}">Alle Buchungen von „${esc(r.g.length > 40 ? r.g.slice(0, 40) + '…' : r.g)}“</button>` : ''}
-        <button class="btn sm" data-nurkat="${esc(r.kat)}">Nur ${esc(r.kat)}</button>
-        <label class="st-zuordnen klein">Steuer: <select data-steuer-i="${r.i}">${postenOptionen(steuerPosten(r), true)}</select></label></td></tr>`;
-    }
+  // Kennzahlen der Treffer (alle, nicht nur die angezeigten)
+  let ein = 0, aus = 0, von = rows[0].d, bis = rows[0].d;
+  const mon = new Map(), tag = new Map();
+  for (const r of rows) {
+    if (r.c > 0) ein += r.c; else aus -= r.c;
+    if (r.d < von) von = r.d; if (r.d > bis) bis = r.d;
+    const k = r.d.slice(0, 7), m = mon.get(k) || { ein: 0, aus: 0 };
+    if (r.c > 0) m.ein += r.c; else m.aus -= r.c;
+    mon.set(k, m);
+    tag.set(r.d, (tag.get(r.d) || 0) + r.c);
   }
-  // Summenzeile über alle Treffer (nicht nur die angezeigten)
-  let ein = 0, aus = 0;
-  for (const r of rows) { if (r.c > 0) ein += r.c; else aus += r.c; }
-  h += `</tbody><tfoot><tr class="summe-zeile"><td class="datum"></td>
-    <td><div class="wer">Summe ${rows.length === 1 ? 'der Buchung' : `aller ${NUM.format(rows.length)} Buchungen`}</div>
-      <div class="zweck">Eingänge ${eur(ein)} · Ausgänge ${eur(aus)}</div></td>
-    <td class="kat-sp"></td><td class="konto-sp"></td><td class="r betrag ${cls(ein + aus)}">${eur(ein + aus)}</td></tr></tfoot></table></div>`;
-  if (rows.length > limit) h += `<div class="mehr">${NUM.format(limit)} von ${NUM.format(rows.length)} angezeigt <button class="btn sm" id="mehr">Weitere ${NUM.format(Math.min(500, rows.length - limit))} anzeigen</button></div>`;
-  else if (rows.length > 20) h += `<div class="mehr">Alle ${NUM.format(rows.length)} Buchungen angezeigt</div>`;
-  return h;
+  const monate = [];
+  for (let k = von.slice(0, 7); k <= bis.slice(0, 7); k = mVor(k, 1)) monate.push(k);
+  const nM = monate.length, je = (c) => (nM > 1 ? ` · Ø ${eur0(c / nM)} im Monat` : '');
+  const zahlen = [
+    zahl5('Treffer', NUM.format(rows.length), von === bis ? dde(von) : `${dde(von)} – ${dde(bis)}`),
+    zahl5('Ausgaben', eur0(aus), `${rows.filter((r) => r.c < 0).length} Buchungen${je(aus)}`, { cls: aus ? 'neg' : '' }),
+    zahl5('Einnahmen', eur0(ein), `${rows.filter((r) => r.c > 0).length} Buchungen${je(ein)}`, { cls: ein ? 'pos' : '' }),
+    zahl5('Saldo', plusMinus(ein - aus), 'Einnahmen minus Ausgaben der Treffer', { cls: ein - aus >= 0 ? 'pos' : 'neg' }),
+  ].join('');
+  if (nM > 36) {   // lange Zeiträume: je Jahr
+    const jahr = new Map();
+    for (const [k, m] of mon) { const y = k.slice(0, 4), x = jahr.get(y) || { ein: 0, aus: 0 }; x.ein += m.ein; x.aus += m.aus; jahr.set(y, x); }
+    const jahre = []; for (let y = +von.slice(0, 4); y <= +bis.slice(0, 4); y++) jahre.push(String(y));
+    buchGrafik = { monate: jahre, mon: jahr, jahre: true };
+  } else if (nM >= 2) buchGrafik = { monate, mon };
+  const pf = (k) => (S.sort === k ? ` ${S.dir < 0 ? '↓' : '↑'}` : '');
+  const sortKnoepfe = `<div class="seg bt-sort" role="group" aria-label="Sortieren">${[['datum', 'Datum'], ['betrag', 'Betrag'], ['wer', 'Empfänger']].map(([k, t]) => `<button data-sort="${k}" class="${S.sort === k ? 'an' : ''}" title="${S.sort === k ? 'nochmal klicken: Reihenfolge umdrehen' : `nach ${t} sortieren`}">${t}${pf(k)}</button>`).join('')}</div>`;
+  const gruppiert = S.sort === 'datum', zeig = rows.slice(0, limit), anzahl = new Map();
+  for (const r of rows) anzahl.set(r.d, (anzahl.get(r.d) || 0) + 1);
+  const datum = (d) => `${WTAG[new Date(`${d}T12:00:00Z`).getUTCDay()]} ${dde(d).slice(0, 6)}${d.slice(2, 4)}`;
+  let h = '';
+  zeig.forEach((r, i) => {
+    const erster = !gruppiert || i === 0 || zeig[i - 1].d !== r.d, letzter = i === zeig.length - 1 || zeig[i + 1].d !== r.d;
+    const auf = offen.has(r.i);
+    h += `<div class="bz mit-datum${auf ? ' offen' : ''}${gruppiert && erster ? ' tag-anfang' : ''}" data-i="${r.i}" title="Anklicken: Einzelheiten">
+      <span class="bz-d">${erster ? datum(r.d) : ''}</span>
+      <span class="bz-n"><b>${mk(r.g || r.z || '–')}</b>${r.g && r.z ? `<small>${mk(r.z)}</small>` : ''}</span>
+      <span class="bz-k"><span>${esc(schoen(r.kat))}</span><small>${esc(schoen(r.ukat))}${r.ukat ? ' · ' : ''}${esc(kn(r))}</small></span>
+      <b class="bz-b ${cls(r.c)}">${eur(r.c)}</b></div>`;
+    if (auf) {
+      const dd = [['Verwendungszweck', r.z], ['Kategorie', `${schoen(r.kat)}${r.ukat ? ' · ' + schoen(r.ukat) : ''}`], ['Konto', kn(r)], ['Art', r.art],
+        ['Vertrag', r.v], ['Tags', r.t], ['Notiz', r.n], ['Steuerkategorie (Buhl)', r.st], ['Früher genannt', r.ga.join(', ')]].filter(([, v]) => v);
+      h += `<div class="bz-detail"><dl>${dd.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+        <div class="bz-knoepfe">${r.g ? `<button class="btn sm" data-alle="${esc(r.g)}">Alle Buchungen von „${esc(r.g.length > 40 ? r.g.slice(0, 40) + '…' : r.g)}“</button>` : ''}
+        <button class="btn sm" data-nurkat="${esc(r.kat)}">Nur ${esc(schoen(r.kat))}</button>
+        <label class="st-zuordnen klein">Steuer: <select data-steuer-i="${r.i}">${postenOptionen(steuerPosten(r), true)}</select></label></div></div>`;
+    }
+    if (gruppiert && letzter && anzahl.get(r.d) > 1) h += `<div class="bz-tagsumme">${anzahl.get(r.d)} Buchungen am ${dde(r.d).slice(0, 6)} · zusammen <b class="${cls(tag.get(r.d))}">${eur(tag.get(r.d))}</b></div>`;
+  });
+  let fuss = `<div class="bt-summe"><span>Summe ${rows.length === 1 ? 'der Buchung' : `aller ${NUM.format(rows.length)} Treffer`}<small>Einnahmen ${eur(ein)} · Ausgaben ${eur(-aus)}</small></span><b class="${cls(ein - aus)}">${eur(ein - aus)}</b></div>`;
+  if (rows.length > limit) fuss += `<div class="mehr">${NUM.format(limit)} von ${NUM.format(rows.length)} angezeigt <button class="btn sm" id="mehr">Weitere ${NUM.format(Math.min(500, rows.length - limit))} anzeigen</button></div>`;
+  return `<div class="bt">
+    <div class="s5-zahlen bt-zahlen">${zahlen}</div>
+    ${buchGrafik ? `<div class="bt-grafik"><div class="bt-g-t"><b>Je ${buchGrafik.jahre ? 'Jahr' : 'Monat'}</b><span class="muted klein">Ausgaben orange, Einnahmen grün · Säule anklicken: nur ${buchGrafik.jahre ? 'dieses Jahr' : 'dieser Monat'}</span></div><div class="s5-chart bt-chart"><canvas id="c-buch"></canvas></div></div>` : ''}
+    <div class="bt-leiste"><span class="muted klein">${gruppiert ? 'Nach Datum, bei mehreren Buchungen am Tag mit Tagessumme' : S.sort === 'betrag' ? 'Nach Betrag sortiert' : 'Nach Empfänger sortiert'} · Zeile anklicken: Einzelheiten</span>${sortKnoepfe}</div>
+    <div class="bt-liste">${h}</div>${fuss}</div>`;
+}
+
+// Ausgaben und Einnahmen der Treffer je Monat; Klick auf eine Säule: nur dieser Monat (übrige Filter bleiben)
+function buchGrafikZeichnen() {
+  if (!buchGrafik || !$('#c-buch')) return;
+  const { monate, mon, jahre } = buchGrafik, cE = css('--ein'), cA = css('--aus');
+  const o = basis();
+  o.interaction = { mode: 'index', intersect: false };
+  o.scales = {
+    x: { ...achsenStil(), grid: { display: false }, ticks: { ...achsenStil().ticks, font: { size: 11 }, maxRotation: 0, autoSkip: true, autoSkipPadding: 8 } },
+    y: { ...achsenStil(), beginAtZero: true, ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 3 } },
+  };
+  o.plugins.tooltip.callbacks = { title: (it) => (jahre ? monate[it[0].dataIndex] : monLang(monate[it[0].dataIndex])), label: (it) => ` ${it.dataset.label}: ${EUR0.format(it.raw)}` };
+  o.onClick = (_, el) => { if (el.length) setze(jahre ? { jahr: monate[el[0].index], monat: '', zr: '' } : { ...monatZiel(monate[el[0].index]) }); };
+  o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
+  const g = (k, f) => (mon.get(k)?.[f] || 0) / 100;
+  zeichne('c-buch', { type: 'bar', data: { labels: jahre ? monate : monate.map(monKurz), datasets: [
+    { label: 'Ausgaben', data: monate.map((k) => g(k, 'aus')), backgroundColor: alpha(cA, 0.85), borderRadius: 3, maxBarThickness: 18, categoryPercentage: 0.75, barPercentage: 0.9 },
+    { label: 'Einnahmen', data: monate.map((k) => g(k, 'ein')), backgroundColor: alpha(cE, 0.85), borderRadius: 3, maxBarThickness: 18, categoryPercentage: 0.75, barPercentage: 0.9 },
+  ] }, options: o });
 }
 
 // Stichtag für die Kontostände: selbst gewählt, sonst der letzte Datenstand
@@ -1259,7 +1312,7 @@ function eingangHtml() {
 }
 
 const TITEL = {
-  buchungen: () => ['Buchungen', `${[...(kontoSet() || [])].some((i) => D.konten[i].kind) ? 'mit Konto eines Kindes – zählt nicht zu deinen Finanzen · ' : [...(kontoSet() || [])].some((i) => D.konten[i].gemeinsam) ? 'mit gemeinsamem Konto – zählt nicht zu deinen Finanzen, nur deine Einzahlungen · ' : ''}${NUM.format(F.length)} Treffer · Zeile anklicken für Details · Spaltenkopf: sortieren`],
+  buchungen: () => ['Buchungen', `${[...(kontoSet() || [])].some((i) => D.konten[i].kind) ? 'mit Konto eines Kindes – zählt nicht zu deinen Finanzen · ' : [...(kontoSet() || [])].some((i) => D.konten[i].gemeinsam) ? 'mit gemeinsamem Konto – zählt nicht zu deinen Finanzen, nur deine Einzahlungen · ' : ''}${NUM.format(F.length)} Treffer · Zeile anklicken: Einzelheiten`],
   uebersicht: () => ['Kategorien', 'Zeile anklicken: Unterkategorien · Spaltenkopf: Monat bzw. Jahr filtern'],
   fix: () => ['Fixkosten und Abos', 'regelmäßige Zahlungen, automatisch erkannt'],
   konten: () => ['Konten', 'Zeile anklicken: Buchungen des Kontos'],
@@ -1293,11 +1346,12 @@ function tabelle(conds) {
   });
   el.querySelector('[data-k2buch]')?.addEventListener('click', () => katBuchungen({}));
   el.querySelectorAll('[data-fixtab]').forEach((b) => b.onclick = () => setze({ fixtab: b.dataset.fixtab }));
-  el.querySelectorAll('th[data-sort]').forEach((th) => th.onclick = () => {
+  el.querySelectorAll('[data-sort]').forEach((th) => th.onclick = () => {
     const k = th.dataset.sort;
     S.dir = S.sort === k ? -S.dir : k === 'wer' ? 1 : -1; S.sort = k; tabelle(conds);
   });
-  el.querySelectorAll('tr[data-i]').forEach((tr) => tr.onclick = () => {
+  el.querySelectorAll('[data-i]').forEach((tr) => tr.onclick = (e) => {
+    if (e.target.closest('.bz-detail')) return;
     const i = +tr.dataset.i; offen.has(i) ? offen.delete(i) : offen.add(i); tabelle(conds);
   });
   el.querySelectorAll('[data-alle]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); setze({ q: `"${b.dataset.alle}"` }); });
@@ -1336,6 +1390,7 @@ function tabelle(conds) {
     tabelle(conds);
   });
   if (S.tab === 'konten') kontenGrafikZeichnen();
+  if (S.tab === 'buchungen') buchGrafikZeichnen();
   if (S.tab === 'uebersicht') kat2Zeichnen();
   $('#stichtag')?.addEventListener('change', (e) => { const v = e.target.value; if (/^\d{4}-\d{2}-\d{2}$/.test(v)) setze({ stichtag: v }); });
   el.querySelectorAll('[data-st]').forEach((b) => b.onclick = () => setze({ stichtag: b.dataset.st === D.bis && !S.jahr ? '' : b.dataset.st }));
