@@ -4,7 +4,7 @@
 // an jedem Tag mit Finanzguru-Kontostand geprüft (Feld „genauigkeit“, „pruefung“).
 //   exakt           – stimmt mit den Bank-Kontoständen überein
 //   ungefaehr       – kann um bis zu pruefung.maxAbw € abweichen (nur bis pruefung.abwBis, danach exakt)
-//   unsicher        – für dieses Konto lassen sich frühere Stände nicht verlässlich berechnen (PayPal)
+//   unsicher        – für dieses Konto lassen sich frühere Stände nicht verlässlich berechnen (PayPal; nur bis pruefung.abwBis, danach exakt)
 //   geschaetzt      – kein Bank-Kontostand bekannt, ab 0 € aufsummiert
 //   nicht_eroeffnet – Konto gab es am Stichtag noch nicht (0 €)
 //   unbekannt       – Stichtag liegt vor Beginn der Daten eines Kontos, das schon vorher Geld hatte
@@ -28,7 +28,7 @@ export function kontostaende(D, datum) {
     let status = 'exakt';
     if (datum < k.saldoAm && !k.vollstaendig) {
       const p = k.pruefung;
-      if (k.genauigkeit === 'unsicher') status = 'unsicher';
+      if (k.genauigkeit === 'unsicher' && (!p?.abwBis || datum <= p.abwBis)) status = 'unsicher';   // nach der letzten Abweichung stimmt jeder geprüfte Tag
       else if (k.genauigkeit === 'ungefaehr' && (!p?.abwBis || datum <= p.abwBis)) status = 'ungefaehr';
     }
     return { k, i, c: status === 'unsicher' ? null : c, status, abw: k.pruefung?.maxAbw };

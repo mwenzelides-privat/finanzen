@@ -948,8 +948,11 @@ function tabKategorien() {
   const dZelle = (d) => `<span class="kl-d ${d == null || Math.abs(d) < 1000 ? 'muted' : (d > 0) === aus ? 'neg' : 'pos'}">${d == null ? '' : Math.abs(d) < 1000 ? '≈' : plusMinus(d)}</span>`;
   const zeile = (x) => {
     const vm = vorM(x);
+    // größter Posten der Kategorie (Unterkategorie bzw. bei Einnahmen der Absender), damit klar ist, was z. B. in „Finanzen“ steckt
+    const [tn, tc] = aus ? [...x.unter].sort((p, q) => q[1] - p[1])[0] || [] : ([...x.empf].sort((p, q) => q[1].c - p[1].c)[0] || []).map((y, i) => (i ? y.c : y));
+    const sub = tn && norm(tn) !== norm(x.k) && x.g !== 1 ? `v. a. ${esc(schoen(tn))}${tc < x.c * 0.995 ? ` (${Math.round((tc / x.c) * 100)} %)` : ''}` : '';
     return `<button class="vg-z kz kl-z${x === wahl ? ' an' : ''}" data-k2kat="${esc(x.k)}" title="${esc(schoen(x.k))}: Ø ${eur0(x.c / a.n)} im Monat${vm != null ? ` · Vorjahr ${eur0(vm)}` : ''}${aus ? ` · ${Math.round((x.fest / x.c) * 100)} % Verträge` : ''} – anklicken: Einzelheiten">
-      <span class="vg-zn">${esc(schoen(x.k))}</span>
+      <span class="vg-zn">${esc(schoen(x.k))}${sub ? `<small>${sub}</small>` : ''}</span>
       <span class="kl-b"><i style="width:${Math.max(1, (x.c / a.n / max) * 100)}%"></i>${vm ? `<b style="left:${(vm / max) * 100}%"></b>` : ''}</span>
       <b class="vg-zw">${eur0(x.c / a.n)}</b><span class="vg-zp">${anteil(x.c)} %</span>${dZelle(dM(x))}</button>`;
   };
@@ -1446,17 +1449,35 @@ function verlaufText(f) {
   return s.map((x) => e(x.betrag)).join(' → ') + ' €';
 }
 
+// Finanzguru benennt Empfänger manchmal um – und nur bei einem Teil der Buchungen. Damit ein Vertrag nicht in „beendet“
+// und „neu“ zerfällt, gilt je früherem Namen + Verwendungszweck der heutige Name, den die umbenannten Buchungen tragen
+// (nur wenn eindeutig: mindestens 2 Buchungen und 75 % auf denselben neuen Namen).
+function namenAngleichen() {
+  const zaehl = new Map();
+  for (const r of D.rows) for (const a of r.ga) {
+    const k = `${empfaengerKey(a)}|${zweckSignatur(r.z)}`;
+    if (!zaehl.has(k)) zaehl.set(k, new Map());
+    zaehl.get(k).set(r.g, (zaehl.get(k).get(r.g) || 0) + 1);
+  }
+  const neu = new Map();
+  for (const [k, m] of zaehl) {
+    const ges = [...m.values()].reduce((t, n) => t + n, 0), [name, n] = [...m].sort((a, b) => b[1] - a[1])[0];
+    if (n >= 2 && n / ges >= 0.75) neu.set(k, name);
+  }
+  return (r) => neu.get(`${empfaengerKey(r.g)}|${zweckSignatur(r.z)}`) || r.g;
+}
+
 function fixkostenErkennen() {
   if (D.fix) return D.fix;
   const out = [], benutzt = new Set();
-  const beitrag = beitragsBuchungen();
+  const beitrag = beitragsBuchungen(), name = namenAngleichen();
   // Schritt 1: Empfänger + Verwendungszweck; Beiträge zum Gemeinschaftskonto nach Verwendungszweck
   const gruppen = new Map();
   for (const r of D.rows) {
     const b = beitrag.has(r.i);
     const ab = r.art === 'Ausgabe' || (r.art === 'Gemeinschaftskonto' && r.c < 0);
     if ((!ab && !b) || (!r.g && !b)) continue;
-    const key = b ? `gemeinsam|${zweckSignatur(r.z) || beitrag.get(r.i)}` : empfaengerKey(r.g) + '|' + zweckSignatur(r.z);
+    const key = b ? `gemeinsam|${zweckSignatur(r.z) || beitrag.get(r.i)}` : empfaengerKey(name(r)) + '|' + zweckSignatur(r.z);
     if (!gruppen.has(key)) gruppen.set(key, []);
     gruppen.get(key).push(r);
   }
@@ -1477,7 +1498,7 @@ function fixkostenErkennen() {
   const rest = new Map();
   for (const r of D.rows) {
     if (!(r.art === 'Ausgabe' || (r.art === 'Gemeinschaftskonto' && r.c < 0)) || !r.g || benutzt.has(r.i)) continue;
-    const key = empfaengerKey(r.g);
+    const key = empfaengerKey(name(r));
     if (!rest.has(key)) rest.set(key, []);
     rest.get(key).push(r);
   }
@@ -2203,6 +2224,7 @@ function anzeigen(v) {
   const j = Q.pruefen(v.text);
   quelle = v;
   D = aufbereiten(j);
+  if (LOKAL) window.__fd = { D, fix: () => fixkostenErkennen(), mr: () => monatsRechnung(), sammle, periode };   // nur zum Testen auf dem eigenen Rechner
   chatDaten(D);
   steuerDaten(D).then(() => { if (S.tab === 'steuer') tabelle(parse(S.q)); else if (S.tab === 'start') { try { startSeite(); } catch (e) { console.error(e); } } });
   hashLesen();
