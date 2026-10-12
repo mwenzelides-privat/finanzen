@@ -581,7 +581,8 @@ function vaRechnen(V, R) {
   }
   for (const z of va.zugang || []) zeilen.push({ name: z.name, ehe: 'Anrecht der Ehefrau', ab: 0, zu: R.real(z.rente_nominal ?? z.rente), sub: z.hinweis || '' });
   const ab = sum(zeilen, (x) => x.ab), zu = sum(zeilen, (x) => x.zu), netto = ab - zu;
-  return { zeilen, ab, zu, netto, vorher: R.summe, nachher: R.summe - netto, proJahr, jahre: proJahr > 0 ? netto / proJahr : null };
+  const erworben = (V.gesetzlich?.bisher || 0) + sum(Object.values(va.vertraege || {}), (v) => R.real(2 * (v.verlust_nominal || 0)));
+  return { zeilen, ab, zu, netto, vorher: R.summe, nachher: R.summe - netto, proJahr, jahre: proJahr > 0 ? netto / proJahr : null, erworben };
 }
 function vaKarte(V, R) {
   const A = vaRechnen(V, R), va = V.va;
@@ -593,6 +594,7 @@ function vaKarte(V, R) {
   const zeilen = A.zeilen.map((x) => `<tr><td>${H.esc(x.name)}<small>${H.esc(x.ehe)}${x.sub ? ` · ${H.esc(x.sub)}` : ''}</small></td>
     <td class="r neg">${x.ab ? `−${e0(x.ab)}` : '–'}</td><td class="r pos">${x.zu ? `+${e0(x.zu)}` : '–'}</td><td class="r"><b>${pm0(x.zu - x.ab)}</b></td></tr>`).join('');
   const satz = `Nach dem Versorgungsausgleich bleiben dir mit 67 etwa <b>${e0(A.nachher)}</b> statt ${e0(A.vorher)} im Monat (${kk}), also <b class="neg">${e0(A.netto)} weniger</b> (−${pz(A.netto / A.vorher)}).`
+    + ` Der Anteil wirkt klein, weil bis zur Rente noch viele Beitragsjahre dazukommen: Von dem, was du <b>bis heute</b> erworben hast (≈ ${e0(A.erworben)} Rente), gibst du <b>${pz(A.netto / A.erworben)}</b> ab. Bei der gesetzlichen Rente gleicht Sandras Hälfte rund die Hälfte deines Abgangs aus.`
     + (A.jahre > 0 ? ` Mit deinen heutigen Beiträgen (gesetzlich und Betriebsrente) hast du diesen Verlust nach etwa <b>${jz} Jahren</b> wieder aufgebaut${bisWann ? `, gerechnet ab Ehezeitende also etwa ${bisWann.getFullYear()}` : ''}.` : '');
   return H.karte5('Rente nach der Scheidung', `Versorgungsausgleich: Die in der Ehezeit (${va.ehezeit_beginn ? H.dde(va.ehezeit_beginn) : '?'} – ${va.ehezeit_ende ? H.dde(va.ehezeit_ende) : '?'}) erworbenen Anrechte werden geteilt · ${kk}`,
     `<p class="ge-text">${satz}</p>
