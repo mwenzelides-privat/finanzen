@@ -1567,6 +1567,21 @@ button.ge-hz:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
   .ge-yt > span:nth-child(3), .ge-yt > span:nth-child(6) { display: none; }
   .ge-yj small { display: none; }
 }
+/* Abrechnung heute und künftig */
+.ge-zt td:first-child { color: var(--text-2); }
+.ge-zt td small, .ge-zt th small { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+.ge-zt td small.pos { color: var(--ein-text); font-weight: 600; }
+.ge-zt td small.neg { color: var(--aus-text); font-weight: 600; }
+.ge-zt .ge-sum td { font-weight: 700; border-top: 1.5px solid var(--border-strong); }
+.ge-zt .kurz { display: none; }
+@media (max-width: 700px) {
+  .ge-zt { font-size: 12px; }
+  .ge-zt td, .ge-zt th { padding: 4px 3px; }
+  .ge-zt .lang, .ge-zt th small, .ge-zt td:first-child small { display: none; }
+  .ge-zt .kurz { display: inline; }
+  .ge-zt td:first-child { white-space: normal; }
+  .ge-zt td.r small { white-space: normal; }
+}
 /* Alle Daten der Abrechnungen */
 .ge-tab td:first-child { color: var(--text-2); white-space: nowrap; }
 .ge-tab td.ge-txt { white-space: normal; font-size: 12px; line-height: 1.3; }

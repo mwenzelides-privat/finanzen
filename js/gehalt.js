@@ -172,6 +172,7 @@ export function gehaltZeigen(el, helfer) {
       ${brueckeKarte(G, z)}
       <div class="s5-spalte">${bavKarte(G, z)}${autoKarte(G, z)}</div>
     </div>
+    ${zukunftKarte(G)}
     ${renteHtml(G, z)}
     ${verlaufKarte(G)}
     <div class="s5-raster">
@@ -320,6 +321,53 @@ function autoKarte(G, z) {
     </div>
     <p class="s5-erkl">${herkunft} Fahrten Wohnung–Arbeit: 0,03 % je km, beim E-Auto vom ermäßigten Listenpreis. Sozialversicherung fällt nicht an (du liegst über der Beitragsgrenze). Schätzung mit deinem Grenzsteuersatz ${pz(W.gs, 1)} inkl. Soli, keine Steuerberatung.</p>`, 'ge-autok');
 }
+// ---------------------------------------------------------------- Abrechnung heute und künftig
+// Ausgangspunkt ist die letzte Abrechnung. Bekannte Änderungen (gehalt.zukunft: Entfernung, Dienstwagen) verändern nur den
+// geldwerten Vorteil; Steuer ändert sich mit dem gemessenen Grenzsteuersatz, Sozialversicherung nicht (über der Grenze).
+function zukunftKarte(G) {
+  const Z = H.D.j.gehalt?.zukunft || [], z = G.pdf.at(-1);
+  if (!Z.length || !z || !auto(z)) return '';
+  const dw = H.D.j.gehalt.dienstwagen || {}, satz0 = dw.satz_prozent ?? 1;
+  const preis0 = z.privatfahrten / (satz0 / 100), km0 = Math.round(z.whg_arbeit / (0.0003 * satz0 * preis0));
+  const gs = G.gs.r;
+  const stufe = (a) => {
+    const lp = Math.floor(a.preis / 100) * 100, pf = (a.satz / 100) * lp, wa = 0.0003 * a.satz * lp * a.km;
+    const d = pf + wa - auto(z);
+    return { ...a, pf, wa, d, brutto: z.brutto + d, stBrutto: z.steuer_brutto + d, steuer: steuer(z) + d * gs,
+      netto: z.netto_verdienst + d - d * gs, ausz: z.auszahlung - d * gs };
+  };
+  let a = { satz: satz0, preis: preis0, km: km0 };
+  const spalten = [{ titel: `Heute`, sub: `Abrechnung ${H.monKurz(z.m)}`, ...stufe(a) }];
+  for (const x of Z) {
+    a = { satz: x.satz_prozent ?? a.satz, preis: x.listenpreis ?? a.preis, km: x.km ?? a.km };
+    spalten.push({ titel: `ab ${H.monKurz(x.ab)}`, sub: x.titel, ...stufe(a) });
+  }
+  const zeile = (name, f, opt = {}) => `<tr class="${opt.cls || ''}"><td>${name}${opt.sub ? `<small>${opt.sub}</small>` : ''}</td>${spalten.map((c, i) => {
+    const v = f(c), d = i && opt.diff ? v - f(spalten[0]) : 0;
+    const w = (x, f0) => `<span class="lang">${(f0 ? pm : e)(x).replace(/^-/, '−')}</span><span class="kurz">${(f0 ? pm0 : e0)(x).replace(/^-/, '−')}</span>`;
+    return `<td class="r">${typeof v === 'string' ? v : w(v)}${i && opt.diff && Math.abs(d) >= 0.5 ? `<small class="${(opt.gut ? d > 0 : d < 0) ? 'pos' : 'neg'}">${w(d, true)}</small>` : ''}</td>`;
+  }).join('')}</tr>`;
+  const letzt = spalten.at(-1), plus = letzt.ausz - spalten[0].ausz;
+  const satz = spalten.slice(1).map((c, i) => `${i ? 'Und ' + c.titel : c.titel.replace('ab ', 'Ab ')} (${H.esc(c.sub)}${c.km !== spalten[i].km ? `, ${c.km} statt ${spalten[i].km} km` : ''}${c.satz !== spalten[i].satz ? `, ${String(c.satz).replace('.', ',')} % statt ${String(spalten[i].satz).replace('.', ',')} %` : ''}): <b class="pos">${pm0(c.ausz - spalten[0].ausz)}</b> im Monat gegenüber heute.`).join(' ')
+    + ` Der versteuerte Dienstwagen-Vorteil sinkt von ${e0(auto(z))} auf ${e0(letzt.pf + letzt.wa)}; das bringt ${pm0(plus * 12)} im Jahr.`;
+  const tab = `<table class="t3 ge-zt"><thead><tr><th></th>${spalten.map((c) => `<th class="r">${c.titel}<small>${H.esc(c.sub)}</small></th>`).join('')}</tr></thead><tbody>
+    ${zeile('Dienstwagen', (c) => `${String(c.satz).replace('.', ',')} %<small>${e0(c.preis)} Listenpreis</small>`)}
+    ${zeile('Entfernung zur Arbeit', (c) => `${c.km} km`)}
+    ${zeile('Grundgehalt', () => z.gehalt)}
+    ${zeile('Privatfahrten', (c) => c.pf, { diff: true, sub: 'geldwerter Vorteil' })}
+    ${zeile('Wohnung – Arbeit', (c) => c.wa, { diff: true, sub: '0,03 % je km' })}
+    ${zeile('Gesamt-Brutto', (c) => c.brutto, { cls: 'ge-sum', diff: true })}
+    ${zeile('Steuer-Brutto', (c) => c.stBrutto, { diff: true })}
+    ${zeile('Lohnsteuer und Soli', (c) => -c.steuer, { diff: true, gut: true, sub: `geschätzt, ${pz(gs, 1)} Grenzsteuersatz` })}
+    ${zeile('Sozialversicherung', () => -sozial(z), { sub: 'unverändert (über der Beitragsgrenze)' })}
+    ${zeile('Betriebsrente (dein Anteil)', () => -(z.bav_an || 0))}
+    ${zeile('Auszahlung', (c) => c.ausz, { cls: 'ge-sum', diff: true, gut: true })}
+  </tbody></table>`;
+  return H.karte5('Deine Abrechnung heute und ab 2027', 'was sich durch Umzug und neuen Dienstwagen ändert – alles andere wie in der letzten Abrechnung',
+    `<p class="ge-text">${satz}</p><div class="t3-rahmen">${tab}</div>
+    <p class="s5-erkl">Schätzung: Gehalt, Betriebsrente und Sozialversicherung wie heute; Änderungen bei Steuertarif, Beitragsgrenzen oder Gehalt 2027 sind nicht berücksichtigt. Keine Steuerberatung.</p>`, '', '', 'ge-zukunft');
+}
+
 function verlaufKarte(G) {
   const seg = `<div class="seg">${[['jahre', 'Jahre'], ['monate', 'Monate']].map(([k, n]) => `<button data-ge-ansicht="${k}" class="${k === ansicht ? 'an' : ''}">${n}</button>`).join('')}</div>`;
   const erh = G.erh.filter((x) => !x.plan);
