@@ -4,6 +4,7 @@
 // Zugang: eigener API-Schlüssel von Anthropic, nur auf diesem Gerät gespeichert.
 import { parse, matcher } from './suche.js';
 import { kontostaende, STATUS_TEXT } from './salden.js';
+import { gehaltKurz } from './gehalt.js';
 
 const API = 'https://api.anthropic.com/v1/messages';
 const MODELLE = [
@@ -89,7 +90,7 @@ const TOOLS = [
         beschriftung: { type: 'string', description: 'z. B. „Alle Versicherungen 2025 anzeigen“' },
         suche: { type: 'string' }, jahr: { type: 'integer' }, monat: { type: 'integer' }, konto: { type: 'string' },
         kategorie: { type: 'string' }, unterkategorie: { type: 'string' }, art: { type: 'string', enum: ['alle', 'aus', 'ein'] },
-        tab: { type: 'string', enum: ['buchungen', 'start', 'kennzahlen', 'uebersicht', 'fix', 'konten', 'steuer'], description: 'buchungen = Liste, start = Übersicht, kennzahlen, uebersicht = Kategorien, fix = Fixkosten, konten, steuer' },
+        tab: { type: 'string', enum: ['buchungen', 'start', 'kennzahlen', 'uebersicht', 'fix', 'konten', 'gehalt', 'steuer'], description: 'buchungen = Liste, start = Übersicht, kennzahlen, uebersicht = Kategorien, fix = Fixkosten, konten, gehalt = Gehaltsentwicklung (alle Daten der Gehaltsabrechnungen), steuer' },
       },
       required: ['beschriftung'],
     },
@@ -176,7 +177,8 @@ function systemText() {
 ` : '';
   return `Du bist der Finanz-Assistent in der privaten App „Finanzen“ des Nutzers. Heute ist der ${new Date().toISOString().slice(0, 10)}.
 Die Daten: ${D.rows.length} Buchungen vom ${D.von} bis ${D.bis} (Stand der Datei ${D.j.erstellt}).
-${monat}
+${monat}${gehaltKurz(D) ? `${gehaltKurz(D)}
+` : ''}
 Konten:
 ${konten}
 

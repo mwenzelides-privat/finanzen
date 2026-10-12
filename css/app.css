@@ -1401,3 +1401,123 @@ button.vg-summe.kz:hover { background: var(--surface-2); }
 .s5-dl dd small.inl { display: inline; margin-left: 6px; }
 .mj-w { font-size: 9.5px; color: var(--text-2); text-align: center; white-space: nowrap; min-height: 12px; }
 .mj-b { justify-content: flex-start; }
+
+/* ===== Gehaltsentwicklung ===== */
+:root { --g-steuer: #d4572b; --g-bav: #2463d6; --g-rv: #7ea4ea; --g-kv: #2f9fb2; --g-auto: #d39a12; --g-sach: #9085e9; --g-sonst: #98a2b3; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --g-steuer: #ec7442; --g-bav: #5b93f0; --g-rv: #9dbcf5; --g-kv: #3cb7cb; --g-auto: #e0ad35; --g-sach: #a79ef0; --g-sonst: #7d8696; } }
+:root[data-theme="dark"] { --g-steuer: #ec7442; --g-bav: #5b93f0; --g-rv: #9dbcf5; --g-kv: #3cb7cb; --g-auto: #e0ad35; --g-sach: #a79ef0; --g-sonst: #7d8696; }
+.ge-wahl { display: flex; align-items: center; gap: 8px; }
+.ge-wahl select { height: 34px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--border-strong); background: var(--surface); font-size: 14px; }
+.ge-fehlt { display: block; margin-top: 4px; color: var(--aus-text); font-weight: 600; font-size: 14px; }
+.ge-text { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--text-2); }
+.ge-text b { color: var(--text); }
+.ge-text b.pos, .ge-bz b.pos, .ge-jd.pos { color: var(--ein-text); }
+.ge-text b.neg, .ge-bz b.neg, .ge-jd.neg, .ge5 .neg { color: var(--aus-text); }
+/* 100 Kästchen = 100 % */
+.ge-waffel { display: grid; grid-template-columns: repeat(20, minmax(0, 1fr)); gap: 3px; }
+.ge-waffel i { aspect-ratio: 1; border-radius: 3px; }
+.ge-legende { display: grid; }
+.ge-lg { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto 36px; gap: 8px; align-items: center; font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.ge-lg:last-child { border-bottom: 0; }
+.ge-lg > i { width: 12px; height: 12px; border-radius: 3px; }
+.ge-lg small { display: block; font-size: 11.5px; color: var(--muted); }
+.ge-lg b { white-space: nowrap; }
+.ge-lg > span:last-child { text-align: right; font-size: 12px; }
+/* Warum die Auszahlung anders ist */
+.ge-bruecke { gap: 8px; }
+.ge-br { display: grid; }
+.ge-bz { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(50px, 1fr) auto; gap: 10px; align-items: center; font-size: 13px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+.ge-bz b { white-space: nowrap; text-align: right; }
+.ge-bsum { font-weight: 700; }
+.ge-bsum:last-child { border-bottom: 0; border-top: 1.5px solid var(--border-strong); }
+.ge-bb { position: relative; height: 12px; }
+.ge-bb::before { content: ''; position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1px; background: var(--border-strong); }
+.ge-bb i { position: absolute; top: 0; bottom: 0; min-width: 2px; }
+.ge-bb i.plus { left: 50%; background: var(--ein); border-radius: 0 4px 4px 0; }
+.ge-bb i.minus { right: 50%; background: var(--aus); border-radius: 4px 0 0 4px; }
+.ge-chronik { display: grid; margin-top: 4px; }
+.ge-chronik h3 { margin: 0 0 2px; font-size: 13.5px; font-weight: 700; }
+.ge-cz { display: grid; grid-template-columns: 52px minmax(0, 1fr) 62px 72px; gap: 8px; align-items: baseline; padding: 4px 2px; border: 0; border-bottom: 1px solid var(--border); background: none; font: inherit; font-size: 12.5px; color: inherit; text-align: left; cursor: pointer; }
+.ge-cz:hover { background: var(--surface-2); }
+.ge-cz.an { background: var(--accent-soft); }
+.ge-cz > span.muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ge-cz b { text-align: right; white-space: nowrap; }
+.ge-cz b.pos { color: var(--ein-text); }
+.ge-cz b.neg { color: var(--aus-text); }
+.ge-rechner { margin-top: auto; padding-top: 10px; border-top: 1px dashed var(--border-strong); display: grid; gap: 6px; }
+.ge-rechner h3 { margin: 0; font-size: 13.5px; font-weight: 700; }
+.ge-regler { display: grid; grid-template-columns: auto minmax(80px, 1fr) auto; gap: 10px; align-items: center; font-size: 13px; color: var(--text-2); }
+.ge-regler input { width: 100%; accent-color: var(--accent); }
+.ge-regler b { color: var(--text); min-width: 58px; text-align: right; }
+/* Betriebsrente */
+.ge-bav { display: flex; height: 44px; border-radius: 8px; overflow: hidden; gap: 2px; }
+.ge-bav i { display: flex; flex-direction: column; justify-content: center; padding: 0 8px; color: #fff; min-width: 0; font-style: normal; overflow: hidden; }
+.ge-bav span { font-size: 11px; line-height: 1.15; opacity: .92; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ge-bav b { font-size: 13px; line-height: 1.2; white-space: nowrap; }
+.ge-bav .du { background: var(--g-bav); }
+.ge-bav .fa { background: var(--ein); }
+.ge-bav .ag { background: var(--g-kv); }
+.ge5 .s5-dl dd.neg { color: var(--aus-text); }
+/* Gehaltsentwicklung (Grafik) */
+.ge-chart { height: 330px; }
+.ge-erhs { display: flex; flex-wrap: wrap; gap: 6px 8px; font-size: 12.5px; align-items: center; }
+.ge-erh { padding: 2px 9px; border-radius: 999px; background: var(--surface-2); white-space: nowrap; }
+.ge-erh b { color: var(--ein-text); }
+.ge-erh.wechsel { box-shadow: inset 0 0 0 1px var(--border-strong); }
+/* Jeder Monat auf einen Blick */
+.ge-heat { display: grid; grid-template-columns: 40px repeat(12, minmax(0, 1fr)) 78px; gap: 4px; align-items: center; font-size: 12px; }
+.ge-hk { text-align: center; font-size: 11.5px; color: var(--muted); font-weight: 600; }
+.ge-hk.r, .ge-hs { text-align: right; }
+.ge-hj { font-weight: 700; }
+.ge-hs { font-size: 12.5px; white-space: nowrap; }
+.ge-hz { height: 32px; border-radius: 6px; border: 0; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--ein) var(--x, 10%), var(--surface-2)); color: var(--text); font: inherit; font-size: 11.5px; font-weight: 600; padding: 0; min-width: 0; overflow: hidden; white-space: nowrap; }
+button.ge-hz { cursor: pointer; }
+button.ge-hz:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ge-hz.dunkel { color: #fff; }
+.ge-hz.an { outline: 2.5px solid var(--text); outline-offset: 1px; }
+.ge-hz.leer { background: transparent; }
+.ge-hz.plan { background-image: repeating-linear-gradient(135deg, rgba(128, 128, 128, .28) 0 2px, transparent 2px 6px); color: var(--text-2); cursor: default; }
+.ge-hz.fehlt { background: var(--surface); color: var(--aus-text); box-shadow: inset 0 0 0 1.5px var(--aus-text); font-weight: 800; }
+.ge-hz .kurz { display: none; }
+/* Jahr für Jahr */
+.ge-jahre { display: grid; }
+.ge-jz { display: grid; grid-template-columns: 58px minmax(40px, 1fr) auto 50px; gap: 10px; align-items: center; padding: 6px 4px; border: 0; border-bottom: 1px solid var(--border); background: none; font: inherit; font-size: 13.5px; color: inherit; text-align: left; cursor: pointer; width: 100%; }
+.ge-jz:last-child { border-bottom: 0; }
+.ge-jz:hover { background: var(--surface-2); }
+.ge-jj { font-weight: 700; }
+.ge-jj small { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+.ge-jb { position: relative; height: 14px; border-radius: 5px; background: var(--surface-2); }
+.ge-jb i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px; }
+.ge-jb i.b { background: color-mix(in srgb, var(--accent) 28%, var(--surface-2)); }
+.ge-jb i.k { background: var(--ein); }
+.ge-jz > b { text-align: right; white-space: nowrap; }
+.ge-jz > b small { display: block; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.ge-jd { text-align: right; font-size: 12.5px; white-space: nowrap; }
+/* Alle Daten der Abrechnungen */
+.ge-tab td:first-child { color: var(--text-2); white-space: nowrap; }
+.ge-tab td.ge-txt { white-space: normal; font-size: 12px; line-height: 1.3; }
+.ge-tab td, .ge-tab th { padding: 4px 8px; }
+.ge-tab th small { display: block; font-weight: 400; font-size: 10.5px; color: var(--muted); }
+.ge-tab .ge-th th { padding-top: 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); border-bottom: 1px solid var(--border); }
+.ge-tab .ge-sum td { font-weight: 700; color: var(--text); border-top: 1.5px solid var(--border-strong); }
+.ge-tab td.neg { color: var(--aus-text); }
+.ge-tab .ge-js { background: var(--surface-2); color: var(--text-2); }
+.ge-mk { border: 0; background: none; font: inherit; font-weight: 650; color: var(--accent); cursor: pointer; padding: 2px 6px; border-radius: 6px; }
+.ge-mk.an { background: var(--accent-soft); color: var(--text); }
+.ge-mk small { display: block; font-weight: 400; font-size: 10.5px; color: var(--muted); }
+.ge-blaettern { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 900px) {
+  .ge-chart { height: 270px; }
+  .ge-wahl { width: 100%; }
+}
+@media (max-width: 700px) {
+  .ge-heat { grid-template-columns: 30px repeat(12, minmax(0, 1fr)); gap: 2px; font-size: 11px; }
+  .ge-hs, .ge-hk.r { display: none; }
+  .ge-hz { height: 26px; font-size: 9.5px; border-radius: 4px; }
+  .ge-hz .lang { display: none; }
+  .ge-hz .kurz { display: inline; }
+  .ge-hk { font-size: 9.5px; }
+  .ge-tab { font-size: 12.5px; }
+  .ge-tab td:first-child { white-space: normal; }
+  .ge-tab td, .ge-tab th { padding: 4px 4px; }
+}

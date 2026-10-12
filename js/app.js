@@ -6,6 +6,7 @@ import { alsExcel, alsCsv, herunterladen } from './export.js';
 import { chatStart, chatDaten, chatVergessen } from './chat.js';
 import { kontostaende, STATUS_TEXT } from './salden.js';
 import { steuerDaten, steuerZeigen, postenOptionen, steuerPosten, steuerZuordnen, steuerStand } from './steuer.js';
+import { gehaltZeigen } from './gehalt.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1372,6 +1373,12 @@ function tabelle(conds) {
     $('.dl').hidden = true;
     return;
   }
+  if (S.tab === 'gehalt') {
+    gehaltZeigen(el, { D, kopf5, karte5, zahl5, zl, zs, geh, gehBinden, freiFuellen, springe, zeichne, basis, achsenStil, css, alpha, achse, kurzWert, schraffur,
+      zuBuchungen, monatZiel, mVor, monKurz, monLang, MON, MONAT, NUM, dde, eur, eur0, esc });
+    $('.dl').hidden = true;
+    return;
+  }
   $('.dl').hidden = false;
   el.innerHTML = S.tab === 'buchungen' ? tabBuchungen(conds) : `<div class="s5">${S.tab === 'uebersicht' ? tabKategorien() : S.tab === 'konten' ? tabKonten() : tabFixkosten()}</div>`;
   freiFuellen(el);
@@ -2280,7 +2287,7 @@ function hashLesen() {
   if (p.get('nf') === '1') S.nf = '1';
   if (['aus', 'ein'].includes(p.get('art'))) S.art = p.get('art');
   S.umb = p.get('umb') === '1';
-  if (['kennzahlen', 'buchungen', 'uebersicht', 'konten', 'fix', 'steuer'].includes(p.get('tab'))) S.tab = p.get('tab');
+  if (['kennzahlen', 'buchungen', 'uebersicht', 'konten', 'fix', 'gehalt', 'steuer'].includes(p.get('tab'))) S.tab = p.get('tab');
 }
 
 function standZeigen() {
@@ -2587,7 +2594,7 @@ function events() {
   let breiteT, breiteAlt = 0;
   new ResizeObserver(() => {
     clearTimeout(breiteT);
-    breiteT = setTimeout(() => { const w = $('#tab-inhalt').clientWidth; if (D && S.tab === 'uebersicht' && Math.abs(w - breiteAlt) > 20) { breiteAlt = w; tabelle(parse(S.q)); } }, 150);
+    breiteT = setTimeout(() => { const w = $('#tab-inhalt').clientWidth; if (D && (S.tab === 'uebersicht' || S.tab === 'gehalt') && Math.abs(w - breiteAlt) > 20) { breiteAlt = w; tabelle(parse(S.q)); } }, 150);
   }).observe($('#tab-inhalt'));
   matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => themeSetzen());
 }
