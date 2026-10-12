@@ -286,7 +286,7 @@ function bavKarte(G, z) {
 
 // Dienstwagen: geldwerter Vorteil = Satz × Listenpreis (Privatfahrten) + 0,03 % × Listenpreis × km, beim E-Auto
 // anteilig wie der Satz (0,5 % → Hälfte, 0,25 % → Viertel). Kosten für dich = Vorteil × Grenzsteuersatz.
-const SAETZE = [[1, '1 %', 'Verbrenner'], [0.5, '0,5 %', 'Hybrid / E-Auto über der Preisgrenze'], [0.25, '0,25 %', 'E-Auto']];
+const SAETZE = [[1, '1 %', 'Verbrenner'], [0.5, '0,5 %', 'Hybrid / E-Auto über 100.000 €'], [0.25, '0,25 %', 'E-Auto bis 100.000 €']];
 function autoWerte(G, z) {
   const satzStd = H.D.j.gehalt?.dienstwagen?.satz_prozent ?? 1;
   const preisAbr = z.privatfahrten ? z.privatfahrten / (satzStd / 100) : null;
@@ -434,7 +434,7 @@ const ART_NAME = { gesetzlich: 'Gesetzliche Rente', bAV: 'Betriebsrente', Rieste
 function renteRechnen(V, akt) {
   // Arbeitgeberbeitrag zur Betriebsrente: laut letzter Abrechnung oder wie eingestellt (% vom Grundgehalt)
   const agAbr = akt && akt.gehalt ? (akt.bav_ag || 0) / akt.gehalt * 100 : null;
-  const agProz = annahme.agProz ?? V.ag_vereinbart_prozent ?? (agAbr != null ? Math.round(agAbr * 10) / 10 : null);
+  const agProz = annahme.agProz ?? (agAbr != null ? Math.round(agAbr * 10) / 10 : V.ag_vereinbart_prozent ?? null);
   const agNeu = agProz != null && akt ? agProz / 100 * akt.gehalt : null;
   const heute = new Date(), beginn = V.rentenbeginn ? new Date(V.rentenbeginn) : null;
   const jahre = beginn ? Math.max(0, (beginn - heute) / (365.25 * 864e5)) : 0;
