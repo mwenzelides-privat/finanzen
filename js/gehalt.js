@@ -568,16 +568,16 @@ function vaRechnen(V, R) {
   const g = va.grv;
   if (g) {
     const ab = (g.ep_ehe_m || 0) / 2, zu = (g.ep_ehe_s || 0) / 2;
-    zeilen.push({ name: 'Gesetzliche Rente', ehe: `${(g.ep_ehe_m ?? 0).toLocaleString('de-DE', { maximumFractionDigits: 2 })} EP in der Ehe`,
+    zeilen.push({ name: 'Gesetzliche Rente', ehe: `${(g.ep_ehe_m ?? 0).toLocaleString('de-DE', { maximumFractionDigits: 2 })} EP in der Ehe (Sandra ${(g.ep_ehe_s ?? 0).toLocaleString('de-DE', { maximumFractionDigits: 2 })} EP)`,
       ab: auf(ab * g.rentenwert), zu: auf(zu * g.rentenwert), sub: zu ? `du gibst ${ab.toLocaleString('de-DE', { maximumFractionDigits: 2 })} EP ab und bekommst ${zu.toLocaleString('de-DE', { maximumFractionDigits: 2 })} EP` : `du gibst ${ab.toLocaleString('de-DE', { maximumFractionDigits: 2 })} EP ab` });
     proJahr += auf((g.ep_pro_jahr || 0) * g.rentenwert);
   }
-  const restJahre = Math.max(1, (R.beginn - new Date(va.ehezeit_ende)) / (365.25 * 864e5));
+  // Betriebsrenten, Riester: Verlust und Zuwachs je Beitragsjahr sind in gehalt_daten/vorsorge_bauen als Rente im Rentenjahr gerechnet
   for (const x of R.posten) {
     const v = (va.vertraege || {})[x.name];
-    if (!v || x.wert_rente == null) continue;
-    zeilen.push({ name: x.name, ehe: `${pz(v.anteil_ehe)} aus der Ehezeit`, ab: x.wert_rente * v.anteil_ehe / 2, zu: 0, sub: v.hinweis || '' });
-    if (v.laeuft !== false) proJahr += x.wert_rente * (1 - v.anteil_ehe) / restJahre;
+    if (!v) continue;
+    zeilen.push({ name: x.name, ehe: `Ehezeitanteil ${e0(v.ehezeit_kapital)}`, ab: R.real(v.verlust_nominal || 0), zu: R.real(v.gewinn_nominal || 0), sub: v.hinweis || '' });
+    proJahr += R.real(v.zuwachs_jahr_nominal || 0);
   }
   for (const z of va.zugang || []) zeilen.push({ name: z.name, ehe: 'Anrecht der Ehefrau', ab: 0, zu: R.real(z.rente_nominal ?? z.rente), sub: z.hinweis || '' });
   const ab = sum(zeilen, (x) => x.ab), zu = sum(zeilen, (x) => x.zu), netto = ab - zu;
@@ -587,12 +587,13 @@ function vaKarte(V, R) {
   const A = vaRechnen(V, R), va = V.va;
   if (!A) return '';
   const kk = annahme.kaufkraft ? 'in heutiger Kaufkraft' : 'in Euro des Rentenjahres';
-  const jahreTxt = A.jahre == null ? '–' : A.jahre <= 0 ? 'kein Verlust' : `${A.jahre.toLocaleString('de-DE', { maximumFractionDigits: 1 })} Jahre`;
+  const jz = A.jahre > 0 ? A.jahre.toLocaleString('de-DE', { maximumFractionDigits: 1 }) : '';
+  const jahreTxt = A.jahre == null ? '–' : A.jahre <= 0 ? 'kein Verlust' : `≈ ${jz} Jahre`;
   const bisWann = A.jahre > 0 && va.ehezeit_ende ? new Date(new Date(va.ehezeit_ende).getTime() + A.jahre * 365.25 * 864e5) : null;
   const zeilen = A.zeilen.map((x) => `<tr><td>${H.esc(x.name)}<small>${H.esc(x.ehe)}${x.sub ? ` · ${H.esc(x.sub)}` : ''}</small></td>
     <td class="r neg">${x.ab ? `−${e0(x.ab)}` : '–'}</td><td class="r pos">${x.zu ? `+${e0(x.zu)}` : '–'}</td><td class="r"><b>${pm0(x.zu - x.ab)}</b></td></tr>`).join('');
-  const satz = `Nach dem Versorgungsausgleich bleiben dir mit 67 etwa <b>${e0(A.nachher)}</b> statt ${e0(A.vorher)} im Monat (${kk}) – <b class="neg">${pm0(-A.netto)}</b> (${pz(A.netto / A.vorher)} weniger).`
-    + (A.jahre > 0 ? ` Mit deinen heutigen Beiträgen (gesetzlich und Betriebsrente) hast du diesen Verlust nach etwa <b>${jahreTxt}</b> wieder aufgebaut${bisWann ? ` – also etwa ${bisWann.getFullYear()}` : ''}.` : '');
+  const satz = `Nach dem Versorgungsausgleich bleiben dir mit 67 etwa <b>${e0(A.nachher)}</b> statt ${e0(A.vorher)} im Monat (${kk}), also <b class="neg">${e0(A.netto)} weniger</b> (−${pz(A.netto / A.vorher)}).`
+    + (A.jahre > 0 ? ` Mit deinen heutigen Beiträgen (gesetzlich und Betriebsrente) hast du diesen Verlust nach etwa <b>${jz} Jahren</b> wieder aufgebaut${bisWann ? `, gerechnet ab Ehezeitende also etwa ${bisWann.getFullYear()}` : ''}.` : '');
   return H.karte5('Rente nach der Scheidung', `Versorgungsausgleich: Die in der Ehezeit (${va.ehezeit_beginn ? H.dde(va.ehezeit_beginn) : '?'} – ${va.ehezeit_ende ? H.dde(va.ehezeit_ende) : '?'}) erworbenen Anrechte werden geteilt · ${kk}`,
     `<p class="ge-text">${satz}</p>
     <div class="ge-rvgl">
