@@ -282,7 +282,7 @@ function bavKarte(G, z) {
   return H.karte5('Betriebsrente', `${e0(ges)} im Monat fließen in deine Altersvorsorge`,
     `<div class="ge-bav">${teil(netto, 'du', 'du netto')}${teil(steuerSpar, 'fa', 'Steuer gespart')}${teil(ag, 'ag', 'Arbeitgeber')}</div>
     <p class="ge-text">Davon zahlst du netto nur <b>${e0(netto)}</b> (${pz(netto / ges)}) – den Rest tragen dein Arbeitgeber (${e0(ag)}) und die gesparte Lohnsteuer (≈ ${e0(steuerSpar)}).</p>
-    <dl class="s5-dl">${verein ? `<div><dt>Arbeitgeber laut Vereinbarung <small>${verein} % von ${e0(z.gehalt)}</small></dt><dd>${e0(sollAg)}${Math.abs(sollAg - ag) > 1 ? `<small class="neg">abgerechnet ${e0(ag)} · ${pm0(ag - sollAg)} im Monat</small>` : '<small>✓ wie abgerechnet</small>'}</dd></div>` : ''}<div><dt>Seit ${H.monLang(mit[0].m)} eingezahlt</dt><dd>${e0(bisher)}</dd></div><div><dt>Pro Jahr</dt><dd>${e0(ges * 12)}<small>ohne Zinsen</small></dd></div></dl>`, 'ge-bavk');
+    <dl class="s5-dl">${verein && Math.abs(sollAg - ag) > 1 ? `<div><dt>Arbeitgeber laut Vereinbarung <small>${verein} % von ${e0(z.gehalt)}</small></dt><dd>${e0(sollAg)}<small class="neg">abgerechnet ${e0(ag)} · ${pm0(ag - sollAg)} im Monat</small></dd></div>` : ''}<div><dt>Seit ${H.monLang(mit[0].m)} eingezahlt</dt><dd>${e0(bisher)}</dd></div><div><dt>Pro Jahr</dt><dd>${e0(ges * 12)}<small>ohne Zinsen</small></dd></div></dl>`, 'ge-bavk');
 }
 
 // Dienstwagen: geldwerter Vorteil = Satz × Listenpreis (Privatfahrten) + 0,03 % × Listenpreis × km, beim E-Auto
@@ -540,7 +540,7 @@ function renteHtml(G, z) {
       ${regler('anpassung', 'Rentensteigerung gesetzlich pro Jahr', 0, 4, 0.5, annahme.anpassung, '%')}
       ${regler('inflation', 'Inflation pro Jahr', 0, 4, 0.5, annahme.inflation, '%')}
       ${regler('abzug', 'Abzüge im Alter (Steuer, KV/PV)', 10, 45, 1, annahme.abzug, '%')}
-      ${R.agProz != null ? `<label class="ge-regler"><span>Arbeitgeber zahlt in die Betriebsrente<small>${V.ag_vereinbart_prozent ? `vereinbart ${V.ag_vereinbart_prozent} % = ${e0(V.ag_vereinbart_prozent / 100 * akt.gehalt)}` : ''}${R.agAbr != null ? ` · abgerechnet ${H.monKurz(akt.m)}: ${e0(akt.bav_ag)}` : ''}</small></span><input type="range" data-ge-annahme="agProz" min="0" max="15" step="0.5" value="${R.agProz}"><b>${String(R.agProz).replace('.', ',')} %</b></label>` : ''}
+      ${R.agProz != null ? `<label class="ge-regler"><span>Arbeitgeber zahlt in die Betriebsrente<small>${R.agAbr != null ? `laut Abrechnung ${H.monKurz(akt.m)}: ${pz(R.agAbr / 100, 1)} = ${e0(akt.bav_ag)}` : ''}${V.ag_vereinbart_prozent && R.agAbr != null && Math.abs(V.ag_vereinbart_prozent - R.agAbr) > 0.2 ? ` · vereinbart ${V.ag_vereinbart_prozent} %` : ''}</small></span><input type="range" data-ge-annahme="agProz" min="0" max="15" step="0.5" value="${R.agProz}"><b>${String(R.agProz).replace('.', ',')} %</b></label>` : ''}
       <label class="ge-check"><input type="checkbox" data-ge-annahme="kaufkraft"${annahme.kaufkraft ? ' checked' : ''}> in heutiger Kaufkraft rechnen</label>
     </div>
     ${renteZusaetze(V, R, akt)}
@@ -553,8 +553,59 @@ function renteHtml(G, z) {
     </div>${x.hinweis ? `<p class="ge-rh">${H.esc(x.hinweis)}</p>` : ''}`).join('');
   const liste = H.karte5('Deine Altersvorsorge', `Stand der Unterlagen: ${V.stand ? H.esc(V.stand) : '–'} · rechts: Rente im Monat ${kaufkraft}`,
     `<div class="ge-rliste">${zeilen}</div><div class="ge-rz ge-rsum"><i></i><span>Zusammen</span><b>${e0(R.summe)}</b></div>`);
-  return `<div class="s5-raster">${hoch}${liste}</div>`;
+  return `<div class="s5-raster">${hoch}${liste}</div>${vaKarte(V, R)}`;
 }
+// ---------------------------------------------------------------- Versorgungsausgleich (Scheidung)
+// Je Anrecht wird der in der Ehezeit erworbene Teil halbiert. Gesetzliche Rente: Entgeltpunkte (EP) der Ehezeit, beide Seiten
+// gleichen aus (abgeben die Hälfte der eigenen, bekommen die Hälfte der fremden). Verträge: Anteil der Rente aus der Ehezeit.
+// „Wieder aufgebaut“: so viele Jahre mit den heutigen Beiträgen, bis der Verlust ersetzt ist.
+function vaRechnen(V, R) {
+  const va = V.va;
+  if (!va) return null;
+  const auf = (x) => R.real(x * Math.pow(1 + annahme.anpassung / 100, R.jahre));   // Euro heute → Rentenjahr → (Kaufkraft)
+  const zeilen = [];
+  let proJahr = 0;
+  const g = va.grv;
+  if (g) {
+    const ab = (g.ep_ehe_m || 0) / 2, zu = (g.ep_ehe_s || 0) / 2;
+    zeilen.push({ name: 'Gesetzliche Rente', ehe: `${(g.ep_ehe_m ?? 0).toLocaleString('de-DE', { maximumFractionDigits: 2 })} EP in der Ehe`,
+      ab: auf(ab * g.rentenwert), zu: auf(zu * g.rentenwert), sub: zu ? `du gibst ${ab.toLocaleString('de-DE', { maximumFractionDigits: 2 })} EP ab und bekommst ${zu.toLocaleString('de-DE', { maximumFractionDigits: 2 })} EP` : `du gibst ${ab.toLocaleString('de-DE', { maximumFractionDigits: 2 })} EP ab` });
+    proJahr += auf((g.ep_pro_jahr || 0) * g.rentenwert);
+  }
+  const restJahre = Math.max(1, (R.beginn - new Date(va.ehezeit_ende)) / (365.25 * 864e5));
+  for (const x of R.posten) {
+    const v = (va.vertraege || {})[x.name];
+    if (!v || x.wert_rente == null) continue;
+    zeilen.push({ name: x.name, ehe: `${pz(v.anteil_ehe)} aus der Ehezeit`, ab: x.wert_rente * v.anteil_ehe / 2, zu: 0, sub: v.hinweis || '' });
+    if (v.laeuft !== false) proJahr += x.wert_rente * (1 - v.anteil_ehe) / restJahre;
+  }
+  for (const z of va.zugang || []) zeilen.push({ name: z.name, ehe: 'Anrecht der Ehefrau', ab: 0, zu: R.real(z.rente_nominal ?? z.rente), sub: z.hinweis || '' });
+  const ab = sum(zeilen, (x) => x.ab), zu = sum(zeilen, (x) => x.zu), netto = ab - zu;
+  return { zeilen, ab, zu, netto, vorher: R.summe, nachher: R.summe - netto, proJahr, jahre: proJahr > 0 ? netto / proJahr : null };
+}
+function vaKarte(V, R) {
+  const A = vaRechnen(V, R), va = V.va;
+  if (!A) return '';
+  const kk = annahme.kaufkraft ? 'in heutiger Kaufkraft' : 'in Euro des Rentenjahres';
+  const jahreTxt = A.jahre == null ? '–' : A.jahre <= 0 ? 'kein Verlust' : `${A.jahre.toLocaleString('de-DE', { maximumFractionDigits: 1 })} Jahre`;
+  const bisWann = A.jahre > 0 && va.ehezeit_ende ? new Date(new Date(va.ehezeit_ende).getTime() + A.jahre * 365.25 * 864e5) : null;
+  const zeilen = A.zeilen.map((x) => `<tr><td>${H.esc(x.name)}<small>${H.esc(x.ehe)}${x.sub ? ` · ${H.esc(x.sub)}` : ''}</small></td>
+    <td class="r neg">${x.ab ? `−${e0(x.ab)}` : '–'}</td><td class="r pos">${x.zu ? `+${e0(x.zu)}` : '–'}</td><td class="r"><b>${pm0(x.zu - x.ab)}</b></td></tr>`).join('');
+  const satz = `Nach dem Versorgungsausgleich bleiben dir mit 67 etwa <b>${e0(A.nachher)}</b> statt ${e0(A.vorher)} im Monat (${kk}) – <b class="neg">${pm0(-A.netto)}</b> (${pz(A.netto / A.vorher)} weniger).`
+    + (A.jahre > 0 ? ` Mit deinen heutigen Beiträgen (gesetzlich und Betriebsrente) hast du diesen Verlust nach etwa <b>${jahreTxt}</b> wieder aufgebaut${bisWann ? ` – also etwa ${bisWann.getFullYear()}` : ''}.` : '');
+  return H.karte5('Rente nach der Scheidung', `Versorgungsausgleich: Die in der Ehezeit (${va.ehezeit_beginn ? H.dde(va.ehezeit_beginn) : '?'} – ${va.ehezeit_ende ? H.dde(va.ehezeit_ende) : '?'}) erworbenen Anrechte werden geteilt · ${kk}`,
+    `<p class="ge-text">${satz}</p>
+    <div class="ge-rvgl">
+      <div><span>Vor dem Ausgleich</span><b>${e0(A.vorher)}</b><small>Rente im Monat mit 67</small></div>
+      <div><span>Nach dem Ausgleich</span><b>${e0(A.nachher)}</b><small>Rente im Monat mit 67</small></div>
+      <div><span>Differenz</span><b class="neg">${pm0(-A.netto)}</b><small>${pz(A.netto / A.vorher, 1)} weniger</small></div>
+      <div><span>Wieder aufgebaut nach</span><b>${jahreTxt}</b><small>Zuwachs ${e0(A.proJahr)} Rente je Beitragsjahr</small></div>
+    </div>
+    <div class="t3-rahmen"><table class="t3 ge-vat"><thead><tr><th>Anrecht</th><th class="r">gibst du ab</th><th class="r">bekommst du</th><th class="r">Saldo</th></tr></thead><tbody>${zeilen}
+      <tr class="ge-sum"><td>Zusammen</td><td class="r neg">−${e0(A.ab)}</td><td class="r pos">${A.zu ? `+${e0(A.zu)}` : '–'}</td><td class="r"><b>${pm0(-A.netto)}</b></td></tr></tbody></table></div>
+    <p class="s5-erkl">${(va.hinweise || []).map(H.esc).join(' ')} Schätzung, keine Rechts- oder Rentenberatung; maßgeblich ist der Beschluss des Familiengerichts.</p>`, '', '', 'ge-va');
+}
+
 function renteZusaetze(V, R, akt) {
   const monate = Math.round(R.jahre * 12);
   const teile = [];
