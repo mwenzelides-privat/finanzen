@@ -1417,6 +1417,12 @@ button.vg-summe.kz:hover { background: var(--surface-2); }
 .ge-waffel { display: grid; grid-template-columns: repeat(20, minmax(0, 1fr)); gap: 3px; }
 .ge-waffel i { aspect-ratio: 1; border-radius: 3px; }
 .ge-legende { display: grid; }
+.ge-jfluss { display: grid; gap: 6px; padding-top: 8px; border-top: 1px dashed var(--border-strong); }
+.ge-jfluss h3 { margin: 0; font-size: 13.5px; font-weight: 700; }
+.ge-jfluss .s5-dl { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 18px; }
+.ge-jfluss .s5-dl > div { padding: 3px 0; border-bottom: 1px solid var(--border); }
+.ge-jfluss .s5-dl dt { font-size: 12.5px; }
+.ge-jfluss .s5-dl dd { font-size: 13px; }
 .ge-lg { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto 36px; gap: 8px; align-items: center; font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--border); }
 .ge-lg:last-child { border-bottom: 0; }
 .ge-lg > i { width: 12px; height: 12px; border-radius: 3px; }
@@ -1449,6 +1455,7 @@ button.vg-summe.kz:hover { background: var(--surface-2); }
 .ge-regler { display: grid; grid-template-columns: auto minmax(80px, 1fr) auto; gap: 10px; align-items: center; font-size: 13px; color: var(--text-2); }
 .ge-regler input { width: 100%; accent-color: var(--accent); }
 .ge-regler b { color: var(--text); min-width: 58px; text-align: right; }
+.ge-regler span small { display: block; font-size: 11px; color: var(--muted); }
 /* Betriebsrente */
 .ge-bav { display: flex; height: 44px; border-radius: 8px; overflow: hidden; gap: 2px; }
 .ge-bav i { display: flex; flex-direction: column; justify-content: center; padding: 0 8px; color: #fff; min-width: 0; font-style: normal; overflow: hidden; }
@@ -1458,6 +1465,17 @@ button.vg-summe.kz:hover { background: var(--surface-2); }
 .ge-bav .fa { background: var(--ein); }
 .ge-bav .ag { background: var(--g-kv); }
 .ge5 .s5-dl dd.neg { color: var(--aus-text); }
+.ge-autoerg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.ge-autoerg > div { background: var(--surface-2); border-radius: 9px; padding: 8px 10px; display: grid; gap: 1px; }
+.ge-autoerg span { font-size: 12px; color: var(--muted); font-weight: 600; }
+.ge-autoerg b { font-size: 19px; }
+.ge-autoerg b.neg { color: var(--aus-text); }
+.ge-autoerg small { font-size: 11px; color: var(--muted); }
+.ge-autoregler { display: grid; gap: 8px; }
+.ge-schnell { display: flex; flex-wrap: wrap; gap: 6px; }
+.ge-schnell .chip.an { background: var(--accent-soft); border-color: var(--accent); }
+.ge-satz button { padding: 4px 10px; font-size: 13px; }
+.ge-autok .link { padding: 0; font-size: inherit; }
 /* Gehaltsentwicklung (Grafik) */
 .ge-chart { height: 330px; }
 .ge-erhs { display: flex; flex-wrap: wrap; gap: 6px 8px; font-size: 12.5px; align-items: center; }
@@ -1493,6 +1511,62 @@ button.ge-hz:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ge-jz > b { text-align: right; white-space: nowrap; }
 .ge-jz > b small { display: block; font-weight: 400; font-size: 11.5px; color: var(--muted); }
 .ge-jd { text-align: right; font-size: 12.5px; white-space: nowrap; }
+/* Rente */
+.ge-rbalken { display: flex; height: 46px; border-radius: 8px; overflow: hidden; gap: 2px; }
+.ge-rbalken i { display: flex; flex-direction: column; justify-content: center; padding: 0 9px; color: #fff; min-width: 0; font-style: normal; overflow: hidden; }
+.ge-rbalken span { font-size: 11px; opacity: .92; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ge-rbalken b { font-size: 14px; white-space: nowrap; }
+.ge-rvgl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.ge-rvgl > div { background: var(--surface-2); border-radius: 9px; padding: 8px 10px; display: grid; gap: 1px; }
+.ge-rvgl span { font-size: 12px; color: var(--muted); font-weight: 600; }
+.ge-rvgl b { font-size: 18px; }
+.ge-rvgl b.pos { color: var(--ein-text); } .ge-rvgl b.neg { color: var(--aus-text); }
+.ge-rvgl small { font-size: 11px; color: var(--muted); }
+.ge-annahmen { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 18px; padding-top: 8px; border-top: 1px dashed var(--border-strong); }
+.ge-check { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--text-2); }
+.ge-check input { accent-color: var(--accent); }
+.ge-rzus { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; }
+.ge-rteil h3 { margin: 0 0 2px; font-size: 13.5px; font-weight: 700; }
+.ge-rteil dt small { display: block; font-size: 11px; color: var(--muted); }
+.ge-gp { display: grid; grid-template-columns: 70px minmax(0, 1fr) 70px; gap: 8px; align-items: center; font-size: 12.5px; margin: 4px 0; }
+.ge-gp i { height: 14px; border-radius: 4px; background: var(--g-rv); }
+.ge-gp i.p { background: repeating-linear-gradient(135deg, var(--g-bav) 0 4px, color-mix(in srgb, var(--g-bav) 55%, var(--surface)) 4px 8px); }
+.ge-gp b { text-align: right; }
+@media (max-width: 700px) { .ge-rzus { grid-template-columns: minmax(0, 1fr); } }
+.ge-rliste { display: grid; }
+.ge-rz { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 6px 2px; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+.ge-rz > i { width: 10px; height: 26px; border-radius: 3px; }
+.ge-rz small { display: block; font-size: 11.5px; color: var(--muted); font-weight: 400; }
+.ge-rz > b { text-align: right; white-space: nowrap; }
+.ge-rsum { border-bottom: 0; border-top: 1.5px solid var(--border-strong); font-weight: 700; }
+.ge-rh { margin: -2px 0 4px 19px; font-size: 11.5px; color: var(--text-2); line-height: 1.4; }
+@media (max-width: 700px) {
+  .ge-rvgl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ge-annahmen { grid-template-columns: minmax(0, 1fr); }
+}
+/* Brutto, Abgaben, Netto – Jahr für Jahr */
+.ge-yleg { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-2); }
+.ge-yleg span { display: inline-flex; align-items: center; gap: 5px; }
+.ge-yleg i { width: 11px; height: 11px; border-radius: 3px; }
+.ge-ytab { display: grid; }
+.ge-yt { display: grid; grid-template-columns: 92px minmax(80px, 1fr) 96px 78px 78px 104px; gap: 12px; align-items: center; padding: 7px 4px; border: 0; border-bottom: 1px solid var(--border); background: none; font: inherit; font-size: 13.5px; color: inherit; text-align: left; width: 100%; cursor: pointer; }
+.ge-yt:last-child { border-bottom: 0; }
+.ge-yt:hover { background: var(--surface-2); }
+.ge-ykopf { cursor: default; font-size: 11.5px; font-weight: 600; color: var(--muted); padding-top: 0; }
+.ge-ykopf:hover { background: none; }
+.ge-ykopf span:nth-child(n+3) { text-align: right; }
+.ge-yj { font-weight: 700; }
+.ge-yj small, .ge-yw small { display: block; font-weight: 400; font-size: 11px; color: var(--muted); }
+.ge-yb { display: flex; height: 18px; border-radius: 5px; overflow: hidden; gap: 1px; background: var(--surface-2); }
+.ge-yb i { min-width: 1px; }
+.ge-yw { text-align: right; white-space: nowrap; }
+.ge-yw.neg b { color: var(--aus-text); }
+.ge-yw.pos b { color: var(--ein-text); }
+@media (max-width: 700px) {
+  .ge-yt { grid-template-columns: 58px minmax(40px, 1fr) 62px 62px; gap: 8px; }
+  .ge-yt > span:nth-child(3), .ge-yt > span:nth-child(6) { display: none; }
+  .ge-yj small { display: none; }
+}
 /* Alle Daten der Abrechnungen */
 .ge-tab td:first-child { color: var(--text-2); white-space: nowrap; }
 .ge-tab td.ge-txt { white-space: normal; font-size: 12px; line-height: 1.3; }

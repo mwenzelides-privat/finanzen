@@ -7,10 +7,11 @@ import { alsExcelMappe } from './export.js';
 let H = null;              // Helfer aus app.js (Bausteine, Grafik, Navigation)
 let wahl = '';             // gewählter Abrechnungsmonat 'JJJJ-MM'
 let basisWahl = 'vm';      // Vergleich in „Warum anders?“: vm = Vormonat, vj = Vorjahresmonat
-let ansicht = 'monate';    // Grafik Gehaltsentwicklung: monate | jahre
+let ansicht = 'jahre';     // Grafik Gehaltsentwicklung: jahre (Standard) | monate
 let tabEnde = '';          // Tabelle „Alle Daten“: neuester gezeigter Monat
 let erhoehung = 500;       // Rechner: Gehaltserhöhung brutto im Monat
-let km = null;             // Rechner Dienstwagen: Entfernung zur Arbeit
+let auto_ = null;          // Rechner Dienstwagen: { satz (% vom Listenpreis), preis, km }
+try { auto_ = JSON.parse(localStorage.getItem('fd.dienstwagen') || 'null'); } catch {}
 let spaltenMax = 12, spaltenBreite = 0;   // Tabelle: höchstens so viele Monate, wie ohne Querscrollen passen
 
 const e = (v) => H.eur(Math.round(v * 100));
@@ -25,6 +26,9 @@ const auto = (z) => (z.privatfahrten || 0) + (z.whg_arbeit || 0);
 const kvpv = (z) => (z.kv || 0) + (z.pv || 0) - (z.kv_zuschuss || 0) - (z.pv_zuschuss || 0);
 const sonder = (z) => (z.praemie || 0) + (z.sonder || 0);
 const extra = (z) => sonder(z) + (z.sachbezug || 0);   // alles außer Grundgehalt und Dienstwagen
+// Abgaben = Lohnsteuer/Soli/KiSt + eigene Sozialversicherung (RV, AV, KV und PV nach Abzug der Arbeitgeber-Zuschüsse)
+const sozial = (z) => (z.rv || 0) + (z.av || 0) + kvpv(z);
+const abgaben = (z) => steuer(z) + sozial(z);
 
 // Wohin das Gesamtpaket fließt (Brutto + Betriebsrente vom Arbeitgeber). Feste Reihenfolge und Farben.
 const GRUPPEN = {
@@ -148,26 +152,39 @@ export function gehaltZeigen(el, helfer) {
     H.zahl5(`Aufs Konto im ${H.MONAT[+z.m.slice(5) - 1]}`, e(z.auszahlung), `${vm ? `${pm(z.auszahlung - vm.auszahlung)} ggü. ${H.MON[+vm.m.slice(5) - 1]}` : 'erste Abrechnung'}${ein ? ` · angekommen am ${H.dde(ein.d).slice(0, 6)} ✓` : ''}`, { ziel: gehaltZiel(z) }),
     H.zahl5(`Brutto im ${H.MONAT[+z.m.slice(5) - 1]}`, e0(z.brutto), `Grundgehalt ${e0(z.gehalt)}${auto(z) ? ` + Dienstwagen ${e0(auto(z))}` : ''}${sonder(z) > 1 ? ` + Sonderzahlung ${e0(sonder(z))}` : ''}`, { springe: '#ge-daten' }),
     H.zahl5('Grundgehalt', e0(stufe), `${seit > 0 ? `+${pz(seit)} seit ${H.monKurz(erste.m)} (${e0(erste.gehalt)})` : 'monatlich, ohne Zulagen'}${Math.abs(z.gehalt - stufe) > 0.5 ? ` · in diesem Monat ${e0(z.gehalt)} mit Nachzahlung` : ''}`, { cls: seit > 0 ? 'pos' : '', springe: '#ge-verlauf' }),
-    H.zahl5(`Jahr ${j}${jahrPlan ? ' (mit Plan)' : ''}`, `${jahrPlan ? '≈ ' : ''}${e0(sum(jahrAlle, (x) => x.auszahlung))}`, `aufs Konto · brutto ${jahrPlan ? '≈ ' : ''}${e0(sum(jahrAlle, (x) => x.brutto))}${jahrPlan ? ` · ${jahrIst.length} von 12 Monaten abgerechnet` : ''}`, { springe: '#ge-jahre' }),
+    H.zahl5(`Jahr ${j}${jahrPlan ? ' (mit Plan)' : ''}`, `${jahrPlan ? '≈ ' : ''}${e0(sum(jahrAlle, (x) => x.auszahlung))}`, `aufs Konto · brutto ${jahrPlan ? '≈ ' : ''}${e0(sum(jahrAlle, (x) => x.brutto))}${jahrPlan ? ` · ${jahrIst.length} von 12 Monaten abgerechnet` : ''}`, { springe: '#ge-jahrtab' }),
   ].join('');
+  const jahrDet = jahrIst.filter(detail);
+  const vorsorge = detail(z) ? 2 * (z.rv || 0) + (z.bav_an || 0) + (z.bav_ag || 0) : null;
+  const kacheln2 = detail(z) ? [
+    H.zahl5('Netto vom Brutto', pz((z.brutto - abgaben(z)) / z.brutto, 1), `${e0(z.brutto - abgaben(z))} von ${e0(z.brutto)} bleiben nach Steuern und Sozialabgaben`, { cls: 'pos', springe: '#ge-jahrtab' }),
+    H.zahl5('Abgaben', pz(abgaben(z) / z.brutto, 1), `${e0(abgaben(z))}: Lohnsteuer und Soli ${e0(steuer(z))} · Sozialversicherung ${e0(sozial(z))}`, { cls: 'neg', springe: '#ge-quote' }),
+    H.zahl5(`Lohnsteuer ${j}`, e0(sum(jahrDet, steuer)), `bis ${H.MONAT[+jahrDet.at(-1).m.slice(5) - 1]}, im Schnitt ${pz(sum(jahrDet, steuer) / Math.max(1, sum(jahrDet, (x) => x.brutto)), 1)} vom Brutto`, { springe: '#ge-quote' }),
+    H.zahl5('Für die Rente im Monat', e0(vorsorge), `gesetzlich ${e0(2 * (z.rv || 0))} (mit Arbeitgeberanteil)${z.bav_an || z.bav_ag ? ` · Betriebsrente ${e0((z.bav_an || 0) + (z.bav_ag || 0))}` : ''}`, { springe: '#ge-rente' }),
+  ].join('') : '';
 
   el.innerHTML = `<div class="s5 ge5">
     ${H.kopf5('Gehaltsentwicklung', satz, auswahl)}
     <div class="s5-zahlen">${kacheln}</div>
+    ${kacheln2 ? `<div class="s5-zahlen">${kacheln2}</div>` : ''}
     <div class="s5-raster">
       ${flussKarte(z, basis, t)}
       ${brueckeKarte(G, z)}
       <div class="s5-spalte">${bavKarte(G, z)}${autoKarte(G, z)}</div>
     </div>
+    ${renteHtml(G, z)}
     ${verlaufKarte(G)}
     <div class="s5-raster">
-      ${heatmapKarte(G)}
-      ${jahreKarte(G)}
+      ${jahrTabelleKarte(G)}
+      ${quoteKarte(G)}
     </div>
+    ${heatmapKarte(G)}
     ${datenKarte(G, el)}
   </div>`;
   binden(el, G);
   verlaufZeichnen(G);
+  quoteZeichnen(G);
+  renteZeichnen(G);
   const rahmen = el.querySelector('#ge-daten .t3-rahmen'), n = el.querySelectorAll('.ge-tab thead .ge-mk').length;
   if (rahmen && rahmen.scrollWidth > rahmen.clientWidth + 1 && n > 1) { spaltenMax = n - 1; gehaltZeigen(el, H); }
 }
@@ -193,7 +210,19 @@ function flussKarte(z, basis, t) {
     ? `Von 100 € gehen <b>${hundert('konto')} €</b> aufs Konto, <b>${hundert('steuer')} €</b> ans Finanzamt${spaeter.length ? ` und <b>${Math.round(sum(spaeter, (k) => t[k]) / basis * 100)} €</b> in deine Rente` : ''}.`
     : 'Für diesen Monat gibt es nur die Summen aus Lohn-02.xlsx.';
   return H.karte5('Wohin dein Geld fließt', `${H.monLang(z.m)}: ${detail(z) && z.bav_ag ? 'Brutto plus Betriebsrente vom Arbeitgeber' : 'Brutto'} = ${e(basis)}, ein Kästchen = 1 %`,
-    `<p class="ge-text">${text}</p><div class="ge-waffel" role="img" aria-label="Aufteilung in Prozent">${zellen}</div><div class="ge-legende">${legende}</div>`, '', '', 'ge-fluss');
+    `<p class="ge-text">${text}</p><div class="ge-waffel" role="img" aria-label="Aufteilung in Prozent">${zellen}</div><div class="ge-legende">${legende}</div>${jahrFluss(z)}`, '', '', 'ge-fluss');
+}
+
+// Freie Fläche: dieselbe Aufteilung für alle Abrechnungen des Jahres bis zum gewählten Monat
+function jahrFluss(z) {
+  const ms = H.D.j.gehalt.monate.filter((x) => x.m.slice(0, 4) === z.m.slice(0, 4) && x.m <= z.m && x.quelle === 'pdf' && detail(x));
+  if (ms.length < 2) return '';
+  const t = {}; let basis = 0;
+  for (const x of ms) { const a = aufteilung(x); basis += a.basis; for (const [k, w] of Object.entries(a.t)) t[k] = (t[k] || 0) + w; }
+  const keys = Object.keys(GRUPPEN).filter((k) => t[k] > 0.005);
+  return `<div class="ge-jfluss fuell-aus" data-fuell="1"><h3>${z.m.slice(0, 4)} bis ${H.MONAT[+z.m.slice(5) - 1]} zusammen: ${e0(basis)}</h3>
+    <div class="ge-yb">${keys.map((k) => `<i style="flex:${t[k]};background:${GRUPPEN[k].f}" title="${GRUPPEN[k].n}: ${e0(t[k])}"></i>`).join('')}</div>
+    <dl class="s5-dl">${keys.slice().sort((x, y) => t[y] - t[x]).slice(0, 4).map((k) => `<div><dt>${GRUPPEN[k].n}</dt><dd>${e0(t[k])}<small>${pz(t[k] / basis)}</small></dd></div>`).join('')}</dl></div>`;
 }
 
 function brueckeKarte(G, z) {
@@ -247,34 +276,52 @@ function bavKarte(G, z) {
   const an = z.bav_an || 0, ag = z.bav_ag || 0, ges = an + ag;
   const steuerSpar = an * G.gs.r, netto = an - steuerSpar;
   const bisher = sum(mit, (x) => (x.bav_an || 0) + (x.bav_ag || 0));
+  const verein = z.arbeitgeber === 'Wittmann' ? H.D.j.gehalt?.vorsorge?.ag_vereinbart_prozent : null, sollAg = verein ? verein / 100 * z.gehalt : 0;
   const teil = (w, cls, n) => `<i class="${cls}" style="flex:${w}" title="${n}: ${e0(w)}"><span>${n}</span><b>${e0(w)}</b></i>`;
   return H.karte5('Betriebsrente', `${e0(ges)} im Monat fließen in deine Altersvorsorge`,
     `<div class="ge-bav">${teil(netto, 'du', 'du netto')}${teil(steuerSpar, 'fa', 'Steuer gespart')}${teil(ag, 'ag', 'Arbeitgeber')}</div>
     <p class="ge-text">Davon zahlst du netto nur <b>${e0(netto)}</b> (${pz(netto / ges)}) – den Rest tragen dein Arbeitgeber (${e0(ag)}) und die gesparte Lohnsteuer (≈ ${e0(steuerSpar)}).</p>
-    <dl class="s5-dl"><div><dt>Seit ${H.monLang(mit[0].m)} eingezahlt</dt><dd>${e0(bisher)}</dd></div><div><dt>Pro Jahr</dt><dd>${e0(ges * 12)}<small>ohne Zinsen</small></dd></div></dl>`, 'ge-bavk');
+    <dl class="s5-dl">${verein ? `<div><dt>Arbeitgeber laut Vereinbarung <small>${verein} % von ${e0(z.gehalt)}</small></dt><dd>${e0(sollAg)}${Math.abs(sollAg - ag) > 1 ? `<small class="neg">abgerechnet ${e0(ag)} · ${pm0(ag - sollAg)} im Monat</small>` : '<small>✓ wie abgerechnet</small>'}</dd></div>` : ''}<div><dt>Seit ${H.monLang(mit[0].m)} eingezahlt</dt><dd>${e0(bisher)}</dd></div><div><dt>Pro Jahr</dt><dd>${e0(ges * 12)}<small>ohne Zinsen</small></dd></div></dl>`, 'ge-bavk');
 }
 
+// Dienstwagen: geldwerter Vorteil = Satz × Listenpreis (Privatfahrten) + 0,03 % × Listenpreis × km, beim E-Auto
+// anteilig wie der Satz (0,5 % → Hälfte, 0,25 % → Viertel). Kosten für dich = Vorteil × Grenzsteuersatz.
+const SAETZE = [[1, '1 %', 'Verbrenner'], [0.5, '0,5 %', 'Hybrid / E-Auto über der Preisgrenze'], [0.25, '0,25 %', 'E-Auto']];
+function autoWerte(G, z) {
+  const satzStd = H.D.j.gehalt?.dienstwagen?.satz_prozent ?? 1;
+  const preisAbr = z.privatfahrten ? z.privatfahrten / (satzStd / 100) : null;
+  const kmAbr = preisAbr ? z.whg_arbeit / (0.0003 * (satzStd / 1) * preisAbr) : null;
+  const a = { satz: auto_?.satz ?? satzStd, preis: auto_?.preis ?? Math.round(preisAbr || 50000), km: auto_?.km ?? Math.round(kmAbr || 0) };
+  const vorteil = (x) => { const lp = Math.floor(x.preis / 100) * 100; return (x.satz / 100) * lp + 0.0003 * x.satz * lp * x.km; };
+  return { a, satzStd, preisAbr, kmAbr, vorteil, gs: G.gs.r, jetzt: auto(z), dw: H.D.j.gehalt?.dienstwagen || {} };
+}
+function autoText(W) {
+  const v = W.vorteil(W.a), kosten = v * W.gs, d = (W.jetzt - v) * W.gs;
+  const gleich = Math.abs(v - W.jetzt) < 1;
+  return `<div class="ge-autoerg"><div><span>Geldwerter Vorteil</span><b>${e0(v)}</b><small>im Monat versteuert</small></div>
+    <div><span>Kostet dich netto</span><b class="neg">${e0(kosten)}</b><small>${e0(kosten * 12)} im Jahr</small></div></div>
+    <p class="ge-text">${gleich ? `So steht es auf deiner Abrechnung: ${e(W.jetzt)} geldwerter Vorteil, das kostet dich bei ${pz(W.gs, 1)} Grenzsteuersatz etwa <b>${e0(kosten)}</b> im Monat.`
+      : `Gegenüber heute (${e0(W.jetzt * W.gs)} im Monat): <b class="${d >= 0 ? 'pos' : 'neg'}">${pm0(d)}</b> netto im Monat, ${pm0(d * 12)} im Jahr.`}</p>`;
+}
 function autoKarte(G, z) {
   if (!auto(z)) return H.karte5('Dienstwagen', '', '<p class="muted">In diesem Monat kein Dienstwagen auf der Abrechnung.</p>');
-  const lp = z.privatfahrten / 0.01, kmJetzt = z.privatfahrten ? z.whg_arbeit / (lp * 0.0003) : 0;
-  const kmOk = kmJetzt > 1 && kmJetzt < 300 && Math.abs(kmJetzt - Math.round(kmJetzt)) < 0.05;
-  const gs = G.gs.r, kosten = auto(z) * gs;
-  if (km == null && kmOk) km = Math.round(kmJetzt);
-  const rechner = kmOk ? `<label class="ge-regler"><span>Entfernung zur Arbeit</span><input type="range" id="ge-km" min="0" max="120" step="1" value="${km}" data-lp="${lp}" data-km="${Math.round(kmJetzt)}" data-gs="${gs}"><b id="ge-km-w">${km} km</b></label>
-    <p class="ge-text" id="ge-km-t">${kmText(lp, Math.round(kmJetzt), km, gs)}</p>` : '';
-  return H.karte5('Dienstwagen', `geldwerter Vorteil ${e(auto(z))} im Monat – kein Geld, wird aber versteuert`,
-    `<dl class="s5-dl"><div><dt>Privatfahrten${z.privatfahrten ? ` <small>1 % von ${e0(lp)} Listenpreis</small>` : ''}</dt><dd>${e(z.privatfahrten)}</dd></div>
-    <div><dt>Wohnung – Arbeit${kmOk ? ` <small>0,03 % × ${Math.round(kmJetzt)} km</small>` : ''}</dt><dd>${e(z.whg_arbeit)}</dd></div>
-    <div><dt>Kostet dich an Steuer</dt><dd class="neg">≈ ${e0(kosten)}<small>im Monat · ${e0(kosten * 12)} im Jahr</small></dd></div></dl>${rechner}`);
+  const W = autoWerte(G, z), a = W.a;
+  const best = W.dw.bestellt;
+  const schnell = `<div class="ge-schnell"><button class="chip${!auto_ ? ' an' : ''}" data-ge-auto-zurueck>Wie heute (Abrechnung)</button>${best ? `<button class="chip${auto_ && auto_.preis === Math.round(best.listenpreis) && auto_.satz === best.satz_prozent ? ' an' : ''}" data-ge-auto-best>${H.esc(best.modell)}: ${e0(best.listenpreis)}, ${String(best.satz_prozent).replace('.', ',')} %</button>` : ''}</div>`;
+  const knopf = SAETZE.map(([w, t, u]) => `<button data-ge-satz="${w}" class="${w === a.satz ? 'an' : ''}" title="${u}">${t}</button>`).join('');
+  const regler = (id, label, min, max, step, wert, txt) => `<label class="ge-regler"><span>${label}</span><input type="range" data-ge-auto="${id}" min="${min}" max="${max}" step="${step}" value="${wert}"><b>${txt}</b></label>`;
+  const herkunft = `Heute laut Abrechnung ${H.monKurz(z.m)}: Privatfahrten ${e(z.privatfahrten)}, Wohnung–Arbeit ${e(z.whg_arbeit)}.${W.dw.hinweis ? ` ${H.esc(W.dw.hinweis)}` : ''}${best ? ` Bestellt: ${H.esc(best.modell)}, Bruttolistenpreis ${e(best.listenpreis)}${best.liefertermin ? `, Liefertermin ${H.esc(best.liefertermin)}` : ''} – als E-Auto bis 100.000 € gilt 0,25 %.` : ''}`;
+  return H.karte5('Dienstwagen', 'was er dich wirklich kostet – Versteuerung, Preis und Entfernung einstellbar',
+    `${schnell}<div id="ge-auto-erg">${autoText(W)}</div>
+    <div class="ge-autoregler">
+      <div class="ge-regler"><span>Versteuerung</span><div class="seg ge-satz">${knopf}</div><b></b></div>
+      ${regler('preis', 'Listenpreis', 20000, 150000, 500, a.preis, e0(a.preis))}
+      ${regler('km', 'Entfernung zur Arbeit', 0, 150, 1, a.km, `${a.km} km`)}
+    </div>
+    <p class="s5-erkl">${herkunft} Fahrten Wohnung–Arbeit: 0,03 % je km, beim E-Auto vom ermäßigten Listenpreis. Sozialversicherung fällt nicht an (du liegst über der Beitragsgrenze). Schätzung mit deinem Grenzsteuersatz ${pz(W.gs, 1)} inkl. Soli, keine Steuerberatung.</p>`, 'ge-autok');
 }
-const kmText = (lp, kmJetzt, kmNeu, gs) => {
-  if (kmNeu === kmJetzt) return 'Regler bewegen: So ändert sich deine Auszahlung, wenn der Weg zur Arbeit kürzer oder länger wird.';
-  const d = (kmJetzt - kmNeu) * lp * 0.0003 * gs;
-  return `Bei ${kmNeu} km statt ${kmJetzt} km: ≈ <b class="${d >= 0 ? 'pos' : 'neg'}">${pm0(d)}</b> netto im Monat (${pm0(d * 12)} im Jahr).`;
-};
-
 function verlaufKarte(G) {
-  const seg = `<div class="seg">${[['monate', 'Monate'], ['jahre', 'Jahre']].map(([k, n]) => `<button data-ge-ansicht="${k}" class="${k === ansicht ? 'an' : ''}">${n}</button>`).join('')}</div>`;
+  const seg = `<div class="seg">${[['jahre', 'Jahre'], ['monate', 'Monate']].map(([k, n]) => `<button data-ge-ansicht="${k}" class="${k === ansicht ? 'an' : ''}">${n}</button>`).join('')}</div>`;
   const erh = G.erh.filter((x) => !x.plan);
   const liste = erh.map((x) => `<span class="ge-erh${x.wechsel ? ' wechsel' : ''}">${H.monKurz(x.m)} <b>+${pz(x.p, 1)}</b>${x.wechsel ? ' · neuer Arbeitgeber' : ''}</span>`).join('');
   return H.karte5('Gehaltsentwicklung seit ' + H.monLang(G.alle[0].m).split(' ')[1],
@@ -303,28 +350,202 @@ function heatmapKarte(G) {
   }).join('');
   const kopf = `<span></span>${H.MON.map((m) => `<span class="ge-hk">${m}</span>`).join('')}<span class="ge-hk r">Jahr</span>`;
   return H.karte5('Jeder Monat auf einen Blick', 'was aufs Konto kam – je dunkler, desto mehr; Sonderzahlungen fallen sofort auf · Monat anklicken: Abrechnung oben zeigen',
-    `<div class="ge-heat">${kopf}${zeilen}</div>`, 's5-b2');
+    `<div class="ge-heat">${kopf}${zeilen}</div>`);
 }
 
-function jahreKarte(G) {
-  const jahre = [...new Set(G.alle.map((z) => z.m.slice(0, 4)))].sort();
-  const rows = jahre.map((j) => {
-    const ms = G.alle.filter((z) => z.m.startsWith(j) && z.quelle !== 'fehlt');
-    const plan = ms.some((z) => z.quelle === 'plan' || z.auszahlung == null);
-    return { j, plan, brutto: sum(ms, (z) => z.brutto), konto: sum(ms, (z) => z.auszahlung), sonder: sum(ms, sonder), n: ms.filter((z) => z.quelle !== 'plan').length };
+const TEILE = [
+  ['steuer', 'Lohnsteuer, Soli', 'var(--g-steuer)'], ['sozial', 'Sozialversicherung', 'var(--g-kv)'], ['bav', 'Betriebsrente (dein Anteil)', 'var(--g-bav)'],
+  ['auto', 'Dienstwagen, Sachbezüge', 'var(--g-auto)'], ['sonst', 'Sonstiges', 'var(--g-sonst)'], ['abz', 'Steuern, Abgaben, Vorsorge', 'var(--g-steuer)'], ['konto', 'Aufs Konto', 'var(--ein)'],
+];
+function jahrWerte(G) {
+  const jahre = [...new Set(G.ist.map((z) => z.m.slice(0, 4)))].sort();
+  return jahre.map((j) => {
+    const ms = G.ist.filter((z) => z.m.startsWith(j)), det = ms.filter(detail);
+    const brutto = sum(ms, (z) => z.brutto), bd = sum(det, (z) => z.brutto);
+    const r = { j, n: ms.length, nDet: det.length, brutto, konto: sum(ms, (z) => z.auszahlung), sonder: sum(ms, sonder) };
+    if (det.length) {
+      Object.assign(r, { steuer: sum(det, steuer), sozial: sum(det, sozial), bav: sum(det, (z) => z.bav_an || 0), bavAg: sum(det, (z) => z.bav_ag || 0), bd });
+      r.abgQ = (r.steuer + r.sozial) / bd;
+      r.teile = { steuer: r.steuer / bd, sozial: r.sozial / bd, bav: r.bav / bd, auto: sum(det, (z) => auto(z) + (z.sachbezug || 0)) / bd, konto: sum(det, (z) => z.auszahlung) / bd };
+      r.teile.sonst = Math.max(0, 1 - sum(Object.values(r.teile), (x) => x));
+    } else {
+      r.teile = { auto: sum(ms, (z) => Math.max(0, auto(z))) / brutto, konto: r.konto / brutto };
+      r.teile.abz = Math.max(0, 1 - r.teile.auto - r.teile.konto);
+    }
+    return r;
   });
-  const max = Math.max(...rows.map((r) => r.brutto));
-  const html = rows.slice().reverse().map((r, i, l) => {
-    const vor = rows[rows.indexOf(r) - 1];
-    const d = vor && vor.brutto ? r.brutto / vor.brutto - 1 : null;
-    return `<button class="ge-jz"${H.geh(H.zuBuchungen({ kat: 'Einnahmen', ukat: 'Lohn / Gehalt', art: 'ein', jahr: r.j, monat: '', zr: '' }))} title="Gehaltseingänge ${r.j} anzeigen">
-      <span class="ge-jj">${r.j}${r.plan ? '<small>mit Plan</small>' : ''}</span>
-      <span class="ge-jb"><i class="b" style="width:${(r.brutto / max) * 100}%"></i><i class="k" style="width:${(r.konto / max) * 100}%"></i></span>
-      <b>${r.plan ? '≈ ' : ''}${e0(r.brutto)}<small>${r.plan ? '≈ ' : ''}${e0(r.konto)} aufs Konto</small></b>
-      <span class="ge-jd ${d == null ? 'muted' : d >= 0 ? 'pos' : 'neg'}">${d == null ? '–' : `${d >= 0 ? '+' : '−'}${pz(Math.abs(d))}`}</span></button>`;
-  }).join('');
-  return H.karte5('Jahr für Jahr', 'brutto (hell) und aufs Konto (kräftig) · rechts: Veränderung zum Vorjahr', `<div class="ge-jahre">${html}</div>`, '', '', 'ge-jahre');
 }
+function jahrTabelleKarte(G) {
+  const W = jahrWerte(G);
+  const zeilen = W.slice().reverse().map((r) => {
+    const vor = W[W.indexOf(r) - 1];
+    const balken = TEILE.filter(([k]) => r.teile[k] > 0.001).map(([k, n, f]) => `<i style="flex:${r.teile[k]};background:${f}" title="${n}: ${pz(r.teile[k], 1)}"></i>`).join('');
+    const teil = r.nDet && r.nDet < r.n ? `<small>Anteile aus ${r.nDet} von ${r.n} Abrechnungen</small>` : !r.nDet ? '<small>nur Summen (Lohn-02.xlsx)</small>' : `<small>${r.n} Monate</small>`;
+    const netto = r.nDet ? 1 - r.abgQ : null;
+    return `<button class="ge-yt"${H.geh(H.zuBuchungen({ kat: 'Einnahmen', ukat: 'Lohn / Gehalt', art: 'ein', jahr: r.j, monat: '', zr: '' }))} title="Gehaltseingänge ${r.j} anzeigen">
+      <span class="ge-yj">${r.j}${teil}</span>
+      <span class="ge-yb">${balken}</span>
+      <span class="ge-yw"><b>${e0(r.brutto)}</b><small>${vor && vor.brutto ? `${r.brutto >= vor.brutto ? '+' : '−'}${pz(Math.abs(r.brutto / vor.brutto - 1))} ggü. Vorjahr` : 'brutto'}</small></span>
+      <span class="ge-yw neg"><b>${r.nDet ? pz(r.abgQ, 1) : '–'}</b><small>${r.nDet ? `${e0(r.steuer + r.sozial)}${r.nDet < r.n ? ` in ${r.nDet} Mon.` : ''}` : 'Abgaben'}</small></span>
+      <span class="ge-yw pos"><b>${netto != null ? pz(netto, 1) : '–'}</b><small>netto vom Brutto</small></span>
+      <span class="ge-yw"><b>${e0(r.konto)}</b><small>${pz(r.konto / r.brutto)} aufs Konto</small></span></button>`;
+  }).join('');
+  const legende = TEILE.filter(([k]) => W.some((r) => r.teile[k] > 0.001)).map(([k, n, f]) => `<span><i style="background:${f}"></i>${n}</span>`).join('');
+  return H.karte5('Brutto, Abgaben, Netto – Jahr für Jahr', 'Balken = 100 % des Brutto · Abgaben = Lohnsteuer, Soli und Sozialversicherung (dein Anteil, nach Zuschüssen) · netto vom Brutto = was danach bleibt',
+    `<div class="ge-yleg">${legende}</div><div class="ge-ytab"><div class="ge-yt ge-ykopf"><span>Jahr</span><span>wohin das Brutto ging</span><span>Brutto</span><span>Abgaben</span><span>Netto</span><span>Aufs Konto</span></div>${zeilen}</div>`, 's5-b2', '', 'ge-jahrtab');
+}
+
+function quoteKarte(G) {
+  const det = G.ist.filter(detail);
+  if (!det.length) return H.karte5('Abgaben Monat für Monat', '', '<p class="muted">Keine Abrechnungen mit Einzelheiten.</p>', '', '', 'ge-quote');
+  const wechsel = det.filter((z, i) => i && z.stkl && det[i - 1].stkl && z.stkl !== det[i - 1].stkl);
+  const letzt = det.at(-1), erst = det[0];
+  const text = `Im ${H.monLang(letzt.m)} gingen <b>${pz(abgaben(letzt) / letzt.brutto, 1)}</b> deines Brutto an Finanzamt und Sozialversicherung${erst !== letzt ? `, im ${H.monLang(erst.m)} waren es ${pz(abgaben(erst) / erst.brutto, 1)}` : ''}.${wechsel.length ? ` Steuerklasse: ${wechsel.map((z) => `${det[det.indexOf(z) - 1].stkl} → ${z.stkl} ab ${H.monKurz(z.m)}`).join(', ')}.` : ''}`;
+  return H.karte5('Abgaben Monat für Monat', 'Anteil am Brutto: Lohnsteuer und Soli (orange) und Sozialversicherung (türkis) · Spitzen = Sonderzahlungen',
+    `<p class="ge-text">${text}</p><div class="s5-chart fuell"><canvas id="c-ge-quote"></canvas></div>`, '', '', 'ge-quote');
+}
+function quoteZeichnen(G) {
+  if (!document.getElementById('c-ge-quote')) return;
+  const det = G.ist.filter(detail), { css } = H;
+  const o = H.basis();
+  o.interaction = { mode: 'index', intersect: false };
+  o.layout = { padding: { top: 16, right: 6 } };
+  o.plugins.tooltip.callbacks = {
+    title: (it) => H.monLang(det[it[0].dataIndex].m),
+    label: (it) => ` ${it.dataset.label}: ${pz(it.raw / 100, 1)}`,
+    footer: (it) => { const z = det[it[0].dataIndex]; return `Abgaben ${e0(abgaben(z))} von ${e0(z.brutto)}${z.stkl ? ` · Steuerklasse ${z.stkl}` : ''}`; },
+  };
+  o.scales = {
+    x: { ...H.achsenStil(), stacked: true, grid: { display: false }, ticks: { ...H.achsenStil().ticks, maxRotation: 0, autoSkip: true, autoSkipPadding: 10, font: { size: 11 } } },
+    y: { ...H.achsenStil(), stacked: true, beginAtZero: true, ticks: { ...H.achsenStil().ticks, callback: (v) => `${v} %`, maxTicksLimit: 5 } },
+  };
+  const ds = (label, f, farbe) => ({ type: 'bar', label, data: det.map((z) => (f(z) / z.brutto) * 100), backgroundColor: farbe, categoryPercentage: 0.95, barPercentage: 0.95 });
+  H.zeichne('c-ge-quote', { type: 'bar', data: { labels: det.map((z) => H.monKurz(z.m)), datasets: [ds('Lohnsteuer und Soli', steuer, css('--g-steuer')), ds('Sozialversicherung', sozial, css('--g-kv'))] }, options: o });
+}
+
+// ---------------------------------------------------------------- Rente: gesetzlich, betrieblich, privat – zusammen hochgerechnet
+// Grundlage: gehalt.vorsorge (aus Renteninformation und Vertragsunterlagen, gehalt_daten.py). Annahmen sind einstellbar.
+let annahme = { anpassung: 2, inflation: 2, kaufkraft: true, abzug: 30, agProz: null };   // agProz null = wie in der letzten Abrechnung
+try { Object.assign(annahme, JSON.parse(localStorage.getItem('fd.renteannahme') || '{}')); } catch {}
+const ART_FARBE = { gesetzlich: 'var(--g-rv)', bAV: 'var(--g-bav)', Riester: 'var(--g-kv)', privat: 'var(--g-sach)', sonstiges: 'var(--g-sonst)' };
+const artGruppe = (a = '') => (/^bAV/i.test(a) ? 'bAV' : /riester/i.test(a) ? 'Riester' : /lebens|privat|rürup|ruerup|depot/i.test(a) ? 'privat' : 'sonstiges');
+const ART_NAME = { gesetzlich: 'Gesetzliche Rente', bAV: 'Betriebsrente', Riester: 'Riester', privat: 'Private Vorsorge', sonstiges: 'Sonstiges' };
+
+function renteRechnen(V, akt) {
+  // Arbeitgeberbeitrag zur Betriebsrente: laut letzter Abrechnung oder wie eingestellt (% vom Grundgehalt)
+  const agAbr = akt && akt.gehalt ? (akt.bav_ag || 0) / akt.gehalt * 100 : null;
+  const agProz = annahme.agProz ?? V.ag_vereinbart_prozent ?? (agAbr != null ? Math.round(agAbr * 10) / 10 : null);
+  const agNeu = agProz != null && akt ? agProz / 100 * akt.gehalt : null;
+  const heute = new Date(), beginn = V.rentenbeginn ? new Date(V.rentenbeginn) : null;
+  const jahre = beginn ? Math.max(0, (beginn - heute) / (365.25 * 864e5)) : 0;
+  const real = (nominal) => (annahme.kaufkraft ? nominal / Math.pow(1 + annahme.inflation / 100, jahre) : nominal);
+  const posten = [];
+  const g = V.gesetzlich;
+  if (g) {
+    // DRV-Prognose: gleichbleibende Beiträge, ohne Rentenanpassung (heutige Werte) → mit Anpassung nominal, dann ggf. in Kaufkraft
+    const basis = g.prognose ?? g.bisher;
+    posten.push({ k: 'gesetzlich', name: 'Gesetzliche Rente', sub: `Renteninformation ${g.datum ? H.dde(g.datum) : ''}`.trim(), heute: g.bisher, nominal: basis != null ? basis * Math.pow(1 + annahme.anpassung / 100, jahre) : null, hinweis: g.hinweis });
+  }
+  for (const v of V.vertraege || []) {
+    let nominal = v.rente_prognose ?? v.rente_garantiert ?? v.rente_schaetzung ?? null, garantiert = v.rente_garantiert;
+    // Allianz-Prognose mit altem Beitrag: künftigen Teil (Restlaufzeit) im Verhältnis zum neuen Beitrag hochrechnen (grob)
+    if (v.prognose_basis_beitrag && agNeu != null && v.beginn && beginn) {
+      const ganz = (beginn - new Date(v.beginn)) / (365.25 * 864e5);
+      const f = 1 + (agNeu / v.prognose_basis_beitrag - 1) * Math.min(1, jahre / ganz);
+      nominal = nominal != null ? nominal * f : null; garantiert = garantiert != null ? garantiert * f : null;
+    }
+    posten.push({ k: artGruppe(v.art), name: v.name, sub: [v.anbieter, v.art.replace(/^bAV-/, ''), v.beitrag_ag ? `vom Arbeitgeber, ${e0(agNeu ?? v.beitrag_ag)} im Monat` : ''].filter(Boolean).join(' · '), nominal, garantiert,
+      wert: v.wert, wertDatum: v.wert_datum, kapital: v.kapital, kapitalDatum: v.kapital_datum, beitrag: v.beitrag_an || 0, hinweis: v.hinweis,
+      schaetzung: v.rente_prognose == null && v.rente_garantiert == null && v.rente_schaetzung != null });
+  }
+  posten.forEach((x) => { x.wert_rente = x.nominal != null ? real(x.nominal) : null; });
+  const summe = sum(posten, (x) => x.wert_rente);
+  const real0 = (x) => (x == null ? null : real(x));
+  const garantiert = sum(posten, (x) => (x.k === 'gesetzlich' ? x.heute : real0(x.garantiert)));
+  return { posten, summe, jahre, beginn, netto: summe * (1 - annahme.abzug / 100), agProz, agAbr, agNeu, garantiert, real };
+}
+
+function renteHtml(G, z) {
+  const V = H.D.j.gehalt?.vorsorge;
+  if (!V) return '';
+  const akt = G.pdf.at(-1);
+  const R = renteRechnen(V, akt);
+  const gruppen = Object.keys(ART_NAME).map((k) => ({ k, w: sum(R.posten.filter((x) => x.k === k), (x) => x.wert_rente) })).filter((x) => x.w > 0);
+  const det = G.ist.filter(detail), letzt = det.at(-1) || z;
+  const nettoHeute = letzt ? letzt.auszahlung : null;   // Vergleich mit dem, was heute monatlich aufs Konto kommt
+  const barHeute = letzt ? letzt.gehalt + sonder(letzt) : null;
+  const quote = barHeute ? R.summe / barHeute : null;
+  const balken = gruppen.map((x) => `<i style="flex:${x.w};background:${ART_FARBE[x.k]}" title="${ART_NAME[x.k]}: ${e0(x.w)}"><span>${ART_NAME[x.k]}</span><b>${e0(x.w)}</b></i>`).join('');
+  const kaufkraft = annahme.kaufkraft ? 'in heutiger Kaufkraft' : 'in Euro des Rentenjahres';
+  const regler = (id, label, min, max, step, wert, einheit) => `<label class="ge-regler"><span>${label}</span><input type="range" data-ge-annahme="${id}" min="${min}" max="${max}" step="${step}" value="${wert}"><b>${String(wert).replace('.', ',')} ${einheit}</b></label>`;
+  const satz = `Mit ${R.beginn ? `Rentenbeginn ${H.dde(V.rentenbeginn)} (in ${Math.round(R.jahre)} Jahren)` : 'Rentenbeginn'} kommst du zusammen auf etwa <b>${e0(R.summe)}</b> im Monat ${kaufkraft}, vor Steuern und Krankenversicherung${quote ? ` – das sind <b>${pz(quote)}</b> deines heutigen Grundgehalts` : ''}. Nach Abzügen bleiben grob <b class="pos">${e0(R.netto)}</b>${nettoHeute ? ` (heute kommen ${e0(nettoHeute)} im Monat aufs Konto)` : ''}.`;
+  const hoch = H.karte5('Deine Rente – alles zusammen hochgerechnet', `gesetzliche Rente, Betriebsrente und private Vorsorge · ${kaufkraft} · Annahmen unten änderbar`,
+    `<p class="ge-text">${satz}</p>
+    <div class="ge-rbalken">${balken}</div>
+    <div class="ge-rvgl">
+      <div><span>Heute aufs Konto</span><b>${e0(nettoHeute || 0)}</b><small>Auszahlung ${letzt ? H.monKurz(letzt.m) : ''}</small></div>
+      <div><span>Rente brutto</span><b>${e0(R.summe)}</b><small>${kaufkraft}</small></div>
+      <div><span>Rente nach Abzügen</span><b class="pos">${e0(R.netto)}</b><small>grob, ${annahme.abzug} % Steuer und KV/PV</small></div>
+      <div><span>Lücke zu heute</span><b class="${nettoHeute && R.netto < nettoHeute ? 'neg' : 'pos'}">${nettoHeute ? pm0(R.netto - nettoHeute) : '–'}</b><small>im Monat</small></div>
+    </div>
+    <div class="ge-annahmen">
+      ${regler('anpassung', 'Rentensteigerung gesetzlich pro Jahr', 0, 4, 0.5, annahme.anpassung, '%')}
+      ${regler('inflation', 'Inflation pro Jahr', 0, 4, 0.5, annahme.inflation, '%')}
+      ${regler('abzug', 'Abzüge im Alter (Steuer, KV/PV)', 10, 45, 1, annahme.abzug, '%')}
+      ${R.agProz != null ? `<label class="ge-regler"><span>Arbeitgeber zahlt in die Betriebsrente<small>${V.ag_vereinbart_prozent ? `vereinbart ${V.ag_vereinbart_prozent} % = ${e0(V.ag_vereinbart_prozent / 100 * akt.gehalt)}` : ''}${R.agAbr != null ? ` · abgerechnet ${H.monKurz(akt.m)}: ${e0(akt.bav_ag)}` : ''}</small></span><input type="range" data-ge-annahme="agProz" min="0" max="15" step="0.5" value="${R.agProz}"><b>${String(R.agProz).replace('.', ',')} %</b></label>` : ''}
+      <label class="ge-check"><input type="checkbox" data-ge-annahme="kaufkraft"${annahme.kaufkraft ? ' checked' : ''}> in heutiger Kaufkraft rechnen</label>
+    </div>
+    ${renteZusaetze(V, R, akt)}
+    <p class="s5-erkl">Gesetzliche Rente: Prognose der Rentenversicherung (Beiträge wie in den letzten Jahren), mit der eingestellten Rentensteigerung. Betriebs- und Privatrenten: Prognosen der Anbieter, sonst die garantierten Werte. ${V.hinweise?.length ? V.hinweise.map(H.esc).join(' ') : ''} Grobe Hochrechnung, keine Beratung.</p>`, 's5-b2', '', 'ge-rente');
+
+  const zeilen = R.posten.map((x) => `<div class="ge-rz">
+      <i style="background:${ART_FARBE[x.k]}"></i>
+      <span>${H.esc(x.name)}<small>${H.esc(x.sub || '')}${x.beitrag ? ` · ${e0(x.beitrag)} im Monat` : ''}${x.wert ? ` · Wert ${e0(x.wert)}${x.wertDatum ? ` (${H.dde(x.wertDatum)})` : ''}` : ''}</small></span>
+      <b>${x.wert_rente != null ? `${x.schaetzung ? '≈ ' : ''}${e0(x.wert_rente)}` : x.kapital ? `${e0(x.kapital)}` : '–'}<small>${x.heute != null ? `heute erworben ${e0(x.heute)}` : x.kapital && x.wert_rente == null ? `Kapital ${x.kapitalDatum ? x.kapitalDatum.slice(0, 4) : ''}` : x.schaetzung ? 'grobe Schätzung' : x.garantiert != null ? `garantiert ${e0(annahme.kaufkraft ? x.garantiert / Math.pow(1 + annahme.inflation / 100, R.jahre) : x.garantiert)}` : 'Prognose'}</small></b>
+    </div>${x.hinweis ? `<p class="ge-rh">${H.esc(x.hinweis)}</p>` : ''}`).join('');
+  const liste = H.karte5('Deine Altersvorsorge', `Stand der Unterlagen: ${V.stand ? H.esc(V.stand) : '–'} · rechts: Rente im Monat ${kaufkraft}`,
+    `<div class="ge-rliste">${zeilen}</div><div class="ge-rz ge-rsum"><i></i><span>Zusammen</span><b>${e0(R.summe)}</b></div>`);
+  return `<div class="s5-raster">${hoch}${liste}</div>`;
+}
+function renteZusaetze(V, R, akt) {
+  const monate = Math.round(R.jahre * 12);
+  const teile = [];
+  // 1. Was bis zur Rente noch eingezahlt wird (heutige Beiträge × Monate, ohne Steigerung)
+  if (akt && monate > 0) {
+    const rv = 2 * (akt.rv || 0) * monate, bavDu = (akt.bav_an || 0) * monate, bavAg = (R.agNeu ?? akt.bav_ag ?? 0) * monate;
+    const bis = (v) => (v.beitrag_bis ? Math.max(0, Math.min(monate, Math.round((new Date(v.beitrag_bis) - new Date()) / (30.44 * 864e5)))) : monate);
+    const privat = sum(V.vertraege.filter((v) => !/^bAV/i.test(v.art)), (v) => (v.beitrag_an || 0) * bis(v));
+    teile.push(`<div class="ge-rteil fuell-aus" data-fuell="1"><h3>Bis zur Rente zahlst du noch ein</h3><dl class="s5-dl">
+      <div><dt>Gesetzliche Rente <small>dein Anteil und der des Arbeitgebers</small></dt><dd>${e0(rv)}</dd></div>
+      <div><dt>Betriebsrente <small>du ${e0(bavDu)} · Arbeitgeber ${e0(bavAg)}</small></dt><dd>${e0(bavDu + bavAg)}</dd></div>
+      ${privat ? `<div><dt>Privat <small>Riester, Lebensversicherung</small></dt><dd>${e0(privat)}</dd></div>` : ''}
+      <div><dt><b>Zusammen</b> <small>in ${monate} Monaten, Beiträge wie heute</small></dt><dd>${e0(rv + bavDu + bavAg + privat)}</dd></div></dl></div>`);
+  }
+  // 2. Betriebsrente als Einmalbetrag
+  const kap = V.vertraege.filter((v) => /^bAV/i.test(v.art) && v.kapital_prognose);
+  if (kap.length) {
+    const nominal = sum(kap, (v) => v.kapital_prognose);
+    teile.push(`<div class="ge-rteil fuell-aus" data-fuell="2"><h3>Statt Rente: Betriebsrente als Einmalbetrag</h3><dl class="s5-dl">
+      <div><dt>Kapital laut Allianz-Prognose <small>${kap.length} Verträge, im Jahr ${H.esc((V.rentenbeginn || '').slice(0, 4))}</small></dt><dd>${e0(nominal)}</dd></div>
+      <div><dt>in heutiger Kaufkraft <small>${String(annahme.inflation).replace('.', ',')} % Inflation</small></dt><dd>${e0(nominal / Math.pow(1 + annahme.inflation / 100, R.jahre))}</dd></div></dl>
+      <p class="s5-erkl">Beim Einmalbetrag fallen Steuer und Kranken-/Pflegeversicherung ebenfalls an (KV/PV verteilt auf 10 Jahre).</p></div>`);
+  }
+  // 3. Garantiert gegenüber Prognose
+  if (R.garantiert) {
+    const max = Math.max(R.summe, R.garantiert);
+    teile.push(`<div class="ge-rteil fuell-aus" data-fuell="3"><h3>Sicher oder erhofft?</h3>
+      <div class="ge-gp"><span>garantiert</span><i style="width:${(R.garantiert / max) * 100}%"></i><b>${e0(R.garantiert)}</b></div>
+      <div class="ge-gp"><span>Prognose</span><i class="p" style="width:${(R.summe / max) * 100}%"></i><b>${e0(R.summe)}</b></div>
+      <p class="s5-erkl">Garantiert = gesetzliche Rente aus den bisherigen Beiträgen plus die garantierten Werte der Verträge.</p></div>`);
+  }
+  // 4. Gesetzliche Rente im Verlauf der Renteninformationen
+  const vl = V.gesetzlich?.verlauf || [];
+  if (vl.length > 1) {
+    teile.push(`<div class="ge-rteil fuell-aus" data-fuell="4"><h3>Deine gesetzliche Rente wächst</h3><dl class="s5-dl">${vl.map((x) => `<div><dt>Renteninformation ${H.dde(x.datum)}</dt><dd>${e0(x.bisher)}<small>erworben · Prognose ${e0(x.prognose)}</small></dd></div>`).join('')}</dl></div>`);
+  }
+  return teile.length ? `<div class="ge-rzus">${teile.join('')}</div>` : '';
+}
+function renteZeichnen() {}
 
 // ---------------------------------------------------------------- Alle Daten der Abrechnungen
 const ZEILEN = [
@@ -500,13 +721,39 @@ function binden(el, G) {
     el.querySelector('#ge-erh-w').textContent = e0(erhoehung);
     el.querySelector('#ge-erh-t').innerHTML = erhoehungText(erhoehung, erhoehung * (1 - G.gs.r - (svFrei ? 0 : 0.2)));
   };
-  const kmR = el.querySelector('#ge-km');
-  if (kmR) kmR.oninput = () => {
-    km = +kmR.value;
-    el.querySelector('#ge-km-w').textContent = `${km} km`;
-    el.querySelector('#ge-km-t').innerHTML = kmText(+kmR.dataset.lp, +kmR.dataset.km, km, +kmR.dataset.gs);
-  };
+  // Dienstwagen: Regler rechnen sofort, gespeichert wird beim Loslassen
+  const zA = G.nach.get(wahl);
+  const autoNeu = () => { const W = autoWerte(G, zA); const box = el.querySelector('#ge-auto-erg'); if (box) box.innerHTML = autoText(W); };
+  const autoSpeichern = () => { try { localStorage.setItem('fd.dienstwagen', JSON.stringify(auto_)); } catch {} };
+  el.querySelectorAll('[data-ge-auto]').forEach((r) => {
+    r.oninput = () => {
+      auto_ = { ...autoWerte(G, zA).a, [r.dataset.geAuto]: +r.value };
+      r.nextElementSibling.textContent = r.dataset.geAuto === 'km' ? `${r.value} km` : e0(+r.value);
+      autoNeu();
+    };
+    r.onchange = autoSpeichern;
+  });
+  el.querySelectorAll('[data-ge-satz]').forEach((b) => b.onclick = () => {
+    auto_ = { ...autoWerte(G, zA).a, satz: +b.dataset.geSatz };
+    el.querySelectorAll('[data-ge-satz]').forEach((x) => x.classList.toggle('an', x === b));
+    autoNeu(); autoSpeichern();
+  });
+  el.querySelector('[data-ge-auto-zurueck]')?.addEventListener('click', () => { auto_ = null; try { localStorage.removeItem('fd.dienstwagen'); } catch {} neu(); });
+  el.querySelector('[data-ge-auto-best]')?.addEventListener('click', () => {
+    const b = H.D.j.gehalt.dienstwagen.bestellt;
+    auto_ = { ...autoWerte(G, zA).a, preis: Math.round(b.listenpreis), satz: b.satz_prozent };
+    autoSpeichern(); const y = window.scrollY; neu(); window.scrollTo({ top: y });
+  });
   el.querySelector('#ge-excel')?.addEventListener('click', () => excel(G));
+  el.querySelectorAll('[data-ge-annahme]').forEach((r) => {
+    const k = r.dataset.geAnnahme;
+    r.oninput = () => { if (k !== 'kaufkraft') r.nextElementSibling.textContent = `${String(r.value).replace('.', ',')} %`; };
+    r.onchange = () => {
+      annahme[k] = k === 'kaufkraft' ? r.checked : +r.value;
+      try { localStorage.setItem('fd.renteannahme', JSON.stringify(annahme)); } catch {}
+      const y = window.scrollY; neu(); window.scrollTo({ top: y });
+    };
+  });
 }
 
 async function excel(G) {
