@@ -200,18 +200,18 @@ const paar = (k, u) => `${k}|${u}`;
 export const ibanText = (ib) => (!ib ? '' : /^[A-Z]{2}\d{2}/.test(ib) ? ib.replace(/(.{4})/g, '$1 ').trim() : ib.includes('@') ? `PayPal: ${ib.toLowerCase()}` : `Konto-Nr. ${ib}`);
 const katText = (k, u) => `${H.schoen(k)}${u ? ` › ${H.schoen(u)}` : ''}`;
 
-function analyse(g) {
+function analyse(g, richtung = null) {
   const { D, nachIban } = gruppen(), j = D.j;
   const hinw = [], vor = new Map();
   const vorschlag = (k, u, w, grund, umb = false) => {
-    if (!k || k === 'Nicht zugeordnet' || u === 'Unkategorisiert') return;
+    if (!k || k === 'Nicht zugeordnet' || u === 'Unkategorisiert' || (ri < 0 && k === 'Einnahmen')) return;
     if (!umb && u && !D.ukatZu.has(u)) return;
     const key = umb ? 'umb' : paar(k, u), x = vor.get(key) || { kat: k, ukat: u, umb, w: 0, gruende: [] };
     x.w += w; if (grund && !x.gruende.includes(grund)) x.gruende.push(grund); vor.set(key, x);
   };
   const dts = g.rows.map((r) => det(r, j));
   // Vorschläge passend zur Richtung der offenen Buchungen (eine Ausgabe wird keine Einnahme)
-  const ri = g.offen.length && g.offen.every((r) => r.c < 0) ? -1 : g.offen.length && g.offen.every((r) => r.c > 0) ? 1 : 0;
+  const ri = richtung ?? (g.offen.length && g.offen.every((r) => r.c < 0) ? -1 : g.offen.length && g.offen.every((r) => r.c > 0) ? 1 : 0);
   const passt = (r) => !ri || Math.sign(r.c) === ri;
   // 1. IBAN: dieselbe Gegenseite unter anderem Namen bereits eingeordnet?
   const ibans = [...new Set(dts.map((d) => d.iban).filter(Boolean))];
@@ -223,7 +223,7 @@ function analyse(g) {
     const [top, n] = [...c].sort((a, b) => b[1] - a[1])[0];
     const namen = [...new Set(andere.map((r) => r.g).filter(Boolean))].slice(0, 2).join(', ');
     hinw.push(`Dieselbe IBAN kennst du auch als <b>${H.esc(namen)}</b> – dort meist <b>${H.esc(katText(...top.split('|')))}</b> (${n} von ${andere.length} Buchungen).`);
-    vorschlag(...top.split('|'), 3, 'gleiche IBAN');
+    vorschlag(...top.split('|'), 3, `gleiche IBAN wie „${namen.split(', ')[0]}“`);
   }
   // 2. Derselbe Empfänger hat andere Buchungen, die schon eingeordnet sind
   const fertig = g.rows.filter((r) => zaehlt(r, D) && !istOffen(r, D) && passt(r));
@@ -232,7 +232,7 @@ function analyse(g) {
     for (const r of fertig) { const k = paar(r.kat, r.ukat); c.set(k, (c.get(k) || 0) + 1); }
     const s = [...c].sort((a, b) => b[1] - a[1]);
     hinw.push(`Andere ${ri < 0 ? 'Ausgänge' : ri > 0 ? 'Eingänge' : 'Buchungen'} dieses Empfängers stehen unter ${s.slice(0, 3).map(([k, n]) => `<b>${H.esc(katText(...k.split('|')))}</b> (${n}×)`).join(', ')}.`);
-    s.slice(0, 2).forEach(([k], i) => vorschlag(...k.split('|'), 2 - i * 0.5, 'wie seine anderen Buchungen'));
+    s.slice(0, 2).forEach(([k], i) => vorschlag(...k.split('|'), 2 - i * 0.5, 'so sind seine anderen Buchungen eingeordnet'));
   }
   // 3. Lastschrift eines Unternehmens
   const gid = dts.find((d) => d.gid)?.gid, mref = dts.find((d) => d.mref)?.mref;
@@ -268,14 +268,15 @@ function analyse(g) {
   }
   if (gegen) {
     hinw.push(`Am ${H.dde(gegen[1].d)} ${gegen[1].c > 0 ? 'kam' : 'ging'} derselbe Betrag (${H.eur(Math.abs(gegen[0].c))}) auf deinem Konto <b>${H.esc(D.konten[gegen[1].k].name)}</b> ${gegen[1].c > 0 ? 'an' : 'ab'} – vermutlich Geld zwischen deinen eigenen Konten.`);
-    vorschlag('Umbuchung', '', 3, 'Gegenbuchung auf eigenem Konto', true);
+    vorschlag('Umbuchung', '', 3, `gleicher Betrag auf deinem Konto ${D.konten[gegen[1].k].name}`, true);
   }
   // 8. Stichwörter im Text
   const text = H.norm(g.rows.slice(0, 80).map((r) => `${r.g} ${r.z}`).join(' '));
   for (const [re, k, u, vz] of STICHWORTE) {
-    if (!re.test(text)) continue;
+    const tr = text.match(re);
+    if (!tr) continue;
     if (vz === '+' && !g.ein) continue;
-    vorschlag(k, u, 1.5, 'Stichwort im Text');
+    vorschlag(k, u, 1.5, `im Text steht „${tr[0].trim()}“`);
   }
   // 9. Privatperson?
   if (!g.ohneName && !FIRMA.test(g.name) && /^[a-zäöüß.-]+,?\s+[a-zäöüß.-]+(\s+[a-zäöüß.-]+)?$/i.test(g.name.trim()) && !gid) {
@@ -290,239 +291,137 @@ function analyse(g) {
   return { hinw, vor: vs, ibans, gegen };
 }
 
-// ---------------------------------------------------------------- Seite
-const ART = { offen: 'Offen', kontrolle: 'Zur Kontrolle', erledigt: 'Erledigt' };
-function sichtbar(liste) {
-  let l = filter === 'offen' ? liste.filter((g) => g.offen.length) : filter === 'kontrolle' ? liste.filter((g) => g.kontrolle) : liste.filter((g) => g.entschieden);
-  if (suche) { const q = H.norm(suche); l = l.filter((g) => H.norm(`${g.name} ${[...g.namen.keys()].join(' ')}`).includes(q)); }
-  const wert = (g) => (filter === 'offen' ? g.oAus + g.oEin : g.aus + g.ein);
-  const anz = (g) => (filter === 'offen' ? g.offen.length : g.rows.length);
-  return l.sort(sortierung === 'anzahl' ? (a, b) => anz(b) - anz(a) || wert(b) - wert(a) : sortierung === 'datum' ? (a, b) => b.letzt.localeCompare(a.letzt) : (a, b) => wert(b) - wert(a));
+// ---------------------------------------------------------------- Seite: eine Zeile je Buchung, ein Klick zum Abhaken
+// Vorschlag passt → ✓; sonst Kategorie aus der Liste wählen; „zählt nicht“ für Geld zwischen eigenen Konten.
+// Haken „auch die anderen von …“: dieselbe Entscheidung gilt für alle offenen Buchungen dieses Empfängers.
+let zeigAnzahl = 30;
+const analyseCache = new Map();
+function vorschlagFuer(g, r) {
+  const ri = Math.sign(r.c), k = `${g.key}|${ri}`;   // Vorschlag passend zur Richtung dieser Buchung
+  if (!analyseCache.has(k)) analyseCache.set(k, analyse(g, ri));
+  return analyseCache.get(k);
+}
+
+let katOpts = null;
+function katOptionen() {
+  const { D } = gruppen();
+  if (katOpts && katOpts.D === D) return katOpts.html;
+  const m = new Map();
+  for (const r of D.rows) {
+    if (!r.kat || r.kat === 'Nicht zugeordnet' || r.kat === 'Umbuchung' || r.kat === 'Gemeinschaftskonto' || r.ukat === 'Unkategorisiert') continue;
+    if (!m.has(r.kat)) m.set(r.kat, new Map());
+    const u = m.get(r.kat); u.set(r.ukat, (u.get(r.ukat) || 0) + 1);
+  }
+  const html = [...m].sort((a, b) => H.schoen(a[0]).localeCompare(H.schoen(b[0]), 'de')).map(([k, u]) =>
+    `<optgroup label="${H.esc(H.schoen(k))}">${[...u].sort((a, b) => b[1] - a[1]).map(([x]) => `<option value="${H.esc(`${k}|${x}`)}">${H.esc(H.schoen(x || k))}</option>`).join('')}</optgroup>`).join('');
+  katOpts = { D, html };
+  return html;
 }
 
 export function pruefenSeite(h) {
   H = h;
-  const { liste, m } = gruppen();
-  const offen = liste.filter((g) => g.offen.length), kontr = liste.filter((g) => g.kontrolle), erl = liste.filter((g) => g.entschieden);
-  const nOffen = offen.reduce((t, g) => t + g.offen.length, 0);
-  const oAus = offen.reduce((t, g) => t + g.oAus, 0), oEin = offen.reduce((t, g) => t + g.oEin, 0);
-  const l = sichtbar(liste);
-  let wahl = m.get(H.S().wahl);
-  if (!wahl || (!l.includes(wahl) && !H.S().wahl)) wahl = l[0] || null;
-  const satz = nOffen
-    ? `<b>${H.NUM.format(nOffen)} Buchungen</b> von ${H.NUM.format(offen.length)} Empfängern haben noch keine passende Kategorie – zusammen <b class="neg">${H.eur0(oAus)}</b> raus und <b class="pos">${H.eur0(oEin)}</b> rein. Je Empfänger genügt eine Entscheidung; sie gilt sofort.`
-    : 'Alle Buchungen haben eine Kategorie. Unter „Zur Kontrolle“ stehen Empfänger, bei denen sich ein Blick lohnt.';
-  const rechts = `<div class="seg" role="group" aria-label="Ausgaben, Einnahmen oder Prüfen"><button data-k2art="aus">Ausgaben</button><button data-k2art="ein">Einnahmen</button><button data-k2art="pruefen" class="an">Prüfen</button></div>`;
-  const ung = Object.keys(ENT).filter((k) => UNSYNC.has(k)).length;
-  const speicher = dienstOk ? (ung ? `${ung} noch nicht am PC` : 'am PC gespeichert') : ung ? `${ung} nur hier` : 'alles gespeichert';
-  const zahlen = [
-    H.zahl5('Offen', H.NUM.format(nOffen), `Buchungen · ${H.NUM.format(offen.length)} Empfänger`, { cls: nOffen ? 'neg' : 'pos' }),
-    H.zahl5('Zur Kontrolle', H.NUM.format(kontr.length), 'Empfänger mit gemischten oder „sonstigen“ Kategorien'),
-    H.zahl5('Erledigt', H.NUM.format(erl.length), 'Empfänger, die du entschieden hast'),
-    `<div class="s5-z pr-speicher"><span class="s5-z-t">Gespeichert</span><b class="s5-z-w ${ung && !dienstOk ? 'neg' : ''}">${speicher}</b><span class="s5-z-u">
-      ${dienstOk ? '<button class="link" id="pr-uebernehmen">Jetzt in die Auswertung übernehmen</button>' : `<button class="link" id="pr-sichern">Als Datei sichern</button> → Google Drive › 10 Finanzen › Eingang`}</span></div>`,
-  ].join('');
-
-  const zeile = (g) => {
-    const n = filter === 'offen' ? g.offen.length : g.rows.length;
-    const aus = filter === 'offen' ? g.oAus : g.aus, ein = filter === 'offen' ? g.oEin : g.ein;
-    const sub = filter === 'kontrolle' ? g.kontrolle : filter === 'erledigt' ? H.esc(entText(g)) : `${n} ${n === 1 ? 'Buchung' : 'Buchungen'} · bis ${H.dde(g.letzt).slice(3)}`;
-    return `<button class="pr-z${g === wahl ? ' an' : ''}${g.entschieden ? ' fertig' : ''}" data-pr-g="${H.esc(g.key)}">
-      <i class="pr-haken" aria-hidden="true">${g.entschieden ? '✓' : ''}</i>
-      <span class="pr-zn"><b>${H.esc(g.name)}</b><small>${sub}</small></span>
-      <span class="pr-zw">${aus ? `<b class="neg">−${H.eur0(aus).replace('-', '')}</b>` : ''}${ein ? `<b class="pos">+${H.eur0(ein)}</b>` : ''}</span></button>`;
-  };
-  const kopfListe = `<div class="pr-lk">
-    <div class="seg pr-filter" role="group">${Object.entries(ART).map(([k, t]) => `<button data-pr-f="${k}" class="${filter === k ? 'an' : ''}">${t}<small>${k === 'offen' ? offen.length : k === 'kontrolle' ? kontr.length : erl.length}</small></button>`).join('')}</div>
-    <div class="pr-lk2"><input id="pr-suche" type="search" placeholder="Empfänger suchen …" value="${H.esc(suche)}" list="pr-namen" autocomplete="off">
-      <select id="pr-sort" aria-label="Sortierung"><option value="betrag"${sortierung === 'betrag' ? ' selected' : ''}>nach Betrag</option><option value="anzahl"${sortierung === 'anzahl' ? ' selected' : ''}>nach Anzahl</option><option value="datum"${sortierung === 'datum' ? ' selected' : ''}>neueste zuerst</option></select></div>
-    <datalist id="pr-namen">${gruppen().liste.filter((g) => !g.ohneName).sort((a, b) => b.rows.length - a.rows.length).slice(0, 400).map((g) => `<option value="${H.esc(g.name)}">`).join('')}</datalist></div>`;
-  const listeHtml = `<div class="pr-liste">${l.length ? l.map(zeile).join('') : `<p class="leer klein">${suche ? 'Kein Empfänger passt zur Suche.' : filter === 'offen' ? 'Nichts mehr offen. 🎉' : 'Noch nichts.'}</p>`}</div>`;
-  const links = `<section class="card s5-karte pr-links"><div class="s5-kt"><div class="s5-kt-t"><h2>Checkliste</h2><p class="s5-erkl">ein Eintrag je Empfänger · anklicken: alle Einzelheiten</p></div>
-    <div class="s5-kt-r"><button class="btn sm" id="pr-excel" title="Alle offenen Buchungen mit allen Angaben als Excel-Datei">Excel</button></div></div>${kopfListe}${listeHtml}</section>`;
-  return H.kopf5('Kategorien prüfen', satz, rechts) + `<div class="s5-zahlen">${zahlen}</div><div class="pr">${links}${wahl ? detailHtml(wahl) : '<section class="card s5-karte"><p class="leer">Links einen Empfänger wählen.</p></section>'}</div>`;
+  const { D, m, liste } = gruppen();
+  const nur = H.S().wahl ? m.get(H.S().wahl) : null;            // aus „Buchungen“: nur dieser Empfänger
+  const offen = liste.flatMap((g) => g.offen);
+  const erledigt = D.rows.filter((r) => r.ent && zaehlt(r, D));
+  let rows = nur ? [...nur.rows].filter((r) => zaehlt(r, D)) : filter === 'erledigt' ? erledigt : offen;
+  if (suche) { const q = H.norm(suche); rows = rows.filter((r) => H.norm(`${r.g} ${r.z}`).includes(q)); }
+  rows.sort(sortierung === 'datum' ? (a, b) => b.d.localeCompare(a.d) : (a, b) => Math.abs(b.c) - Math.abs(a.c));
+  if (nur) rows.sort((a, b) => istOffen(b, D) - istOffen(a, D));
+  const gesamt = offen.length + erledigt.length;
+  const pz = gesamt ? Math.round((erledigt.length / gesamt) * 100) : 100;
+  const satz = nur ? `Alle Buchungen von <b>${H.esc(nur.name)}</b> – Kategorie per Klick ändern.`
+    : offen.length ? `Noch <b>${H.NUM.format(offen.length)} Buchungen</b> ohne passende Kategorie. Passt der Vorschlag, klick auf <b>✓</b> – sonst wähl eine Kategorie aus der Liste. Die Buchung ist dann erledigt.`
+      : 'Alle Buchungen haben eine Kategorie. 🎉';
+  const rechts = '<div class="seg" role="group" aria-label="Ausgaben, Einnahmen oder Prüfen"><button data-k2art="aus">Ausgaben</button><button data-k2art="ein">Einnahmen</button><button data-k2art="pruefen" class="an">Prüfen</button></div>';
+  const ung = [...UNSYNC].filter((k) => ENT[k]).length;
+  const speicher = dienstOk ? '✓ am PC gespeichert' : ung ? `${ung} Entscheidungen nur auf diesem Gerät · <button class="link" id="pr-sichern">als Datei sichern</button> (dann in Google Drive › 10 Finanzen › Eingang legen)` : '';
+  const leiste = `<div class="pc-leiste">
+    ${nur ? `<button class="btn sm" id="pr-alle">‹ zurück zu allen offenen</button>` : `<div class="pc-fort" title="${erledigt.length} von ${gesamt} erledigt"><i style="width:${pz}%"></i></div><span class="klein"><b>${H.NUM.format(erledigt.length)}</b> erledigt · <b>${H.NUM.format(offen.length)}</b> offen</span>`}
+    <input id="pr-suche" type="search" placeholder="Suchen …" value="${H.esc(suche)}" autocomplete="off">
+    <select id="pr-sort" aria-label="Reihenfolge"><option value="betrag"${sortierung === 'betrag' ? ' selected' : ''}>größte zuerst</option><option value="datum"${sortierung === 'datum' ? ' selected' : ''}>neueste zuerst</option></select>
+    ${nur ? '' : `<button class="btn sm" id="pr-erledigt">${filter === 'erledigt' ? 'Offene zeigen' : `Erledigte ansehen (${erledigt.length})`}</button>`}
+    ${speicher ? `<span class="klein muted pc-speicher">${speicher}</span>` : ''}</div>`;
+  const zeig = rows.slice(0, zeigAnzahl);
+  const html = zeig.map((r) => zeileHtml(r, D, filter === 'erledigt' && !nur)).join('');
+  return H.kopf5('Kategorien prüfen', satz, rechts) + `<section class="card s5-karte pc-karte">${leiste}
+    <div class="pc-liste">${html || '<p class="leer">Nichts zu tun.</p>'}</div>
+    ${rows.length > zeig.length ? `<button class="btn" id="pr-mehr">Weitere ${Math.min(30, rows.length - zeig.length)} zeigen (noch ${rows.length - zeig.length})</button>` : ''}</section>`;
 }
 
-function entText(g) {
-  const r = g.rows.find((x) => x.ent);
-  if (!r) return '';
-  return r.regel?.startsWith('Von dir geprüft') ? 'geprüft – passt so' : r.art === 'Umbuchung' ? 'zählt nicht (eigenes Geld)' : `→ ${katText(r.kat, r.ukat)}`;
-}
-
-function detailHtml(g) {
-  const { D } = gruppen(), j = D.j;
-  const A = analyse(g);
-  const namen = [...g.namen.keys()].filter((n) => n !== g.name);
-  const frueher = [...new Set(g.rows.flatMap((r) => r.ga))].filter((n) => !g.namen.has(n));
-  const konten = [...new Set(g.rows.map((r) => D.konten[r.k].name))];
-  const von = g.rows.reduce((t, r) => (r.d < t ? r.d : t), '9999'), bis = g.letzt;
-  const kopf = `<div class="pr-dk"><h2>${H.esc(g.name)}</h2>
-    <div class="pr-fakten">
-      <span><small>Buchungen</small><b>${g.rows.length}${g.offen.length ? ` <em>· ${g.offen.length} offen</em>` : ''}</b></span>
-      ${g.aus ? `<span><small>raus</small><b class="neg">${H.eur(-g.aus)}</b></span>` : ''}${g.ein ? `<span><small>rein</small><b class="pos">${H.eur(g.ein)}</b></span>` : ''}
-      <span><small>Zeitraum</small><b>${H.dde(von)} – ${H.dde(bis)}</b></span>
-    </div>
-    <dl class="pr-dl">
-      ${A.ibans.length ? `<dt>IBAN</dt><dd>${A.ibans.map((ib) => `<code>${ibanText(ib)}</code>`).join('<br>')}</dd>` : ''}
-      ${namen.length ? `<dt>Auch geschrieben</dt><dd>${namen.slice(0, 4).map(H.esc).join(' · ')}</dd>` : ''}
-      ${frueher.length ? `<dt>Früher genannt</dt><dd>${frueher.slice(0, 4).map(H.esc).join(' · ')}</dd>` : ''}
-      <dt>Konten</dt><dd>${konten.map(H.esc).join(' · ')}</dd>
-    </dl></div>`;
-  const hinw = A.hinw.length ? `<div class="pr-hinw"><h3>Was dahinterstecken könnte</h3><ul>${A.hinw.map((t) => `<li>${t}</li>`).join('')}</ul></div>` : '';
-
-  // Entscheidung
-  const vz = g.offen.length && g.offen.every((r) => r.c < 0) ? '-' : g.offen.length && g.offen.every((r) => r.c > 0) ? '+' : '';
-  const beide = g.ein && g.aus;
-  const alleOffen = g.offen.length === g.rows.filter((r) => zaehlt(r, D)).length;
-  const geltung = g.ohneName ? 'offen' : alleOffen || !g.offen.length ? 'alle' : 'offen';
-  const kats = [...new Set([...D.kats, 'Umbuchung'])].filter((k) => k !== 'Nicht zugeordnet');
-  const jetzigeR = g.rows.find((r) => r.ent) || g.offen[0] || g.rows[0];
-  const startKat = A.vor[0] && !A.vor[0].umb ? A.vor[0].kat : jetzigeR.kat !== 'Nicht zugeordnet' ? jetzigeR.kat : '';
-  const startUkat = A.vor[0] && !A.vor[0].umb ? A.vor[0].ukat : jetzigeR.kat !== 'Nicht zugeordnet' ? jetzigeR.ukat : '';
-  const chips = A.vor.map((v, i) => `<button class="pr-chip" data-pr-v="${i}" title="${H.esc(v.gruende.join(', '))}">${v.umb ? 'Zählt nicht – eigenes Geld' : H.esc(katText(v.kat, v.ukat))}<small>${H.esc(v.gruende[0] || '')}</small></button>`).join('');
-  const entsch = `<div class="pr-ent" id="pr-ent">
-    <h3>Deine Entscheidung</h3>
-    ${chips ? `<div class="pr-chips"><span class="klein muted">Vorschläge:</span>${chips}</div>` : ''}
-    <div class="pr-form">
-      <label><span>Kategorie</span><select id="pr-kat"><option value="">– wählen –</option>${kats.map((k) => `<option value="${H.esc(k)}"${k === startKat ? ' selected' : ''}>${H.esc(H.schoen(k))}</option>`).join('')}</select></label>
-      <label><span>Unterkategorie</span><select id="pr-ukat">${ukatOptionen(startKat, startUkat)}</select></label>
-      <label class="pr-neu" hidden><span>Neue Unterkategorie</span><input id="pr-ukat-neu" type="text" maxlength="40"></label>
-      <label class="pr-check"><input type="checkbox" id="pr-umb"${startKat === 'Umbuchung' ? ' checked' : ''}> <span>Zählt nicht als Einnahme/Ausgabe<small>Geld zwischen deinen eigenen Konten oder durchlaufendes Geld</small></span></label>
-      <label class="pr-notiz"><span>Notiz (optional)</span><input id="pr-notiz" type="text" maxlength="120" placeholder="z. B. Privatverkauf Kinderwagen"></label>
-    </div>
-    <div class="pr-geltung" role="radiogroup" aria-label="Gilt für">
-      ${g.ohneName ? '' : `<label><input type="radio" name="pr-gilt" value="alle"${geltung === 'alle' ? ' checked' : ''}> alle ${g.rows.length} Buchungen von „${H.esc(g.name.slice(0, 40))}“, auch künftige${alleOffen ? '' : ' <small class="neg">(auch die schon eingeordneten)</small>'}</label>`}
-      ${g.offen.length ? `<label><input type="radio" name="pr-gilt" value="offen"${geltung === 'offen' ? ' checked' : ''}> nur die ${g.offen.length} offenen</label>` : ''}
-      <label><input type="radio" name="pr-gilt" value="auswahl"> nur die angehakten Buchungen <small id="pr-n-ausw">(${angehakt.size})</small></label>
-      ${beide && !g.ohneName ? `<label class="pr-vz"><span>bei</span><select id="pr-vz"><option value=""${vz === '' ? ' selected' : ''}>Ein- und Ausgängen</option><option value="-"${vz === '-' ? ' selected' : ''}>nur Ausgängen</option><option value="+"${vz === '+' ? ' selected' : ''}>nur Eingängen</option></select></label>` : `<input type="hidden" id="pr-vz" value="${vz}">`}
-    </div>
-    <div class="pr-knoepfe"><button class="btn primary" id="pr-speichern">Speichern und weiter</button>
-      ${g.kontrolle || g.entschieden ? '<button class="btn" id="pr-passt">Passt so</button>' : ''}
-      ${g.entschieden ? '<button class="btn" id="pr-zuruecknehmen">Entscheidung zurücknehmen</button>' : ''}
-      <button class="btn" id="pr-weiter">Später</button></div>
-  </div>`;
-
-  // Buchungen mit allen Angaben
-  const sortiert = [...g.rows].sort((a, b) => (istOffen(b, D) - istOffen(a, D)) || b.d.localeCompare(a.d));
-  const zeig = mehrBuchungen ? sortiert : sortiert.slice(0, 30);
-  const wt = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
-  const buchung = (r) => {
-    const d = det(r, j), of = istOffen(r, D), fremd = !zaehlt(r, D);
-    const x = [d.uart && ['Umsatzart', d.uart], d.iban && ['IBAN', ibanText(d.iban)], d.mref && ['Mandat', d.mref], d.gid && ['Gläubiger-ID', d.gid],
-      ['jetzt', `${katText(r.kat, r.ukat)}${r.art === 'Umbuchung' ? ' · zählt nicht' : fremd ? ` · ${r.art}` : ''}`],
-      d.kat0 && d.kat0.replace(/ › $/, '') !== r.kat + (r.ukat ? ` › ${r.ukat}` : '') && ['laut Quelle', d.kat0.replace(/ › $/, '')],
-      r.regel && ['geändert durch', r.regel], r.v && ['Vertrag', r.v], r.t && ['Tags', r.t], r.n && ['Notiz', r.n], r.ga.length && ['früher', r.ga.join(', ')],
-      d.quelle && ['Datei', d.quelle.replace(/ › .*/, '').split(/[\\/]/).pop()]].filter(Boolean);
-    return `<label class="pr-b${of ? ' offen' : ''}${fremd ? ' fremd' : ''}"><input type="checkbox" data-pr-b="${r.i}"${angehakt.has(r.i) ? ' checked' : ''}>
-      <span class="pr-b-k"><span>${wt[new Date(`${r.d}T12:00:00Z`).getUTCDay()]} ${H.dde(r.d)}</span><span class="muted">${H.esc(D.konten[r.k].name)}</span><b class="${r.c < 0 ? 'neg' : 'pos'}">${H.eur(r.c)}</b></span>
-      ${r.g && r.g !== g.name ? `<span class="pr-b-n">${H.esc(r.g)}</span>` : ''}
-      <span class="pr-b-z">${H.esc(r.z || '(kein Verwendungszweck)')}</span>
-      <span class="pr-b-x">${x.map(([k, v]) => `<span><i>${k}</i> ${H.esc(v)}</span>`).join('')}</span></label>`;
-  };
-  const buchungen = `<div class="pr-bl"><div class="pr-bl-k"><h3>Alle Buchungen</h3><span class="klein muted">offene zuerst (orange) · anhaken, um nur einzelne zu entscheiden</span>
-      <span class="pr-bl-r"><button class="link" id="pr-alle-haken">${g.offen.length ? 'offene anhaken' : 'alle anhaken'}</button> · <span class="zl" role="button" tabindex="0"${H.geh(H.zuBuchungen({ q: g.ohneName ? '' : `"${g.name}"` }))}>in Buchungen öffnen</span></span></div>
-    ${zeig.map(buchung).join('')}${sortiert.length > zeig.length ? `<button class="btn sm" id="pr-mehr">alle ${sortiert.length} zeigen</button>` : ''}</div>`;
-  return `<section class="card s5-karte pr-detail" data-pr-detail="${H.esc(g.key)}">${kopf}${hinw}${entsch}${buchungen}</section>`;
-}
-
-function ukatOptionen(kat, wahl) {
-  const { D } = gruppen();
-  const n = new Map();
-  for (const r of D.rows) if (r.kat === kat && r.ukat && r.ukat !== 'Unkategorisiert') n.set(r.ukat, (n.get(r.ukat) || 0) + 1);
-  const l = [...n].sort((a, b) => b[1] - a[1]).map(([u]) => u);
-  if (wahl && !l.includes(wahl)) l.unshift(wahl);
-  return `<option value="">– ohne –</option>${l.map((u) => `<option value="${H.esc(u)}"${u === wahl ? ' selected' : ''}>${H.esc(H.schoen(u))}</option>`).join('')}<option value="__neu">+ neue Unterkategorie …</option>`;
+function zeileHtml(r, D, erledigtAnsicht) {
+  const g = gruppen().m.get(gKey(r)), d = det(r, D.j), of = istOffen(r, D);
+  const wt = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'][new Date(`${r.d}T12:00:00Z`).getUTCDay()];
+  const extra = [d.uart, d.iban && ibanText(d.iban), d.gid && `Gläubiger-ID ${d.gid}`, d.mref && `Mandat ${d.mref}`].filter(Boolean).map(H.esc).join(' · ');
+  const andere = g ? g.offen.filter((x) => x !== r && Math.sign(x.c) === Math.sign(r.c)) : [];
+  let aktion;
+  if (!of) {
+    aktion = `<span class="pc-ist">${r.art === 'Umbuchung' ? 'zählt nicht' : H.esc(katText(r.kat, r.ukat))}</span>
+      ${r.ent && r.ent !== 'daten' && erledigtAnsicht ? `<button class="btn sm" data-pc-zurueck="${r.i}">Rückgängig</button>` : ''}
+      <select data-pc-kat="${r.i}" aria-label="Kategorie ändern"><option value="">ändern …</option>${katOptionen()}</select>`;
+  } else {
+    const v = g ? vorschlagFuer(g, r).vor[0] : null;
+    aktion = `${v ? `<button class="btn primary pc-ok" data-pc-ok="${r.i}" title="${H.esc(v.gruende.join(', '))}">✓ ${v.umb ? 'zählt nicht' : H.esc(katText(v.kat, v.ukat))}</button><small class="pc-grund">${H.esc(v.gruende[0] || '')}</small>` : ''}
+      <select data-pc-kat="${r.i}" aria-label="Kategorie wählen"><option value="">${v ? 'andere Kategorie …' : 'Kategorie wählen …'}</option>${katOptionen()}</select>
+      <button class="link pc-umb" data-pc-umb="${r.i}" title="Geld zwischen deinen eigenen Konten oder durchlaufendes Geld – zählt weder als Einnahme noch als Ausgabe">zählt nicht</button>
+      ${andere.length ? `<label class="pc-alle"><input type="checkbox" data-pc-alle="${r.i}" checked> auch die ${andere.length} ${andere.length === 1 ? 'andere' : 'anderen'} von „${H.esc((g.name || '').slice(0, 30))}“</label>` : ''}`;
+  }
+  return `<div class="pc${of ? '' : ' fertig'}" data-pc="${r.i}">
+    <div class="pc-l"><span>${wt} ${H.dde(r.d)}</span><small>${H.esc(D.konten[r.k].name)}</small></div>
+    <div class="pc-m"><b>${H.esc(r.g || '(ohne Namen)')}</b><span class="pc-z">${H.esc(r.z || '')}</span>${extra ? `<small>${extra}</small>` : ''}
+      ${g && !H.S().wahl && g.rows.length > 1 ? `<button class="link klein" data-pc-wer="${H.esc(g.key)}">alle ${g.rows.length} Buchungen von „${H.esc((g.name || '').slice(0, 30))}“ ansehen</button>` : ''}</div>
+    <b class="pc-b ${r.c < 0 ? 'neg' : 'pos'}">${H.eur(r.c)}</b>
+    <div class="pc-a">${aktion}</div></div>`;
 }
 
 // ---------------------------------------------------------------- Klicks
 export function pruefenBinden(el) {
-  const neu = (p = {}) => { if (Object.keys(p).length) H.setze(p); else H.neuZeichnen(); };
-  el.querySelectorAll('[data-pr-f]').forEach((b) => b.onclick = () => { filter = b.dataset.prF; angehakt.clear(); mehrBuchungen = false; H.setze({ wahl: '' }); });
-  el.querySelectorAll('[data-pr-g]').forEach((b) => b.onclick = () => {
-    angehakt.clear(); mehrBuchungen = false; H.setze({ wahl: b.dataset.prG });
-    if (matchMedia('(max-width: 1000px)').matches) document.querySelector('.pr-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const D = gruppen().D;
+  const row = (i) => D.rows[+i];
+  const mitAnderen = (i) => {
+    const r = row(i), box = el.querySelector(`[data-pc-alle="${i}"]`);
+    const g = gruppen().m.get(gKey(r));
+    return box?.checked && g ? [r, ...g.offen.filter((x) => x !== r && Math.sign(x.c) === Math.sign(r.c))] : [r];
+  };
+  el.querySelectorAll('[data-pc-ok]').forEach((b) => b.onclick = () => {
+    const r = row(b.dataset.pcOk), v = vorschlagFuer(gruppen().m.get(gKey(r)), r).vor[0];
+    entscheiden(mitAnderen(b.dataset.pcOk), v.umb ? { kat: 'Umbuchung', ukat: '', umb: true } : { kat: v.kat, ukat: v.ukat, umb: false });
   });
-  const su = el.querySelector('#pr-suche');
-  if (su) {
-    su.oninput = () => {
-      suche = su.value; const pos = su.selectionStart;
-      const g = gruppen().liste.find((x) => x.name === suche);
-      if (g) suche = '';
-      neu(g ? { wahl: g.key } : {});
-      const s2 = document.querySelector('#pr-suche'); if (s2 && !g) { s2.focus(); s2.setSelectionRange(pos, pos); }
-    };
-  }
-  el.querySelector('#pr-sort')?.addEventListener('change', (e) => { sortierung = e.target.value; neu(); });
-  el.querySelector('#pr-mehr')?.addEventListener('click', () => { mehrBuchungen = true; neu(); });
+  el.querySelectorAll('[data-pc-kat]').forEach((s) => s.onchange = () => {
+    if (!s.value) return;
+    const [kat, ukat] = s.value.split('|');
+    entscheiden(istOffen(row(s.dataset.pcKat), D) ? mitAnderen(s.dataset.pcKat) : [row(s.dataset.pcKat)], { kat, ukat, umb: false });
+  });
+  el.querySelectorAll('[data-pc-umb]').forEach((b) => b.onclick = () => entscheiden(mitAnderen(b.dataset.pcUmb), { kat: 'Umbuchung', ukat: '', umb: true }));
+  el.querySelectorAll('[data-pc-zurueck]').forEach((b) => b.onclick = () => {
+    const r = row(b.dataset.pcZurueck), k = r.ent;
+    if (!ENT[k]) { H.toast('Diese Entscheidung stammt aus der Auswertung und lässt sich hier nur ändern.'); return; }
+    const vorher = [[k, ENT[k]]];
+    ENT[k] = { geloescht: true, zeit: jetzt() }; UNSYNC.add(k);
+    fertig(`Zurückgenommen: ${r.g || 'Buchung'} vom ${H.dde(r.d)}.`, vorher, H.S().wahl);
+  });
+  el.querySelectorAll('[data-pc-wer]').forEach((b) => b.onclick = () => { zeigAnzahl = 30; H.setze({ wahl: b.dataset.pcWer }); window.scrollTo({ top: 0 }); });
+  el.querySelector('#pr-alle')?.addEventListener('click', () => { zeigAnzahl = 30; H.setze({ wahl: '' }); });
+  el.querySelector('#pr-erledigt')?.addEventListener('click', () => { filter = filter === 'erledigt' ? 'offen' : 'erledigt'; zeigAnzahl = 30; H.neuZeichnen(); });
+  el.querySelector('#pr-mehr')?.addEventListener('click', () => { zeigAnzahl += 30; H.neuZeichnen(); });
+  el.querySelector('#pr-sort')?.addEventListener('change', (e) => { sortierung = e.target.value; H.neuZeichnen(); });
   el.querySelector('#pr-sichern')?.addEventListener('click', dateiSichern);
-  el.querySelector('#pr-excel')?.addEventListener('click', excel);
-  el.querySelector('#pr-uebernehmen')?.addEventListener('click', () => H.einlesen());
-  const det_ = el.querySelector('[data-pr-detail]');
-  if (!det_) return;
-  const g = gruppen().m.get(det_.dataset.prDetail);
-  const kat = el.querySelector('#pr-kat'), ukat = el.querySelector('#pr-ukat'), umb = el.querySelector('#pr-umb'), neuBox = el.querySelector('.pr-neu');
-  const radio = (v) => { const x = el.querySelector(`input[name="pr-gilt"][value="${v}"]`); if (x) x.checked = true; };
-  kat.onchange = () => { ukat.innerHTML = ukatOptionen(kat.value, ''); neuBox.hidden = true; if (kat.value === 'Umbuchung') umb.checked = true; };
-  ukat.onchange = () => { neuBox.hidden = ukat.value !== '__neu'; if (!neuBox.hidden) el.querySelector('#pr-ukat-neu').focus(); };
-  const A = analyse(g);
-  el.querySelectorAll('[data-pr-v]').forEach((b) => b.onclick = () => {
-    const v = A.vor[+b.dataset.prV];
-    el.querySelectorAll('.pr-chip').forEach((c) => c.classList.toggle('an', c === b));
-    if (v.umb) { umb.checked = true; return; }
-    umb.checked = false; kat.value = v.kat; ukat.innerHTML = ukatOptionen(v.kat, v.ukat); neuBox.hidden = true;
-  });
-  el.querySelectorAll('[data-pr-b]').forEach((c) => c.onchange = () => {
-    const i = +c.dataset.prB; c.checked ? angehakt.add(i) : angehakt.delete(i);
-    el.querySelector('#pr-n-ausw').textContent = `(${angehakt.size})`;
-    radio(angehakt.size ? 'auswahl' : g.offen.length ? 'offen' : 'alle');
-  });
-  el.querySelector('#pr-alle-haken')?.addEventListener('click', () => {
-    const D = gruppen().D;
-    for (const r of g.offen.length ? g.offen : g.rows) angehakt.add(r.i);
-    el.querySelectorAll('[data-pr-b]').forEach((c) => { c.checked = angehakt.has(+c.dataset.prB); });
-    el.querySelector('#pr-n-ausw').textContent = `(${angehakt.size})`; radio('auswahl'); void D;
-  });
-  const naechste = () => {
-    const l = sichtbar(gruppen().liste).filter((x) => x.key !== g.key && !(filter === 'offen' && !x.offen.length));
-    return l[0]?.key || '';
+  const su = el.querySelector('#pr-suche');
+  let suT;
+  if (su) su.oninput = () => {
+    clearTimeout(suT);
+    suT = setTimeout(() => { suche = su.value; H.neuZeichnen(); const s2 = document.querySelector('#pr-suche'); if (s2) { s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); } }, 250);
   };
-  el.querySelector('#pr-weiter').onclick = () => { angehakt.clear(); mehrBuchungen = false; H.setze({ wahl: naechste() }); };
-  el.querySelector('#pr-speichern').onclick = () => {
-    let u = ukat.value === '__neu' ? el.querySelector('#pr-ukat-neu').value.trim() : ukat.value;
-    const k = kat.value;
-    if (!k && !umb.checked) { H.toast('Bitte eine Kategorie wählen oder „Zählt nicht“ anhaken.'); kat.focus(); return; }
-    const e = { kat: k || 'Umbuchung', ukat: k ? u : '', umb: umb.checked, notiz: el.querySelector('#pr-notiz').value.trim() };
-    speichern(g, e, el.querySelector('input[name="pr-gilt"]:checked')?.value || 'offen', el.querySelector('#pr-vz')?.value || '', naechste());
-  };
-  el.querySelector('#pr-passt')?.addEventListener('click', () => speichern(g, { ok: true }, 'alle', '', naechste()));
-  el.querySelector('#pr-zuruecknehmen')?.addEventListener('click', () => {
-    const keys = Object.keys(ENT).filter((k) => !ENT[k].geloescht && betrifft(k, g));
-    if (!keys.length) { H.toast('Diese Entscheidung steht schon in den Daten – zurücknehmen geht in Auswertung › Kategorie-Entscheidungen.json bzw. nach dem nächsten Einlesen hier.'); return; }
-    const vorher = keys.map((k) => [k, ENT[k]]);
-    for (const k of keys) { ENT[k] = { geloescht: true, zeit: jetzt() }; UNSYNC.add(k); }
-    fertig(`Entscheidung für „${g.name}“ zurückgenommen.`, vorher, g.key);
-  });
 }
 
-function betrifft(k, g) {
-  const t = k.split('|');
-  if (t[0] === 'e') return t[1] === g.key;
+function entscheiden(rows, e) {
   const { D } = gruppen();
-  return g.rows.some((r) => `${r.d}|${D.konten[r.k].name}|${r.c}` === t.slice(1, 4).join('|'));
-}
-
-function speichern(g, e, gilt, vz, weiter) {
-  const { D } = gruppen();
-  e = { ...e, zeit: jetzt(), name: g.name };
-  if (!e.notiz) delete e.notiz;
-  let rows = gilt === 'alle' ? null : gilt === 'auswahl' ? g.rows.filter((r) => angehakt.has(r.i)) : g.offen;
-  if (gilt === 'auswahl' && !rows.length) { H.toast('Keine Buchung angehakt.'); return; }
-  if (g.ohneName && !rows) rows = g.offen.length ? g.offen : g.rows;
-  const keys = rows ? rows.map((r) => [`b|${r.d}|${D.konten[r.k].name}|${r.c}`, { ...e, name: r.g || e.name }]) : [[`e|${g.key}|${vz}`, { ...e, n: g.rows.length }]];
+  const z = jetzt();
+  const keys = rows.map((r) => [`b|${r.d}|${D.konten[r.k].name}|${r.c}`, { ...e, zeit: z, name: r.g || '' }]);
   const vorher = keys.map(([k]) => [k, ENT[k]]);
   for (const [k, x] of keys) { ENT[k] = x; UNSYNC.add(k); }
-  const was = e.ok ? 'geprüft – passt so' : e.umb ? 'zählt nicht' : katText(e.kat, e.ukat);
-  fertig(`„${g.name}“: ${was} (${rows ? `${rows.length} ${rows.length === 1 ? 'Buchung' : 'Buchungen'}` : 'alle Buchungen'}).`, vorher, weiter);
+  const was = e.umb ? 'zählt nicht' : katText(e.kat, e.ukat);
+  fertig(`${rows[0].g || 'Buchung'}: ${was}${rows.length > 1 ? ` (${rows.length} Buchungen)` : ''}`, vorher, H.S().wahl);
 }
 
 let rueckT;
@@ -552,22 +451,4 @@ export function pruefenGeoeffnet() {
   if (abgeglichen) return;
   abgeglichen = true;
   abgleichen().then((mehr) => { if (mehr) { H.neuAufbauen(); G = null; } if (H.S().kart === 'pruefen') H.neuZeichnen(); });
-}
-
-async function excel() {
-  const { D, liste } = gruppen(), j = D.j;
-  const zeilen = [];
-  for (const g of liste.filter((x) => x.offen.length).sort((a, b) => b.oAus + b.oEin - a.oAus - a.oEin)) {
-    const A = analyse(g);
-    const tipp = A.vor[0] ? (A.vor[0].umb ? 'zählt nicht (eigenes Geld)' : katText(A.vor[0].kat, A.vor[0].ukat)) : '';
-    for (const r of g.offen) {
-      const d = det(r, j);
-      zeilen.push([g.name, r.d, D.konten[r.k].name, r.c / 100, r.g, r.z, d.uart, d.iban, d.mref, d.gid, d.kat0.replace(/ › $/, ''), tipp, d.quelle, '', '']);
-    }
-  }
-  await H.alsExcel(`Kategorien-pruefen-${new Date().toISOString().slice(0, 10)}`, 'Offene Buchungen', [
-    { titel: 'Empfänger (Gruppe)', breite: 28 }, { titel: 'Datum', typ: 'datum', breite: 11 }, { titel: 'Konto', breite: 16 }, { titel: 'Betrag', typ: 'euro', breite: 12 },
-    { titel: 'Gegenseite', breite: 28 }, { titel: 'Verwendungszweck', breite: 60 }, { titel: 'Umsatzart', breite: 16 }, { titel: 'IBAN', breite: 24 },
-    { titel: 'Mandatsreferenz', breite: 18 }, { titel: 'Gläubiger-ID', breite: 20 }, { titel: 'Kategorie laut Quelle', breite: 24 }, { titel: 'Vorschlag', breite: 26 },
-    { titel: 'Datei', breite: 30 }, { titel: 'Deine Kategorie', breite: 22 }, { titel: 'Notiz', breite: 24 }], zeilen);
 }

@@ -662,7 +662,7 @@ const ZEILEN = [
   ['h', 'Netto-Abzüge und -Zuschüsse'], ['-bav_an', 'Betriebsrente (Entgeltumwandlung)'], ['-_auto', 'Dienstwagen (Sachbezug)'], ['-_sach', 'Gutscheine (Sachbezug)'],
   ['-kv', 'Krankenversicherung'], ['kv_zuschuss', 'Zuschuss Arbeitgeber KV'], ['-pv', 'Pflegeversicherung'], ['pv_zuschuss', 'Zuschuss Arbeitgeber PV'], ['-sonst_abzug', 'Private Abzüge'],
   ['=auszahlung', 'Auszahlung'],
-  ['h', 'Zusätzlich vom Arbeitgeber'], ['bav_ag', 'Betriebsrente Arbeitgeber'], ['sv_ag', 'Sozialversicherung Arbeitgeberanteil'], ['_kosten', 'Kosten des Arbeitgebers (laut Abrechnung)'],
+  ['h', 'Zusätzlich vom Arbeitgeber'], ['bav_ag', 'Betriebsrente Arbeitgeber'], ['sv_ag', 'Sozialversicherung Arbeitgeberanteil'], ['_kosten', 'Kosten des Arbeitgebers'],
   ['h', 'Merkmale'], ['#stkl', 'Steuerklasse'], ['#kinderfreibetrag', 'Kinderfreibetrag'], ['#kv_satz', 'KV-Beitragssatz'], ['#krankenkasse', 'Krankenkasse'],
   ['#urlaubsanspruch', 'Urlaubsanspruch'], ['#erstellt', 'Abrechnung vom'], ['#_konto', 'Auf dem Konto'], ['#_quelle', 'Quelle'],
 ];
@@ -714,7 +714,8 @@ function datenKarte(G, el) {
       if (v == null || v === '') return '<td class="r muted">–</td>';
       if (text || typeof v === 'string') return `<td class="r ge-txt">${H.esc(String(v))}</td>`;
       if (!v) return '<td class="r muted">0</td>';
-      return `<td class="r${neg ? ' neg' : ''}"${cent ? '' : ` title="${H.eur(Math.round(v * 100))}"`}>${neg ? '−' : ''}${zahl(v)}</td>`;
+      const ber = (feld === 'sv_ag' || feld === '_kosten') && z.sv_ag_berechnet;   // nicht gedruckt, aus deinen Anteilen berechnet
+      return `<td class="r${neg ? ' neg' : ''}${ber ? ' ge-ber' : ''}"${ber ? ' title="Steht nicht auf der Abrechnung – berechnet: Renten- und Arbeitslosenversicherung wie dein Anteil, Krankenversicherung die Hälfte, Pflege 1,8 %"' : cent ? '' : ` title="${H.eur(Math.round(v * 100))}"`}>${ber ? '≈ ' : ''}${neg ? '−' : ''}${zahl(v)}</td>`;
     };
     const s = !text ? sum(jahrMs, (z) => { const v = wert(z, feld); return typeof v === 'number' ? v : 0; }) : null;
     const nJahr = jahrMs.filter((z) => typeof wert(z, feld) === 'number').length;
@@ -735,7 +736,7 @@ function datenKarte(G, el) {
     ${teile > 1 ? `<div class="seg ge-tteil" role="group" aria-label="Teil des Jahres">${TEILNAME.map((t, i) => `<button data-ge-tteil="${i}" class="${i === teil ? 'an' : ''}">${t}</button>`).join('')}</div>` : ''}
     <select id="ge-tbereich" aria-label="Bereich">${BEREICHE.map(([k, t]) => `<option value="${k}"${k === tabBereich ? ' selected' : ''}>${k === 'alle' ? 'Alle Bereiche' : t}</option>`).join('')}</select>
     <button class="btn sm" id="ge-excel" title="Alle Monate und alle Lohnarten als Excel-Datei">Excel</button></div>`;
-  return H.karte5('Alle Daten der Abrechnungen', `jede Zeile deiner Abrechnungen, ${teile === 1 ? 'Januar bis Dezember' : 'Monat für Monat'} ${jahr} · ${G.pdf.length} Abrechnungen als PDF mit allen Einzelheiten, frühere Monate aus Lohn-02.xlsx (nur Summen)`,
+  return H.karte5('Alle Daten der Abrechnungen', `jede Zeile deiner Abrechnungen, ${teile === 1 ? 'Januar bis Dezember' : 'Monat für Monat'} ${jahr} · ${G.pdf.length} Abrechnungen als PDF mit allen Einzelheiten, frühere Monate aus Lohn-02.xlsx (nur Summen) · ≈ = berechnet, weil die Abrechnung es nicht druckt`,
     `${filter}<div class="t3-rahmen"><table class="t3 ge-tab${cent ? '' : ' ohne-cent'}"><thead>${kopf}</thead><tbody>${zeilen.join('')}</tbody></table></div>`, '', '', 'ge-daten');
 }
 
