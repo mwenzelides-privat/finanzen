@@ -668,7 +668,11 @@ function belegKarte() {
     const tip = z.map((x) => `Zeile ${x.zeile} ${x.text}: Bescheinigung ${H.eur(Math.round(x.beleg * 100))}, Abrechnungen ${H.eur(Math.round(x.summe * 100))}${Math.abs(x.diff) >= 0.005 ? ` (${pm(x.diff)})` : ''}`).join('\n');
     if (max < 0.005) return `<td class="r pos" title="${H.esc(tip)}">✓ stimmt</td>`;
     if (max < 1) return `<td class="r pos" title="${H.esc(tip)}">✓ ±${H.eur(Math.round(max * 100)).replace(/\s?€/, '')} €${ber ? '<sup>b</sup>' : ''}</td>`;
-    return `<td class="r ge-abw" title="${H.esc(tip)}">${z.filter((x) => Math.abs(x.diff) >= 1).map((x) => `Z. ${x.zeile}: ${pm0(x.diff)}`).join('<br>')}</td>`;
+    const abw = z.filter((x) => Math.abs(x.diff) >= 1);
+    if (abw.every((x) => x.erklaert)) return `<td class="r ge-erkl" title="${H.esc(`${tip}
+
+${abw[0].erklaert}`)}">✓ erklärt<small>${abw.map((x) => `Z. ${x.zeile} ${pm0(x.diff)}`).join(' · ')}</small></td>`;
+    return `<td class="r ge-abw" title="${H.esc(tip)}">⚠ ${abw.map((x) => `Z. ${x.zeile}: ${pm0(x.diff)}`).join('<br>')}</td>`;
   };
   const zeilen = B.jahre.map((j) => `<tr><td><b>${j.jahr}</b><small>${j.monate} Abrechnungen · ${H.esc(j.quelle || '')}</small></td>${BELEG_GRUPPEN.map(([, n]) => zelle(j, n)).join('')}</tr>`).join('');
   const meld = (B.meldungen || []).map((m) => {
@@ -676,11 +680,18 @@ function belegKarte() {
     return `<li><span>${H.dde(m.von)} – ${H.dde(m.bis)}</span><span class="muted">${H.esc(m.grund.replace(/^\d+\s*/, ''))}</span><b>${H.eur0(m.entgelt * 100)}</b>
       <span class="${m.diff == null ? 'muted' : ok ? 'pos' : 'ge-abw'}">${m.diff == null ? 'keine Abrechnungen' : ok ? '✓ stimmt' : pm0(m.diff)}</span></li>`;
   }).join('');
-  const rvAbw = B.jahre.some((j) => j.zeilen.some((x) => ['22a', '23a', '27'].includes(x.zeile) && Math.abs(x.diff) >= 1));
+  const rvAbw = B.jahre.some((j) => j.zeilen.some((x) => x.erklaert));
+  const offen = B.jahre.some((j) => j.zeilen.some((x) => Math.abs(x.diff) >= 1 && !x.erklaert)) || (B.meldungen || []).some((m) => m.diff != null && Math.abs(m.diff) >= 0.5);
   return H.karte5('Abgleich mit den Jahresbescheinigungen', 'Summe deiner Monatsabrechnungen gegen Lohnsteuerbescheinigung und Meldung zur Sozialversicherung · Maus auf ein Feld: alle Zeilen',
     `<div class="t3-rahmen"><table class="t3 ge-bel"><thead><tr><th>Jahr</th>${BELEG_GRUPPEN.map(([t]) => `<th class="r">${t}</th>`).join('')}</tr></thead><tbody>${zeilen}</tbody></table></div>
     ${meld ? `<h3 class="ge-bel-h">Gemeldetes Rentenversicherungs-Entgelt</h3><ul class="ge-meld">${meld}</ul>` : ''}
-    <p class="s5-erkl">${rvAbw ? 'Renten- und Arbeitslosenversicherung: Die Lohnsteuerbescheinigung nennt nur Beiträge auf steuerpflichtigen Lohn. Beiträge auf die steuerfreie, aber beitragspflichtige Entgeltumwandlung für die Betriebsrente stehen dort nicht – deshalb ist sie dort kleiner. ' : ''}<sup>b</sup> = enthält nach Regel berechnete Monate (Wurzer 04–12/2025); die Jahressumme der Bescheinigung bestätigt sie bis auf Cent-Rundung.</p>`, '', '', 'ge-belege');
+    <p class="s5-erkl">${rvAbw ? '„✓ erklärt“ bei Renten- und Arbeitslosenversicherung: Die Lohnsteuerbescheinigung nennt nur Beiträge auf steuerpflichtigen Lohn; die Differenz entspricht bei beiden Versicherungen demselben Lohnbetrag – also keine fehlende Abrechnung. ' : ''}<sup>b</sup> = enthält nach Regel berechnete Monate (Wurzer 04–12/2025); die Jahressumme der Bescheinigung bestätigt sie bis auf Cent-Rundung.</p>
+    <details class="ge-tun"${offen ? ' open' : ''}><summary>Was tun bei ⚠ Abweichung?</summary><ol>
+      <li><b>Zuerst mir Bescheid geben</b> – meist fehlt eine Abrechnung oder eine Zeile wurde falsch gelesen (so war es bei den Nachberechnungen und dem Verpflegungszuschuss). Das korrigiere ich.</li>
+      <li><b>Fehlt eine Abrechnung</b> (z. B. eine Korrektur-Abrechnung): PDF in den Ordner Lohnabrechnung legen – sie wird beim nächsten Einlesen mitgezählt.</li>
+      <li><b>Stimmen alle Abrechnungen und trotzdem nicht die Bescheinigung:</b> beim Lohnbüro nachfragen. Eine falsche Lohnsteuerbescheinigung muss der Arbeitgeber berichtigen – das Finanzamt übernimmt in der Steuererklärung die Werte der Bescheinigung.</li>
+      <li><b>Weicht das gemeldete Rentenversicherungs-Entgelt ab:</b> wichtig für deine Rente – Arbeitgeber bitten, die Meldung zu korrigieren; danach in der Renteninformation prüfen.</li>
+    </ol></details>`, '', '', 'ge-belege');
 }
 
 // ---------------------------------------------------------------- Alle Daten der Abrechnungen
