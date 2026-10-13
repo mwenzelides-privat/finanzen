@@ -711,11 +711,12 @@ function datenKarte(G, el) {
       if (!z) return '<td class="r muted ge-leer"></td>';
       const v = wert(z, feld);
       if (v == null || v === '') return `<td class="r muted"${detail(z) ? ` title="Steht auf dieser Abrechnung nicht${z.scan ? ' (neues Lohnsystem bei Wurzer 04/2025–04/2026)' : ''}"` : ''}>–</td>`;
-      // neues Wurzer-Lohnsystem: bei Kranken- und Pflegeversicherung steht nur dein Anteil auf der Abrechnung
-      const tip = z.scan && (feld === 'kv' || feld === 'pv') ? ' title="Auf dieser Abrechnung steht nur dein Anteil – den Arbeitgeberanteil zahlte Wurzer direkt an die Krankenkasse"' : '';
-      if (text || typeof v === 'string') return `<td class="r ge-txt">${H.esc(String(v))}</td>`;
+      // nicht gedruckt, nach fester Regel aus deinem gedruckten Anteil berechnet (Wurzer 04/2025–04/2026)
+      const ber = (z.berechnet || []).includes(feld);
+      const tip = ber ? ' title="Steht nicht auf der Abrechnung, nach fester Regel berechnet: Renten- und Arbeitslosenversicherung zahlen beide gleich viel, Krankenversicherung je zur Hälfte, Pflege Arbeitgeber 1,8 % (du 1,55 %). Ergibt auf den Cent die gedruckten Werte der Monate davor und danach."' : '';
+      if (text || typeof v === 'string') return `<td class="r ge-txt${ber ? ' ge-ber' : ''}"${tip}>${H.esc(String(v))}${ber ? '<sup>b</sup>' : ''}</td>`;
       if (!v) return '<td class="r muted">0</td>';
-      return `<td class="r${neg ? ' neg' : ''}${tip ? ' ge-nur-an' : ''}"${tip || (cent ? '' : ` title="${H.eur(Math.round(v * 100))}"`)}>${neg ? '−' : ''}${zahl(v)}${tip ? '<sup>AN</sup>' : ''}</td>`;
+      return `<td class="r${neg ? ' neg' : ''}${ber ? ' ge-ber' : ''}"${tip || (cent ? '' : ` title="${H.eur(Math.round(v * 100))}"`)}>${neg ? '−' : ''}${zahl(v)}${ber ? '<sup>b</sup>' : ''}</td>`;
     };
     const s = !text ? sum(jahrMs, (z) => { const v = wert(z, feld); return typeof v === 'number' ? v : 0; }) : null;
     const nJahr = jahrMs.filter((z) => typeof wert(z, feld) === 'number').length;
@@ -736,7 +737,7 @@ function datenKarte(G, el) {
     ${teile > 1 ? `<div class="seg ge-tteil" role="group" aria-label="Teil des Jahres">${TEILNAME.map((t, i) => `<button data-ge-tteil="${i}" class="${i === teil ? 'an' : ''}">${t}</button>`).join('')}</div>` : ''}
     <select id="ge-tbereich" aria-label="Bereich">${BEREICHE.map(([k, t]) => `<option value="${k}"${k === tabBereich ? ' selected' : ''}>${k === 'alle' ? 'Alle Bereiche' : t}</option>`).join('')}</select>
     <button class="btn sm" id="ge-excel" title="Alle Monate und alle Lohnarten als Excel-Datei">Excel</button></div>`;
-  return H.karte5('Alle Daten der Abrechnungen', `jede Zeile deiner Abrechnungen, ${teile === 1 ? 'Januar bis Dezember' : 'Monat für Monat'} ${jahr} · ${G.pdf.length} Abrechnungen als PDF mit allen Einzelheiten, frühere Monate aus Lohn-02.xlsx (nur Summen) · nur Werte, die auf der Abrechnung stehen; – = dort nicht angegeben (Maus darauf: Erklärung)`,
+  return H.karte5('Alle Daten der Abrechnungen', `jede Zeile deiner Abrechnungen, ${teile === 1 ? 'Januar bis Dezember' : 'Monat für Monat'} ${jahr} · ${G.pdf.length} Abrechnungen als PDF mit allen Einzelheiten, frühere Monate aus Lohn-02.xlsx (nur Summen) · <sup>b</sup> = nicht gedruckt, nach fester Regel berechnet · – = steht nicht auf der Abrechnung · Maus darauf: Erklärung`,
     `${filter}<div class="t3-rahmen"><table class="t3 ge-tab${cent ? '' : ' ohne-cent'}"><thead>${kopf}</thead><tbody>${zeilen.join('')}</tbody></table></div>`, '', '', 'ge-daten');
 }
 

@@ -1595,7 +1595,8 @@ button.ge-hz:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ge-tab .ge-th th { padding-top: 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); border-bottom: 1px solid var(--border); }
 .ge-tab .ge-sum td { font-weight: 700; color: var(--text); border-top: 1.5px solid var(--border-strong); }
 .ge-tab td.neg { color: var(--aus-text); }
-.ge-tab td.ge-nur-an sup { font-size: 9px; color: var(--muted); margin-left: 2px; }
+.ge-tab td.ge-ber { color: var(--text-2); }
+.ge-tab td.ge-ber sup, .s5-erkl sup { font-size: 9px; color: var(--accent); font-weight: 700; margin-left: 2px; }
 .ge-tab .ge-js { background: var(--surface-2); color: var(--text-2); }
 .ge-mk { border: 0; background: none; font: inherit; font-weight: 650; color: var(--accent); cursor: pointer; padding: 2px 6px; border-radius: 6px; }
 .ge-mk.an { background: var(--accent-soft); color: var(--text); }
