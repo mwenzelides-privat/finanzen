@@ -8,11 +8,13 @@ let H = null;              // Helfer aus app.js (Bausteine, Grafik, Navigation)
 let wahl = '';             // gewählter Abrechnungsmonat 'JJJJ-MM'
 let basisWahl = 'vm';      // Vergleich in „Warum anders?“: vm = Vormonat, vj = Vorjahresmonat
 let ansicht = 'jahre';     // Grafik Gehaltsentwicklung: jahre (Standard) | monate
-let tabEnde = '';          // Tabelle „Alle Daten“: neuester gezeigter Monat
+let tabJahr = '';          // Tabelle „Alle Daten“: gezeigtes Jahr (leer = Jahr der gewählten Abrechnung)
+let tabBereich = 'alle';   // Tabelle „Alle Daten“: nur ein Bereich (Bezüge, Steuer …)
+let tabTeil = -1;          // schmaler Bildschirm: welcher Teil des Jahres (Halbjahr bzw. Quartal)
 let erhoehung = 500;       // Rechner: Gehaltserhöhung brutto im Monat
 let auto_ = null;          // Rechner Dienstwagen: { satz (% vom Listenpreis), preis, km }
 try { auto_ = JSON.parse(localStorage.getItem('fd.dienstwagen') || 'null'); } catch {}
-let spaltenMax = 12, spaltenBreite = 0;   // Tabelle: höchstens so viele Monate, wie ohne Querscrollen passen
+let tabStufe = 0, spaltenBreite = 0;   // Tabelle: 0 = 12 Monate mit Cent, 1 = ohne Cent, 2 = Halbjahre, 3 = Quartale (bis nichts mehr quer scrollt)
 
 const e = (v) => H.eur(Math.round(v * 100));
 const e0 = (v) => H.eur0(Math.round(v * 100));
@@ -186,8 +188,8 @@ export function gehaltZeigen(el, helfer) {
   verlaufZeichnen(G);
   quoteZeichnen(G);
   renteZeichnen(G);
-  const rahmen = el.querySelector('#ge-daten .t3-rahmen'), n = el.querySelectorAll('.ge-tab thead .ge-mk').length;
-  if (rahmen && rahmen.scrollWidth > rahmen.clientWidth + 1 && n > 1) { spaltenMax = n - 1; gehaltZeigen(el, H); }
+  const rahmen = el.querySelector('#ge-daten .t3-rahmen');
+  if (rahmen && rahmen.scrollWidth > rahmen.clientWidth + 1 && tabStufe < 3) { tabStufe++; gehaltZeigen(el, H); }
 }
 
 const gehaltZiel = (z) => {
@@ -676,43 +678,65 @@ function wert(z, feld) {
   if (feld === 'erstellt') return z.erstellt ? z.erstellt.slice(0, 6) : null;
   return z[feld] ?? null;
 }
+const BEREICHE = [['alle', 'Alles'], ['Bezüge', 'Bezüge'], ['Steuer', 'Steuer'], ['Sozialversicherung', 'Sozialvers.'],
+  ['Netto-Abzüge und -Zuschüsse', 'Netto-Abzüge'], ['Zusätzlich vom Arbeitgeber', 'Arbeitgeber'], ['Merkmale', 'Merkmale']];
 function datenKarte(G, el) {
   const breite = el.clientWidth || 1200, schmal = breite < 640;
-  if (Math.abs(breite - spaltenBreite) > 20) { spaltenBreite = breite; spaltenMax = 12; }
-  const n = Math.max(1, Math.min(spaltenMax, Math.floor((breite - (schmal ? 30 : 40) - (schmal ? 128 : 230) - (schmal ? 0 : 108)) / (schmal ? 80 : 92))));
-  if (!tabEnde || !G.ist.some((z) => z.m === tabEnde)) tabEnde = G.ist.at(-1).m;
-  let ende = G.ist.findIndex((z) => z.m === tabEnde);
-  if (G.ist.findIndex((z) => z.m === wahl) > ende) ende = G.ist.findIndex((z) => z.m === wahl);
-  if (G.ist.findIndex((z) => z.m === wahl) <= ende - n) ende = G.ist.findIndex((z) => z.m === wahl) + n - 1;
-  ende = Math.min(G.ist.length - 1, Math.max(n - 1, ende));
-  tabEnde = G.ist[ende].m;
-  const ms = G.ist.slice(Math.max(0, ende - n + 1), ende + 1);
-  const jahr = ms.at(-1).m.slice(0, 4), jahrMs = G.ist.filter((z) => z.m.startsWith(jahr));
-  const genutzt = (feld) => G.ist.some((z) => { const v = wert(z, feld); return v != null && v !== 0 && v !== '–'; });
+  if (Math.abs(breite - spaltenBreite) > 20) { spaltenBreite = breite; tabStufe = 0; }
+  // Stufe vorab schätzen: Name + Summe + 12 Monate à ~84 px (mit Cent) bzw. ~62 px (ohne)
+  const platz = breite - (schmal ? 24 : 40) - (schmal ? 110 : 210) - (schmal ? 0 : 100);
+  const stufe = Math.max(tabStufe, platz >= 12 * 84 ? 0 : platz >= 12 * 62 ? 1 : platz >= 6 * 62 ? 2 : 3);
+  const teile = stufe <= 1 ? 1 : stufe === 2 ? 2 : 4, proTeil = 12 / teile, cent = stufe === 0;
+  const jahre = [...new Set(G.ist.map((z) => z.m.slice(0, 4)))].sort().reverse();
+  const jahr = jahre.includes(tabJahr) ? tabJahr : (wahl || G.ist.at(-1).m).slice(0, 4);
+  // gezeigter Teil des Jahres: beim schmalen Bildschirm der mit der gewählten Abrechnung, bis man selbst blättert
+  if (tabTeil >= teile) tabTeil = 0;
+  const wm = wahl.startsWith(jahr) ? +wahl.slice(5) - 1 : 0;
+  const teil = teile === 1 ? 0 : tabTeil < 0 ? Math.floor(wm / proTeil) : tabTeil;
+  const monate = Array.from({ length: 12 }, (_, i) => `${jahr}-${String(i + 1).padStart(2, '0')}`).slice(teil * proTeil, (teil + 1) * proTeil);
+  const ist = new Set(G.ist);
+  const ms = monate.map((m) => { const z = G.nach.get(m); return z && ist.has(z) ? z : null; });
+  const jahrMs = G.ist.filter((z) => z.m.startsWith(jahr));
+  const genutzt = (feld) => jahrMs.some((z) => { const v = wert(z, feld); return v != null && v !== 0 && v !== '–'; });
+  const zahl = (v) => H.eur(Math.round(v * (cent ? 100 : 1)) * (cent ? 1 : 100)).replace(cent ? /\s?€/ : /,00\s?€/, '');
   const zeilen = [];
-  let kopfOffen = null;
+  let kopfOffen = null, bereich = '';
   for (const [f, name] of ZEILEN) {
-    if (f === 'h') { kopfOffen = name; continue; }
+    if (f === 'h') { kopfOffen = bereich = name; continue; }
+    if (tabBereich !== 'alle' && bereich !== tabBereich) continue;
     const text = f.startsWith('#'), neg = f.startsWith('-'), summe = f.startsWith('=');
     const feld = f.replace(/^[-=#]/, '');
     if (!genutzt(feld)) continue;
     if (kopfOffen) { zeilen.push(`<tr class="ge-th"><th colspan="${ms.length + 1 + (schmal ? 0 : 1)}">${kopfOffen}</th></tr>`); kopfOffen = null; }
     const zelle = (z) => {
+      if (!z) return '<td class="r muted ge-leer"></td>';
       const v = wert(z, feld);
       if (v == null || v === '') return '<td class="r muted">–</td>';
       if (text || typeof v === 'string') return `<td class="r ge-txt">${H.esc(String(v))}</td>`;
       if (!v) return '<td class="r muted">0</td>';
-      return `<td class="r${neg ? ' neg' : ''}">${neg ? '−' : ''}${H.eur(Math.round(v * 100)).replace(/\s?€/, '')}</td>`;
+      return `<td class="r${neg ? ' neg' : ''}"${cent ? '' : ` title="${H.eur(Math.round(v * 100))}"`}>${neg ? '−' : ''}${zahl(v)}</td>`;
     };
     const s = !text ? sum(jahrMs, (z) => { const v = wert(z, feld); return typeof v === 'number' ? v : 0; }) : null;
     const nJahr = jahrMs.filter((z) => typeof wert(z, feld) === 'number').length;
-    zeilen.push(`<tr class="${summe ? 'ge-sum' : ''}"><td>${name}</td>${ms.map(zelle).join('')}${schmal ? '' : `<td class="r ge-js">${text ? '' : !nJahr ? '–' : `${neg ? '−' : ''}${H.eur(Math.round(s * 100)).replace(/\s?€/, '')}`}</td>`}</tr>`);
+    zeilen.push(`<tr class="${summe ? 'ge-sum' : ''}"><td>${name}</td>${ms.map(zelle).join('')}${schmal ? '' : `<td class="r ge-js">${text ? '' : !nJahr ? '–' : `${neg ? '−' : ''}${zahl(s)}`}</td>`}</tr>`);
   }
-  const kopf = `<tr><th>in €</th>${ms.map((z) => `<th class="r"><button class="ge-mk${z.m === wahl ? ' an' : ''}" data-ge-m="${z.m}" title="Diese Abrechnung oben zeigen">${H.monKurz(z.m)}${detail(z) ? '' : '<small>Summen</small>'}</button></th>`).join('')}${schmal ? '' : `<th class="r">Summe ${jahr}<small>${jahrMs.length} Mon.</small></th>`}</tr>`;
-  const i0 = G.ist.indexOf(ms[0]);
-  const blaettern = `<div class="ge-blaettern"><button class="btn sm" data-ge-blatt="-1"${i0 <= 0 ? ' disabled' : ''}>‹ früher</button><button class="btn sm" data-ge-blatt="1"${ende >= G.ist.length - 1 ? ' disabled' : ''}>später ›</button><button class="btn sm" id="ge-excel" title="Alle Monate und alle Lohnarten als Excel-Datei">Excel</button></div>`;
-  return H.karte5('Alle Daten der Abrechnungen', `jede Zeile deiner Abrechnungen, Monat für Monat · ${G.pdf.length} Abrechnungen als PDF mit allen Einzelheiten, frühere Monate aus Lohn-02.xlsx (nur Summen)`,
-    `<div class="t3-rahmen"><table class="t3 ge-tab"><thead>${kopf}</thead><tbody>${zeilen.join('')}</tbody></table></div>`, '', blaettern, 'ge-daten');
+  if (!zeilen.length) zeilen.push(`<tr><td colspan="${ms.length + 2}" class="muted">In ${jahr} gibt es zu diesem Bereich keine Werte.</td></tr>`);
+  const kopf = `<tr><th>in €${cent ? '' : '<small>ohne Cent</small>'}</th>${monate.map((m, i) => {
+    const z = ms[i];
+    return z ? `<th class="r"><button class="ge-mk${z.m === wahl ? ' an' : ''}" data-ge-m="${z.m}" title="Diese Abrechnung oben zeigen">${H.MON[+m.slice(5) - 1]}${detail(z) ? '' : '<small>Summen</small>'}</button></th>`
+      : `<th class="r muted ge-leer">${H.MON[+m.slice(5) - 1]}<small>${m > G.ist.at(-1).m ? 'kommt noch' : 'keine'}</small></th>`;
+  }).join('')}${schmal ? '' : `<th class="r">Summe ${jahr}<small>${jahrMs.length} Mon.</small></th>`}</tr>`;
+  const ji = jahre.indexOf(jahr);
+  const TEILNAME = teile === 2 ? ['Jan – Jun', 'Jul – Dez'] : ['Jan – Mär', 'Apr – Jun', 'Jul – Sep', 'Okt – Dez'];
+  const filter = `<div class="ge-tfilter">
+    <div class="ge-tjahr"><button class="btn sm" data-ge-tjahr="${jahre[ji + 1] || ''}"${jahre[ji + 1] ? '' : ' disabled'} aria-label="Vorjahr">‹</button>
+      <select id="ge-tjahr" aria-label="Jahr">${jahre.map((j) => `<option${j === jahr ? ' selected' : ''}>${j}</option>`).join('')}</select>
+      <button class="btn sm" data-ge-tjahr="${jahre[ji - 1] || ''}"${jahre[ji - 1] ? '' : ' disabled'} aria-label="Folgejahr">›</button></div>
+    ${teile > 1 ? `<div class="seg ge-tteil" role="group" aria-label="Teil des Jahres">${TEILNAME.map((t, i) => `<button data-ge-tteil="${i}" class="${i === teil ? 'an' : ''}">${t}</button>`).join('')}</div>` : ''}
+    <select id="ge-tbereich" aria-label="Bereich">${BEREICHE.map(([k, t]) => `<option value="${k}"${k === tabBereich ? ' selected' : ''}>${k === 'alle' ? 'Alle Bereiche' : t}</option>`).join('')}</select>
+    <button class="btn sm" id="ge-excel" title="Alle Monate und alle Lohnarten als Excel-Datei">Excel</button></div>`;
+  return H.karte5('Alle Daten der Abrechnungen', `jede Zeile deiner Abrechnungen, ${teile === 1 ? 'Januar bis Dezember' : 'Monat für Monat'} ${jahr} · ${G.pdf.length} Abrechnungen als PDF mit allen Einzelheiten, frühere Monate aus Lohn-02.xlsx (nur Summen)`,
+    `${filter}<div class="t3-rahmen"><table class="t3 ge-tab${cent ? '' : ' ohne-cent'}"><thead>${kopf}</thead><tbody>${zeilen.join('')}</tbody></table></div>`, '', '', 'ge-daten');
 }
 
 // ---------------------------------------------------------------- Grafik
@@ -804,18 +828,16 @@ function binden(el, G) {
   neu = () => gehaltZeigen(el, H);
   H.freiFuellen(el);
   H.gehBinden(el);
-  el.querySelector('#ge-monat')?.addEventListener('change', (ev) => { wahl = ev.target.value; neu(); });
+  el.querySelector('#ge-monat')?.addEventListener('change', (ev) => { wahl = ev.target.value; tabJahr = ''; tabTeil = -1; neu(); });
   el.querySelectorAll('[data-ge-m]').forEach((b) => b.onclick = () => { wahl = b.dataset.geM; neu(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
   el.querySelectorAll('[data-ge-basis]').forEach((b) => b.onclick = () => { basisWahl = b.dataset.geBasis; neu(); });
   el.querySelectorAll('[data-ge-ansicht]').forEach((b) => b.onclick = () => { ansicht = b.dataset.geAnsicht; el.querySelectorAll('[data-ge-ansicht]').forEach((x) => x.classList.toggle('an', x === b)); verlaufZeichnen(G); });
-  el.querySelectorAll('[data-ge-blatt]').forEach((b) => b.onclick = () => {
-    const i = G.ist.findIndex((z) => z.m === tabEnde), n = el.querySelectorAll('.ge-tab thead .ge-mk').length;
-    tabEnde = G.ist[Math.max(0, Math.min(G.ist.length - 1, i + Number(b.dataset.geBlatt) * n))].m;
-    const ziel = G.ist.find((z) => z.m === tabEnde);
-    if (G.ist.indexOf(G.nach.get(wahl)) > G.ist.indexOf(ziel) || G.ist.indexOf(G.nach.get(wahl)) <= G.ist.indexOf(ziel) - n) wahl = tabEnde;
-    neu();
-    H.springe('#ge-daten', false);
-  });
+  // Tabelle „Alle Daten“: Jahr, Teil des Jahres, Bereich
+  const tabNeu = () => { neu(); H.springe('#ge-daten', false); };
+  el.querySelector('#ge-tjahr')?.addEventListener('change', (ev) => { tabJahr = ev.target.value; tabTeil = 0; tabNeu(); });
+  el.querySelectorAll('[data-ge-tjahr]').forEach((b) => b.onclick = () => { if (b.dataset.geTjahr) { tabJahr = b.dataset.geTjahr; tabTeil = 0; tabNeu(); } });
+  el.querySelectorAll('[data-ge-tteil]').forEach((b) => b.onclick = () => { tabTeil = +b.dataset.geTteil; tabNeu(); });
+  el.querySelector('#ge-tbereich')?.addEventListener('change', (ev) => { tabBereich = ev.target.value; tabNeu(); });
   const erh = el.querySelector('#ge-erh');
   if (erh) erh.oninput = () => {
     erhoehung = +erh.value;

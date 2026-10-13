@@ -7,6 +7,7 @@ import { chatStart, chatDaten, chatVergessen } from './chat.js';
 import { kontostaende, STATUS_TEXT } from './salden.js';
 import { steuerDaten, steuerZeigen, postenOptionen, steuerPosten, steuerZuordnen, steuerStand } from './steuer.js';
 import { gehaltZeigen } from './gehalt.js';
+import { entscheidungenAnwenden, entscheidungenLaden, pruefenSeite, pruefenBinden, pruefenGeoeffnet, det, gruppenSchluessel, offenZahl, ibanText } from './pruefen.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -35,6 +36,7 @@ const offen = new Set();
 const charts = {};
 
 // ======================================================================= Daten aufbereiten
+const suchText = (r, konten) => norm(`${r.g} ${r.ga.join(' ')} ${r.z} ${r.kat} ${r.ukat} ${konten[r.k].name} ${r.v} ${r.t} ${r.n} ${r.st}`);
 function aufbereiten(j) {
   const K = j.kategorien, U = j.unterkategorien, A = j.arten, konten = j.konten, ST = j.steuerkategorien || [];
   const rows = j.buchungen.map((b, i) => {
@@ -42,9 +44,11 @@ function aufbereiten(j) {
     const r = { i, d, y: +d.slice(0, 4), m: +d.slice(5, 7), k, c, g, z, kat: K[kat], ukat: U[ukat], art: A[art], v, t, n };
     r.ga = frueher || [];   // frühere Namen der Gegenseite (Finanzguru benennt Empfänger manchmal um)
     r.st = ST[st] || '';
-    r.s = norm(`${g} ${r.ga.join(' ')} ${z} ${r.kat} ${r.ukat} ${konten[k].name} ${v} ${t} ${n} ${r.st}`);
+    r.s = suchText(r, konten);
     return r;
   });
+  // eigene Kategorie-Entscheidungen (Reiter Kategorien › Prüfen) wirken sofort, auch bevor der PC neu aufgebaut hat
+  for (const r of entscheidungenAnwenden(rows, j)) r.s = suchText(r, konten);
   const emp = new Map(), ukatZu = new Map();
   for (const r of rows) {
     if (r.ukat && !ukatZu.has(r.ukat)) ukatZu.set(r.ukat, r.kat);
@@ -923,8 +927,9 @@ function k5MonateZeichnen(P, a, R) {
 // lässt sich am ehesten sparen. Einnahmen: Gehalt und sonstige. Rechts die Einzelheiten der gewählten Kategorie.
 let kat2Grafik = null;
 function tabKategorien() {
-  const P = periode(), aus = S.kart !== 'ein';
-  const rechts = `<div class="seg" role="group" aria-label="Ausgaben oder Einnahmen"><button data-k2art="aus" class="${aus ? 'an' : ''}">Ausgaben</button><button data-k2art="ein" class="${aus ? '' : 'an'}">Einnahmen</button></div>${kontoWahlHtml()}${zeitSeg()}`;
+  if (S.kart === 'pruefen') return pruefenSeite(pruefHelfer());
+  const P = periode(), aus = S.kart !== 'ein', nP = offenZahl(D);
+  const rechts = `<div class="seg" role="group" aria-label="Ausgaben, Einnahmen oder Prüfen"><button data-k2art="aus" class="${aus ? 'an' : ''}">Ausgaben</button><button data-k2art="ein" class="${aus ? '' : 'an'}">Einnahmen</button><button data-k2art="pruefen" title="Buchungen ohne passende Kategorie ansehen und selbst einordnen">Prüfen${nP ? ` <small class="pr-zahl">${NUM.format(nP)}</small>` : ''}</button></div>${kontoWahlHtml()}${zeitSeg()}`;
   if (!P.monate.length) { kat2Grafik = null; return kopf5('Kategorien', 'In diesem Jahr ist noch kein Monat abgeschlossen.', rechts); }
   const a = sammle(P.monate, aus ? 'aus' : 'ein'), v = P.vor.length ? sammle(P.vor, aus ? 'aus' : 'ein') : null;
   const liste = [...a.g.values()].filter((x) => x.c > 0).sort((x, y) => y.c - x.c);
@@ -1034,6 +1039,10 @@ function tabKategorien() {
     ${detail}</div>
     <details class="card s5-details"><summary>Monat für Monat je ${aus ? 'Kategorie' : 'Einnahme'} <span class="muted">· in Euro · rot: deutlich über dem eigenen Ø · Zahl anklicken: Buchungen</span></summary>${tabelle}</details>`;
 }
+
+// Helfer für js/pruefen.js
+const pruefHelfer = () => ({ D: () => D, S: () => S, setze: (p) => setze(p), neuZeichnen: () => tabelle(parse(S.q)), neuAufbauen, toast, esc, eur, eur0, dde, NUM,
+  kopf5, zahl5, geh, zuBuchungen, schoen, norm, herunterladen, alsExcel, DIENST, einlesen });
 
 // Monatsbalken der gewählten Kategorie mit dem Durchschnitt als beschriftete Linie
 function kat2Zeichnen() {
@@ -1279,10 +1288,15 @@ function tabBuchungen(conds) {
       <b class="bz-b ${cls(r.c)}">${eur(r.c)}</b></div>`;
     if (auf) {
       const dd = [['Verwendungszweck', r.z], ['Kategorie', `${schoen(r.kat)}${r.ukat ? ' · ' + schoen(r.ukat) : ''}`], ['Konto', kn(r)], ['Art', r.art],
-        ['Vertrag', r.v], ['Tags', r.t], ['Notiz', r.n], ['Steuerkategorie (Buhl)', r.st], ['Früher genannt', r.ga.join(', ')]].filter(([, v]) => v);
+        ['Vertrag', r.v], ['Tags', r.t], ['Notiz', r.n], ['Steuerkategorie (Buhl)', r.st], ['Früher genannt', r.ga.join(', ')]];
+      const bx = det(r, D.j);
+      dd.push(['Umsatzart', bx.uart], ['IBAN Gegenseite', ibanText(bx.iban)], ['Mandatsreferenz', bx.mref], ['Gläubiger-ID', bx.gid],
+        ['Kategorie laut Quelle', (bx.kat0 || '').replace(/ › $/, '')], ['Kategorie geändert durch', r.regel || bx.regel], ['Datei', (bx.quelle || '').replace(/ › .*/, '')]);
+      for (let x = dd.length - 1; x >= 0; x--) if (!dd[x][1]) dd.splice(x, 1);
       h += `<div class="bz-detail"><dl>${dd.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
         <div class="bz-knoepfe">${r.g ? `<button class="btn sm" data-alle="${esc(r.g)}">Alle Buchungen von „${esc(r.g.length > 40 ? r.g.slice(0, 40) + '…' : r.g)}“</button>` : ''}
         <button class="btn sm" data-nurkat="${esc(r.kat)}">Nur ${esc(schoen(r.kat))}</button>
+        <button class="btn sm"${geh({ tab: 'uebersicht', kart: 'pruefen', wahl: gruppenSchluessel(r) })}>Kategorie prüfen/ändern</button>
         <label class="st-zuordnen klein">Steuer: <select data-steuer-i="${r.i}">${postenOptionen(steuerPosten(r), true)}</select></label></div></div>`;
     }
     if (gruppiert && letzter && anzahl.get(r.d) > 1) h += `<div class="bz-tagsumme">${anzahl.get(r.d)} Buchungen am ${dde(r.d).slice(0, 6)} · zusammen <b class="${cls(tag.get(r.d))}">${eur(tag.get(r.d))}</b></div>`;
@@ -1427,7 +1441,7 @@ function tabelle(conds) {
   if (S.tab === 'fix') planBinden();
   if (S.tab === 'konten') kontenGrafikZeichnen();
   if (S.tab === 'buchungen') buchGrafikZeichnen();
-  if (S.tab === 'uebersicht') kat2Zeichnen();
+  if (S.tab === 'uebersicht' && S.kart === 'pruefen') { pruefenBinden(el); pruefenGeoeffnet(); } else if (S.tab === 'uebersicht') kat2Zeichnen();
   $('#stichtag')?.addEventListener('change', (e) => { const v = e.target.value; if (/^\d{4}-\d{2}-\d{2}$/.test(v)) setze({ stichtag: v }); });
   el.querySelectorAll('[data-st]').forEach((b) => b.onclick = () => setze({ stichtag: b.dataset.st === D.bis && !S.jahr ? '' : b.dataset.st }));
   el.querySelectorAll('tr[data-konto]').forEach((tr) => tr.onclick = () => setze({ konto: tr.dataset.konto, tab: 'buchungen' }));
@@ -2280,7 +2294,7 @@ function hashLesen() {
   if (ersterStart && D && ![...p.keys()].length) S.jahr = startJahr();
   if (D) ersterStart = false;
   for (const k of ['q', 'jahr', 'monat', 'konto', 'kat', 'ukat', 'wahl']) if (p.get(k)) S[k] = p.get(k);
-  if (p.get('kart') === 'ein') S.kart = 'ein';
+  if (['ein', 'pruefen'].includes(p.get('kart'))) S.kart = p.get('kart');
   if (['kalender', 'plan'].includes(p.get('fixtab'))) S.fixtab = p.get('fixtab');
   if (/^\d{4}-\d{2}-\d{2}$/.test(p.get('stichtag') || '')) S.stichtag = p.get('stichtag');
   if (/^\d{4}-\d{2}_\d{4}-\d{2}$/.test(p.get('zr') || '')) S.zr = p.get('zr');
@@ -2313,6 +2327,7 @@ function anzeigen(v) {
   D = aufbereiten(j);
   if (LOKAL) window.__fd = { D, fix: () => fixkostenErkennen(), mr: () => monatsRechnung(), sammle, periode };   // nur zum Testen auf dem eigenen Rechner
   chatDaten(D);
+  entscheidungenLaden(j).then((fehlen) => { if (fehlen && D?.j === j) { neuAufbauen(); aktualisieren(); } });
   steuerDaten(D).then(() => { if (S.tab === 'steuer') tabelle(parse(S.q)); else if (S.tab === 'start') { try { startSeite(); } catch (e) { console.error(e); } } });
   hashLesen();
   selectsFuellen();
@@ -2320,6 +2335,14 @@ function anzeigen(v) {
   $('#dash').hidden = false;
   standZeigen();
   aktualisieren();
+}
+
+// Daten mit den aktuellen Kategorie-Entscheidungen neu aufbereiten (ohne neu zu zeichnen)
+function neuAufbauen() {
+  D = aufbereiten(D.j);
+  if (LOKAL) window.__fd = { D, fix: () => fixkostenErkennen(), mr: () => monatsRechnung(), sammle, periode };
+  chatDaten(D);
+  steuerDaten(D);
 }
 
 let toastT;
