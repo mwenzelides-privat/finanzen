@@ -662,19 +662,18 @@ const ZEILEN = [
   ['h', 'Netto-Abzüge und -Zuschüsse'], ['-bav_an', 'Betriebsrente (Entgeltumwandlung)'], ['-_auto', 'Dienstwagen (Sachbezug)'], ['-_sach', 'Gutscheine (Sachbezug)'],
   ['-kv', 'Krankenversicherung'], ['kv_zuschuss', 'Zuschuss Arbeitgeber KV'], ['-pv', 'Pflegeversicherung'], ['pv_zuschuss', 'Zuschuss Arbeitgeber PV'], ['-sonst_abzug', 'Private Abzüge'],
   ['=auszahlung', 'Auszahlung'],
-  ['h', 'Zusätzlich vom Arbeitgeber'], ['bav_ag', 'Betriebsrente Arbeitgeber'], ['sv_ag', 'Sozialversicherung Arbeitgeberanteil'], ['_kosten', 'Kosten des Arbeitgebers'],
+  ['h', 'Zusätzlich vom Arbeitgeber'], ['bav_ag', 'Betriebsrente Arbeitgeber'], ['sv_ag', 'Sozialversicherung Arbeitgeberanteil'], ['ag_gesamtkosten', 'Gesamtkosten des Arbeitgebers'],
   ['h', 'Merkmale'], ['#stkl', 'Steuerklasse'], ['#kinderfreibetrag', 'Kinderfreibetrag'], ['#kv_satz', 'KV-Beitragssatz'], ['#krankenkasse', 'Krankenkasse'],
   ['#urlaubsanspruch', 'Urlaubsanspruch'], ['#erstellt', 'Abrechnung vom'], ['#_konto', 'Auf dem Konto'], ['#_quelle', 'Quelle'],
 ];
 function wert(z, feld) {
   if (feld === '_auto') return detail(z) ? auto(z) : null;
   if (feld === '_sach') return detail(z) ? z.sachbezug : null;
-  if (feld === '_kosten') return detail(z) && z.sv_ag != null ? z.brutto + (z.bav_ag || 0) + z.sv_ag : null;   // SV-Anteil enthält die Zuschüsse zu KV und PV
   if (feld === '_konto') { const r = eingang(z); return r ? `✓ ${H.dde(r.d).slice(0, 6)}` : '–'; }
   if (feld === '_quelle') return detail(z) ? (z.geprueft ? 'PDF ✓ geprüft' : 'PDF') : 'Lohn-02.xlsx';
   if (feld === 'kinderfreibetrag') return z.kinderfreibetrag != null ? z.kinderfreibetrag.toLocaleString('de-DE', { minimumFractionDigits: 1 }) : null;
   if (feld === 'kv_satz') return z.kv_satz != null ? `${z.kv_satz.toLocaleString('de-DE')} %` : null;
-  if (feld === 'urlaubsanspruch') return z.urlaubsanspruch != null ? `${z.urlaubsanspruch} Tage` : null;
+  if (feld === 'urlaubsanspruch') return z.urlaubsanspruch != null ? `${z.urlaubsanspruch.toLocaleString('de-DE')} Tage` : null;
   if (feld === 'erstellt') return z.erstellt ? z.erstellt.slice(0, 6) : null;
   return z[feld] ?? null;
 }
@@ -711,13 +710,12 @@ function datenKarte(G, el) {
     const zelle = (z) => {
       if (!z) return '<td class="r muted ge-leer"></td>';
       const v = wert(z, feld);
-      if (v == null || v === '') return `<td class="r muted"${z.scan ? ' title="Steht auf dieser Abrechnung nicht (neues Lohnsystem bei Wurzer ab 04/2025)"' : ''}>–</td>`;
-      // nicht gedruckt, aus deinen Anteilen berechnet (eingescannte Wurzer-Abrechnungen 04/2025–04/2026)
-      const ber = (z.berechnet || []).includes(feld) || ((feld === 'sv_ag' || feld === '_kosten') && z.sv_ag_berechnet);
-      const tip = ber ? ' title="Steht nicht auf der Abrechnung – berechnet aus deinem Anteil: Renten- und Arbeitslosenversicherung gleich hoch, Krankenversicherung zur Hälfte, Pflege 1,8 % statt deiner 1,55 %"' : '';
-      if (text || typeof v === 'string') return `<td class="r ge-txt${ber ? ' ge-ber' : ''}"${tip}>${ber ? '≈ ' : ''}${H.esc(String(v))}</td>`;
+      if (v == null || v === '') return `<td class="r muted"${detail(z) ? ` title="Steht auf dieser Abrechnung nicht${z.scan ? ' (neues Lohnsystem bei Wurzer 04/2025–04/2026)' : ''}"` : ''}>–</td>`;
+      // neues Wurzer-Lohnsystem: bei Kranken- und Pflegeversicherung steht nur dein Anteil auf der Abrechnung
+      const tip = z.scan && (feld === 'kv' || feld === 'pv') ? ' title="Auf dieser Abrechnung steht nur dein Anteil – den Arbeitgeberanteil zahlte Wurzer direkt an die Krankenkasse"' : '';
+      if (text || typeof v === 'string') return `<td class="r ge-txt">${H.esc(String(v))}</td>`;
       if (!v) return '<td class="r muted">0</td>';
-      return `<td class="r${neg ? ' neg' : ''}${ber ? ' ge-ber' : ''}"${tip || (cent ? '' : ` title="${H.eur(Math.round(v * 100))}"`)}>${ber ? '≈ ' : ''}${neg ? '−' : ''}${zahl(v)}</td>`;
+      return `<td class="r${neg ? ' neg' : ''}${tip ? ' ge-nur-an' : ''}"${tip || (cent ? '' : ` title="${H.eur(Math.round(v * 100))}"`)}>${neg ? '−' : ''}${zahl(v)}${tip ? '<sup>AN</sup>' : ''}</td>`;
     };
     const s = !text ? sum(jahrMs, (z) => { const v = wert(z, feld); return typeof v === 'number' ? v : 0; }) : null;
     const nJahr = jahrMs.filter((z) => typeof wert(z, feld) === 'number').length;
@@ -738,7 +736,7 @@ function datenKarte(G, el) {
     ${teile > 1 ? `<div class="seg ge-tteil" role="group" aria-label="Teil des Jahres">${TEILNAME.map((t, i) => `<button data-ge-tteil="${i}" class="${i === teil ? 'an' : ''}">${t}</button>`).join('')}</div>` : ''}
     <select id="ge-tbereich" aria-label="Bereich">${BEREICHE.map(([k, t]) => `<option value="${k}"${k === tabBereich ? ' selected' : ''}>${k === 'alle' ? 'Alle Bereiche' : t}</option>`).join('')}</select>
     <button class="btn sm" id="ge-excel" title="Alle Monate und alle Lohnarten als Excel-Datei">Excel</button></div>`;
-  return H.karte5('Alle Daten der Abrechnungen', `jede Zeile deiner Abrechnungen, ${teile === 1 ? 'Januar bis Dezember' : 'Monat für Monat'} ${jahr} · ${G.pdf.length} Abrechnungen als PDF mit allen Einzelheiten, frühere Monate aus Lohn-02.xlsx (nur Summen) · ≈ = berechnet, weil die Abrechnung es nicht druckt · Maus auf einen Wert: Erklärung`,
+  return H.karte5('Alle Daten der Abrechnungen', `jede Zeile deiner Abrechnungen, ${teile === 1 ? 'Januar bis Dezember' : 'Monat für Monat'} ${jahr} · ${G.pdf.length} Abrechnungen als PDF mit allen Einzelheiten, frühere Monate aus Lohn-02.xlsx (nur Summen) · nur Werte, die auf der Abrechnung stehen; – = dort nicht angegeben (Maus darauf: Erklärung)`,
     `${filter}<div class="t3-rahmen"><table class="t3 ge-tab${cent ? '' : ' ohne-cent'}"><thead>${kopf}</thead><tbody>${zeilen.join('')}</tbody></table></div>`, '', '', 'ge-daten');
 }
 
