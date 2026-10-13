@@ -2345,6 +2345,23 @@ function neuAufbauen() {
   steuerDaten(D);
 }
 
+// Minuswerte überall rot (Wunsch des Nutzers): jedes Element, dessen Text mit einem Minus vor einer Zahl beginnt
+const MINUS = /^\s*[−-]\s?\d/;
+function minusRot(root) {
+  if (!root || root.nodeType !== 1 || root.closest('svg, canvas, select, option, textarea, script, style')) return;
+  for (const e of [root, ...root.querySelectorAll('*')]) {
+    if (e.closest('svg, canvas, select, option')) continue;
+    const n = [...e.childNodes].find((x) => x.nodeType === 1 || x.textContent.trim());
+    e.classList.toggle('minus', !!n && n.nodeType === 3 && MINUS.test(n.textContent));
+  }
+}
+new MutationObserver((ms) => {
+  for (const m of ms) {
+    if (m.type === 'characterData') minusRot(m.target.parentElement);
+    else for (const n of m.addedNodes) minusRot(n.nodeType === 1 ? n : n.parentElement);
+  }
+}).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+
 let toastT;
 function toast(t) {
   const el = $('#toast');

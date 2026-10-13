@@ -182,6 +182,7 @@ export function gehaltZeigen(el, helfer) {
       ${quoteKarte(G)}
     </div>
     ${heatmapKarte(G)}
+    ${belegKarte()}
     ${datenKarte(G, el)}
   </div>`;
   binden(el, G);
@@ -651,6 +652,37 @@ function renteZusaetze(V, R, akt) {
 }
 function renteZeichnen() {}
 
+// ---------------------------------------------------------------- Abgleich mit Lohnsteuer- und Meldebescheinigungen
+// Jahressummen der Monatsabrechnungen gegen die amtlichen Bescheinigungen (gehalt.belege aus gehalt_daten.py).
+const BELEG_GRUPPEN = [
+  ['Bruttolohn', ['3']], ['Lohnsteuer, Soli, Kirchensteuer', ['4', '5', '6']], ['Kranken- und Pflegeversicherung', ['25', '26', '24a', '24c']],
+  ['Renten- und Arbeitslosenversicherung', ['22a', '23a', '27']],
+];
+function belegKarte() {
+  const B = H.D.j.gehalt?.belege;
+  if (!B?.jahre?.length) return '';
+  const zelle = (j, nrn) => {
+    const z = j.zeilen.filter((x) => nrn.includes(x.zeile));
+    if (!z.length) return '<td class="r muted">–</td>';
+    const max = Math.max(...z.map((x) => Math.abs(x.diff))), ber = z.some((x) => x.berechnet);
+    const tip = z.map((x) => `Zeile ${x.zeile} ${x.text}: Bescheinigung ${H.eur(Math.round(x.beleg * 100))}, Abrechnungen ${H.eur(Math.round(x.summe * 100))}${Math.abs(x.diff) >= 0.005 ? ` (${pm(x.diff)})` : ''}`).join('\n');
+    if (max < 0.005) return `<td class="r pos" title="${H.esc(tip)}">✓ stimmt</td>`;
+    if (max < 1) return `<td class="r pos" title="${H.esc(tip)}">✓ ±${H.eur(Math.round(max * 100)).replace(/\s?€/, '')} €${ber ? '<sup>b</sup>' : ''}</td>`;
+    return `<td class="r ge-abw" title="${H.esc(tip)}">${z.filter((x) => Math.abs(x.diff) >= 1).map((x) => `Z. ${x.zeile}: ${pm0(x.diff)}`).join('<br>')}</td>`;
+  };
+  const zeilen = B.jahre.map((j) => `<tr><td><b>${j.jahr}</b><small>${j.monate} Abrechnungen · ${H.esc(j.quelle || '')}</small></td>${BELEG_GRUPPEN.map(([, n]) => zelle(j, n)).join('')}</tr>`).join('');
+  const meld = (B.meldungen || []).map((m) => {
+    const ok = m.diff != null && Math.abs(m.diff) < 0.5;
+    return `<li><span>${H.dde(m.von)} – ${H.dde(m.bis)}</span><span class="muted">${H.esc(m.grund.replace(/^\d+\s*/, ''))}</span><b>${H.eur0(m.entgelt * 100)}</b>
+      <span class="${m.diff == null ? 'muted' : ok ? 'pos' : 'ge-abw'}">${m.diff == null ? 'keine Abrechnungen' : ok ? '✓ stimmt' : pm0(m.diff)}</span></li>`;
+  }).join('');
+  const rvAbw = B.jahre.some((j) => j.zeilen.some((x) => ['22a', '23a', '27'].includes(x.zeile) && Math.abs(x.diff) >= 1));
+  return H.karte5('Abgleich mit den Jahresbescheinigungen', 'Summe deiner Monatsabrechnungen gegen Lohnsteuerbescheinigung und Meldung zur Sozialversicherung · Maus auf ein Feld: alle Zeilen',
+    `<div class="t3-rahmen"><table class="t3 ge-bel"><thead><tr><th>Jahr</th>${BELEG_GRUPPEN.map(([t]) => `<th class="r">${t}</th>`).join('')}</tr></thead><tbody>${zeilen}</tbody></table></div>
+    ${meld ? `<h3 class="ge-bel-h">Gemeldetes Rentenversicherungs-Entgelt</h3><ul class="ge-meld">${meld}</ul>` : ''}
+    <p class="s5-erkl">${rvAbw ? 'Renten- und Arbeitslosenversicherung: Die Lohnsteuerbescheinigung nennt nur Beiträge auf steuerpflichtigen Lohn. Beiträge auf die steuerfreie, aber beitragspflichtige Entgeltumwandlung für die Betriebsrente stehen dort nicht – deshalb ist sie dort kleiner. ' : ''}<sup>b</sup> = enthält nach Regel berechnete Monate (Wurzer 04–12/2025); die Jahressumme der Bescheinigung bestätigt sie bis auf Cent-Rundung.</p>`, '', '', 'ge-belege');
+}
+
 // ---------------------------------------------------------------- Alle Daten der Abrechnungen
 const ZEILEN = [
   ['h', 'Bezüge'],
@@ -662,7 +694,7 @@ const ZEILEN = [
   ['h', 'Netto-Abzüge und -Zuschüsse'], ['-bav_an', 'Betriebsrente (Entgeltumwandlung)'], ['-_auto', 'Dienstwagen (Sachbezug)'], ['-_sach', 'Gutscheine (Sachbezug)'],
   ['-kv', 'Krankenversicherung'], ['kv_zuschuss', 'Zuschuss Arbeitgeber KV'], ['-pv', 'Pflegeversicherung'], ['pv_zuschuss', 'Zuschuss Arbeitgeber PV'], ['-sonst_abzug', 'Private Abzüge'],
   ['=auszahlung', 'Auszahlung'],
-  ['h', 'Zusätzlich vom Arbeitgeber'], ['bav_ag', 'Betriebsrente Arbeitgeber'], ['sv_ag', 'Sozialversicherung Arbeitgeberanteil'], ['ag_gesamtkosten', 'Gesamtkosten des Arbeitgebers'],
+  ['h', 'Zusätzlich vom Arbeitgeber'], ['bav_ag', 'Betriebsrente Arbeitgeber'], ['sv_ag', 'Sozialversicherung Arbeitgeberanteil'], ['ag_zusatzkosten', 'Zusätzliche Kosten (Umlagen u. a.)'], ['ag_gesamtkosten', 'Gesamtkosten des Arbeitgebers'],
   ['h', 'Merkmale'], ['#stkl', 'Steuerklasse'], ['#kinderfreibetrag', 'Kinderfreibetrag'], ['#kv_satz', 'KV-Beitragssatz'], ['#krankenkasse', 'Krankenkasse'],
   ['#urlaubsanspruch', 'Urlaubsanspruch'], ['#erstellt', 'Abrechnung vom'], ['#_konto', 'Auf dem Konto'], ['#_quelle', 'Quelle'],
 ];

@@ -169,12 +169,9 @@ function gruppen() {
     g.entschieden = g.rows.some((r) => r.ent);
     g.letzt = g.rows.reduce((t, r) => (r.d > t ? r.d : t), '');
     // Zur Kontrolle: viel unter „Sonstige Einnahmen“ oder Buchungen in vielen verschiedenen Kategorien
-    if (!g.offen.length && !g.entschieden && z.length) {
-      const sonst = z.filter((r) => r.ukat === 'Sonstige Einnahmen').reduce((t, r) => t + r.c, 0);
-      const kats = new Set(z.map((r) => r.kat));
-      if (sonst >= 30000) g.kontrolle = `${H.eur0(sonst)} als „Sonstige Einnahmen“`;
-      else if (kats.size >= 3 && z.length >= 5 && g.aus + g.ein >= 50000) g.kontrolle = `in ${kats.size} verschiedenen Kategorien`;
-    }
+    const sonst = z.filter((r) => r.ukat === 'Sonstige Einnahmen' && r.c > 0 && !r.ent);
+    g.kontrolleRows = sonst.reduce((t, r) => t + r.c, 0) >= 30000 ? sonst : [];
+    if (g.kontrolleRows.length) g.kontrolle = 'als „Sonstige Einnahmen“';
     liste.push(g);
   }
   G = { D, m, nachIban, liste };
@@ -192,6 +189,9 @@ const STICHWORTE = [
   [/mitgliedsbeitrag|\bverein\b|\be\.\s?v\.|ortsverein/, 'Freizeit', 'Mitgliedschaft'], [/jagd|revier|wildschaden|jagdpacht/, 'Freizeit', 'Jagd'],
   [/geldautomat|bargeld/, 'Sonstiges', 'Bargeld'], [/werkstatt|reifen|\bkfz\b|autohaus/, 'Mobilitaet', 'Auto'], [/stadtwerke|\bstrom\b/, 'Wohnen', 'Strom'],
   [/handwerk|renovier|baumarkt|fliesen|maler/, 'Wohnen', 'Bauen / Renovieren'], [/finanzamt|steuer/, 'Finanzen', 'Steuern'], [/versicherung/, 'Versicherungen', 'Sonstige Versicherungen'],
+  [/bundesagentur f\w* arbeit|arbeitsagentur|arbeitslosengeld/, 'Einnahmen', 'Arbeitslosengeld', '+', 'neu'],
+  [/honorar|\brnr\b|rechnungs?nr|\brechnung\b/, 'Einnahmen', 'Honorar / Nebeneinkünfte', '+', 'neu'],
+  [/reisekosten|spesen|auslagen/, 'Einnahmen', 'Reisekosten-Erstattung', '+', 'neu'],
   [/gehalt|\blohn\b|bezuege|bezüge/, 'Einnahmen', 'Lohn / Gehalt', '+'], [/rueckzahlung|rückzahlung|erstattung|auslage|zurueck|zurück/, 'Einnahmen', 'Sonstige Einnahmen', '+'],
 ];
 const FIRMA = /\b(gmbh|ag|kg|se|ohg|ug|e\.?\s?v|mbh|gbr|bank|kasse|versicherung|stadt|gemeinde|amt|verlag|service|shop|markt|apotheke|\.de|\.com|inc|ltd|paypal)\b/i;
@@ -203,9 +203,9 @@ const katText = (k, u) => `${H.schoen(k)}${u ? ` › ${H.schoen(u)}` : ''}`;
 function analyse(g, richtung = null) {
   const { D, nachIban } = gruppen(), j = D.j;
   const hinw = [], vor = new Map();
-  const vorschlag = (k, u, w, grund, umb = false) => {
+  const vorschlag = (k, u, w, grund, umb = false, neu = false) => {
     if (!k || k === 'Nicht zugeordnet' || u === 'Unkategorisiert' || (ri < 0 && k === 'Einnahmen')) return;
-    if (!umb && u && !D.ukatZu.has(u)) return;
+    if (!umb && !neu && u && !D.ukatZu.has(u)) return;
     const key = umb ? 'umb' : paar(k, u), x = vor.get(key) || { kat: k, ukat: u, umb, w: 0, gruende: [] };
     x.w += w; if (grund && !x.gruende.includes(grund)) x.gruende.push(grund); vor.set(key, x);
   };
@@ -272,12 +272,14 @@ function analyse(g, richtung = null) {
   }
   // 8. Stichwörter im Text
   const text = H.norm(g.rows.slice(0, 80).map((r) => `${r.g} ${r.z}`).join(' '));
-  for (const [re, k, u, vz] of STICHWORTE) {
+  for (const [re, k, u, vz, neu] of STICHWORTE) {
     const tr = text.match(re);
     if (!tr) continue;
     if (vz === '+' && !g.ein) continue;
-    vorschlag(k, u, 1.5, `im Text steht „${tr[0].trim()}“`);
+    vorschlag(k, u, neu ? 2.5 : 1.5, `im Text steht „${tr[0].trim().slice(0, 30)}“`, false, !!neu);
   }
+  // eigenes Geld: dein Name als Gegenseite oder automatischer Ausgleich der Banksoftware
+  if (/marcus wenzelides|starmoney autom/.test(text)) vorschlag('Umbuchung', '', 3, /starmoney/.test(text) ? 'automatischer Ausgleich der Banksoftware' : 'Geld von dir selbst', true);
   // 9. Privatperson?
   if (!g.ohneName && !FIRMA.test(g.name) && /^[a-zäöüß.-]+,?\s+[a-zäöüß.-]+(\s+[a-zäöüß.-]+)?$/i.test(g.name.trim()) && !gid) {
     hinw.push('Der Name sieht nach einer <b>Privatperson</b> aus – typisch: Geld an Familie oder Freunde, Privatverkauf, geteilte Kosten oder Rückzahlungen.');
@@ -324,13 +326,16 @@ export function pruefenSeite(h) {
   const nur = H.S().wahl ? m.get(H.S().wahl) : null;            // aus „Buchungen“: nur dieser Empfänger
   const offen = liste.flatMap((g) => g.offen);
   const erledigt = D.rows.filter((r) => r.ent && zaehlt(r, D));
-  let rows = nur ? [...nur.rows].filter((r) => zaehlt(r, D)) : filter === 'erledigt' ? erledigt : offen;
+  const kontrolle = liste.flatMap((g) => g.kontrolleRows || []);
+  let rows = nur ? [...nur.rows].filter((r) => zaehlt(r, D)) : filter === 'erledigt' ? erledigt : filter === 'kontrolle' ? kontrolle : offen;
   if (suche) { const q = H.norm(suche); rows = rows.filter((r) => H.norm(`${r.g} ${r.z}`).includes(q)); }
   rows.sort(sortierung === 'datum' ? (a, b) => b.d.localeCompare(a.d) : (a, b) => Math.abs(b.c) - Math.abs(a.c));
   if (nur) rows.sort((a, b) => istOffen(b, D) - istOffen(a, D));
   const gesamt = offen.length + erledigt.length;
   const pz = gesamt ? Math.round((erledigt.length / gesamt) * 100) : 100;
   const satz = nur ? `Alle Buchungen von <b>${H.esc(nur.name)}</b> – Kategorie per Klick ändern.`
+    : filter === 'kontrolle' ? `<b>${H.NUM.format(kontrolle.length)} Einnahmen</b> stehen nur unter „Sonstige Einnahmen“ – oft steckt mehr dahinter (Honorar, Arbeitslosengeld, Erstattung, eigenes Geld). Passt der Vorschlag, klick auf <b>✓</b>; stimmt es so, auf <b>„passt so“</b>.`
+    : filter === 'erledigt' ? `<b>${H.NUM.format(erledigt.length)} Buchungen</b> hast du entschieden – hier kannst du sie ändern oder zurücknehmen.`
     : offen.length ? `Noch <b>${H.NUM.format(offen.length)} Buchungen</b> ohne passende Kategorie. Passt der Vorschlag, klick auf <b>✓</b> – sonst wähl eine Kategorie aus der Liste. Die Buchung ist dann erledigt.`
       : 'Alle Buchungen haben eine Kategorie. 🎉';
   const rechts = '<div class="seg" role="group" aria-label="Ausgaben, Einnahmen oder Prüfen"><button data-k2art="aus">Ausgaben</button><button data-k2art="ein">Einnahmen</button><button data-k2art="pruefen" class="an">Prüfen</button></div>';
@@ -340,33 +345,35 @@ export function pruefenSeite(h) {
     ${nur ? `<button class="btn sm" id="pr-alle">‹ zurück zu allen offenen</button>` : `<div class="pc-fort" title="${erledigt.length} von ${gesamt} erledigt"><i style="width:${pz}%"></i></div><span class="klein"><b>${H.NUM.format(erledigt.length)}</b> erledigt · <b>${H.NUM.format(offen.length)}</b> offen</span>`}
     <input id="pr-suche" type="search" placeholder="Suchen …" value="${H.esc(suche)}" autocomplete="off">
     <select id="pr-sort" aria-label="Reihenfolge"><option value="betrag"${sortierung === 'betrag' ? ' selected' : ''}>größte zuerst</option><option value="datum"${sortierung === 'datum' ? ' selected' : ''}>neueste zuerst</option></select>
-    ${nur ? '' : `<button class="btn sm" id="pr-erledigt">${filter === 'erledigt' ? 'Offene zeigen' : `Erledigte ansehen (${erledigt.length})`}</button>`}
+    ${nur ? '' : `<div class="seg pc-bereich" role="group" aria-label="Bereich">${[['offen', 'Offen', offen.length], ['kontrolle', 'Zur Kontrolle', kontrolle.length], ['erledigt', 'Erledigt', erledigt.length]].map(([k, t, n]) => `<button data-pc-f="${k}" class="${filter === k ? 'an' : ''}">${t} <small>${H.NUM.format(n)}</small></button>`).join('')}</div>`}
     ${speicher ? `<span class="klein muted pc-speicher">${speicher}</span>` : ''}</div>`;
   const zeig = rows.slice(0, zeigAnzahl);
-  const html = zeig.map((r) => zeileHtml(r, D, filter === 'erledigt' && !nur)).join('');
+  const html = zeig.map((r) => zeileHtml(r, D, filter === 'erledigt' && !nur, filter === 'kontrolle' && !nur)).join('');
   return H.kopf5('Kategorien prüfen', satz, rechts) + `<section class="card s5-karte pc-karte">${leiste}
     <div class="pc-liste">${html || '<p class="leer">Nichts zu tun.</p>'}</div>
     ${rows.length > zeig.length ? `<button class="btn" id="pr-mehr">Weitere ${Math.min(30, rows.length - zeig.length)} zeigen (noch ${rows.length - zeig.length})</button>` : ''}</section>`;
 }
 
-function zeileHtml(r, D, erledigtAnsicht) {
-  const g = gruppen().m.get(gKey(r)), d = det(r, D.j), of = istOffen(r, D);
+// Liste, auf die sich „auch die anderen von …“ bezieht
+const andereVon = (g, r, kontr) => (kontr ? g.kontrolleRows || [] : g.offen).filter((x) => x !== r && Math.sign(x.c) === Math.sign(r.c));
+function zeileHtml(r, D, erledigtAnsicht, kontr = false) {
+  const g = gruppen().m.get(gKey(r)), d = det(r, D.j), of = istOffen(r, D) || kontr;
   const wt = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'][new Date(`${r.d}T12:00:00Z`).getUTCDay()];
   const extra = [d.uart, d.iban && ibanText(d.iban), d.gid && `Gläubiger-ID ${d.gid}`, d.mref && `Mandat ${d.mref}`].filter(Boolean).map(H.esc).join(' · ');
-  const andere = g ? g.offen.filter((x) => x !== r && Math.sign(x.c) === Math.sign(r.c)) : [];
+  const andere = g ? andereVon(g, r, kontr) : [];
   let aktion;
   if (!of) {
     aktion = `<span class="pc-ist">${r.art === 'Umbuchung' ? 'zählt nicht' : H.esc(katText(r.kat, r.ukat))}</span>
       ${r.ent && r.ent !== 'daten' && erledigtAnsicht ? `<button class="btn sm" data-pc-zurueck="${r.i}">Rückgängig</button>` : ''}
       <select data-pc-kat="${r.i}" aria-label="Kategorie ändern"><option value="">ändern …</option>${katOptionen()}</select>`;
   } else {
-    const v = g ? vorschlagFuer(g, r).vor[0] : null;
+    const v = g ? vorschlagFuer(g, r).vor.find((x) => x.umb || x.kat !== r.kat || x.ukat !== r.ukat) : null;
     aktion = `${v ? `<button class="btn primary pc-ok" data-pc-ok="${r.i}" title="${H.esc(v.gruende.join(', '))}">✓ ${v.umb ? 'zählt nicht' : H.esc(katText(v.kat, v.ukat))}</button><small class="pc-grund">${H.esc(v.gruende[0] || '')}</small>` : ''}
       <select data-pc-kat="${r.i}" aria-label="Kategorie wählen"><option value="">${v ? 'andere Kategorie …' : 'Kategorie wählen …'}</option>${katOptionen()}</select>
-      <button class="link pc-umb" data-pc-umb="${r.i}" title="Geld zwischen deinen eigenen Konten oder durchlaufendes Geld – zählt weder als Einnahme noch als Ausgabe">zählt nicht</button>
+      <span class="pc-links">${kontr ? `<button class="link" data-pc-passt="${r.i}" title="Die Kategorie stimmt so – aus der Kontrolle nehmen">passt so</button> · ` : ''}<button class="link pc-umb" data-pc-umb="${r.i}" title="Geld zwischen deinen eigenen Konten oder durchlaufendes Geld – zählt weder als Einnahme noch als Ausgabe">zählt nicht</button></span>
       ${andere.length ? `<label class="pc-alle"><input type="checkbox" data-pc-alle="${r.i}" checked> auch die ${andere.length} ${andere.length === 1 ? 'andere' : 'anderen'} von „${H.esc((g.name || '').slice(0, 30))}“</label>` : ''}`;
   }
-  return `<div class="pc${of ? '' : ' fertig'}" data-pc="${r.i}">
+  return `<div class="pc${of ? '' : ' fertig'}" data-pc="${r.i}"${kontr ? ' data-kontr="1"' : ''}>
     <div class="pc-l"><span>${wt} ${H.dde(r.d)}</span><small>${H.esc(D.konten[r.k].name)}</small></div>
     <div class="pc-m"><b>${H.esc(r.g || '(ohne Namen)')}</b><span class="pc-z">${H.esc(r.z || '')}</span>${extra ? `<small>${extra}</small>` : ''}
       ${g && !H.S().wahl && g.rows.length > 1 ? `<button class="link klein" data-pc-wer="${H.esc(g.key)}">alle ${g.rows.length} Buchungen von „${H.esc((g.name || '').slice(0, 30))}“ ansehen</button>` : ''}</div>
@@ -380,19 +387,22 @@ export function pruefenBinden(el) {
   const row = (i) => D.rows[+i];
   const mitAnderen = (i) => {
     const r = row(i), box = el.querySelector(`[data-pc-alle="${i}"]`);
-    const g = gruppen().m.get(gKey(r));
-    return box?.checked && g ? [r, ...g.offen.filter((x) => x !== r && Math.sign(x.c) === Math.sign(r.c))] : [r];
+    const g = gruppen().m.get(gKey(r)), kontr = !!el.querySelector(`[data-pc="${i}"][data-kontr]`);
+    return box?.checked && g ? [r, ...andereVon(g, r, kontr)] : [r];
   };
   el.querySelectorAll('[data-pc-ok]').forEach((b) => b.onclick = () => {
-    const r = row(b.dataset.pcOk), v = vorschlagFuer(gruppen().m.get(gKey(r)), r).vor[0];
+    const r = row(b.dataset.pcOk), v = vorschlagFuer(gruppen().m.get(gKey(r)), r).vor.find((x) => x.umb || x.kat !== r.kat || x.ukat !== r.ukat);
     entscheiden(mitAnderen(b.dataset.pcOk), v.umb ? { kat: 'Umbuchung', ukat: '', umb: true } : { kat: v.kat, ukat: v.ukat, umb: false });
   });
   el.querySelectorAll('[data-pc-kat]').forEach((s) => s.onchange = () => {
     if (!s.value) return;
     const [kat, ukat] = s.value.split('|');
-    entscheiden(istOffen(row(s.dataset.pcKat), D) ? mitAnderen(s.dataset.pcKat) : [row(s.dataset.pcKat)], { kat, ukat, umb: false });
+    const akt = istOffen(row(s.dataset.pcKat), D) || el.querySelector(`[data-pc="${s.dataset.pcKat}"][data-kontr]`);
+    entscheiden(akt ? mitAnderen(s.dataset.pcKat) : [row(s.dataset.pcKat)], { kat, ukat, umb: false });
   });
   el.querySelectorAll('[data-pc-umb]').forEach((b) => b.onclick = () => entscheiden(mitAnderen(b.dataset.pcUmb), { kat: 'Umbuchung', ukat: '', umb: true }));
+  el.querySelectorAll('[data-pc-passt]').forEach((b) => b.onclick = () => entscheiden(mitAnderen(b.dataset.pcPasst), { ok: true }));
+  el.querySelectorAll('[data-pc-f]').forEach((b) => b.onclick = () => { filter = b.dataset.pcF; zeigAnzahl = 30; H.neuZeichnen(); });
   el.querySelectorAll('[data-pc-zurueck]').forEach((b) => b.onclick = () => {
     const r = row(b.dataset.pcZurueck), k = r.ent;
     if (!ENT[k]) { H.toast('Diese Entscheidung stammt aus der Auswertung und lässt sich hier nur ändern.'); return; }
@@ -402,7 +412,6 @@ export function pruefenBinden(el) {
   });
   el.querySelectorAll('[data-pc-wer]').forEach((b) => b.onclick = () => { zeigAnzahl = 30; H.setze({ wahl: b.dataset.pcWer }); window.scrollTo({ top: 0 }); });
   el.querySelector('#pr-alle')?.addEventListener('click', () => { zeigAnzahl = 30; H.setze({ wahl: '' }); });
-  el.querySelector('#pr-erledigt')?.addEventListener('click', () => { filter = filter === 'erledigt' ? 'offen' : 'erledigt'; zeigAnzahl = 30; H.neuZeichnen(); });
   el.querySelector('#pr-mehr')?.addEventListener('click', () => { zeigAnzahl += 30; H.neuZeichnen(); });
   el.querySelector('#pr-sort')?.addEventListener('change', (e) => { sortierung = e.target.value; H.neuZeichnen(); });
   el.querySelector('#pr-sichern')?.addEventListener('click', dateiSichern);
@@ -420,7 +429,7 @@ function entscheiden(rows, e) {
   const keys = rows.map((r) => [`b|${r.d}|${D.konten[r.k].name}|${r.c}`, { ...e, zeit: z, name: r.g || '' }]);
   const vorher = keys.map(([k]) => [k, ENT[k]]);
   for (const [k, x] of keys) { ENT[k] = x; UNSYNC.add(k); }
-  const was = e.umb ? 'zählt nicht' : katText(e.kat, e.ukat);
+  const was = e.ok ? 'passt so' : e.umb ? 'zählt nicht' : katText(e.kat, e.ukat);
   fertig(`${rows[0].g || 'Buchung'}: ${was}${rows.length > 1 ? ` (${rows.length} Buchungen)` : ''}`, vorher, H.S().wahl);
 }
 
