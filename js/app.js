@@ -2445,10 +2445,16 @@ async function einlesen() {
     }
     const start = Date.now(), seit = st.gestartet;
     txt.textContent = 'Wird eingelesen …';
-    while (st.laeuft && Date.now() - start < 20 * 60e3) {
-      await warte(2500);
-      try { st = await dienst('/status'); } catch { /* weiter warten */ }
-    }
+    // sichtbarer Fortschritt: ein Aufbau dauert etwa 4–5 Minuten (Buchungsliste, Excel-Auswertung, Nachprüfung, App-Daten)
+    const t0 = seit ? Date.parse(seit) : start;
+    const balken = einlesenBalken(st.automatisch);
+    const tick = setInterval(() => balken.zeit(Date.now() - t0), 1000);
+    try {
+      while (st.laeuft && Date.now() - start < 20 * 60e3) {
+        await warte(2500);
+        try { st = await dienst('/status'); } catch { /* weiter warten */ }
+      }
+    } finally { clearInterval(tick); balken.weg(); }
     const e = st.letztes && (!seit || st.letztes.zeit >= seit.slice(0, 19)) ? st.letztes : null;
     let neu = await datenNeuLaden(false);
     // Google Drive braucht nach dem Aufbau etwas, bis die neue Datei hochgeladen ist
@@ -2457,6 +2463,26 @@ async function einlesen() {
   } finally {
     einlesenLaeuft = false; btn.classList.remove('dreht'); btn.disabled = false; txt.textContent = 'Daten einlesen';
   }
+}
+
+// Leiste unten während des Einlesens: was passiert, wie lange es schon läuft, ungefähr wie lange noch
+function einlesenBalken(automatisch) {
+  let b = $('#einlesen-balken');
+  if (!b) { b = Object.assign(document.createElement('div'), { id: 'einlesen-balken', className: 'einlesen-balken' }); document.body.append(b); }
+  b.innerHTML = `<div><b>${automatisch ? 'Der automatische Durchgang läuft gerade' : 'Dein PC liest die neuen Daten ein'}</b>
+    <span class="klein">Buchungsliste, Excel-Auswertung, Nachprüfung und App-Daten – dauert etwa 4–5 Minuten. Du kannst die App solange weiter benutzen.</span></div>
+    <div class="eb-fort"><i></i></div><span class="eb-zeit">0:00</span>`;
+  b.hidden = true;   // erst nach 3 Sekunden zeigen – ist nichts Neues da, ist der Dienst sofort fertig
+  const fort = b.querySelector('.eb-fort i'), zeit = b.querySelector('.eb-zeit'), t1 = Date.now();
+  return {
+    zeit(ms) {
+      const s = Math.max(0, Math.round(ms / 1000));
+      if (Date.now() - t1 >= 3000) b.hidden = false;
+      zeit.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+      fort.style.width = `${Math.min(95, (s / 270) * 100)}%`;
+    },
+    weg() { b.hidden = true; },
+  };
 }
 
 function einlesenMeldung({ e, ohneDienst, automatisch, wartend }) {
