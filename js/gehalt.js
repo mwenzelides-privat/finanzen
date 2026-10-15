@@ -310,11 +310,12 @@ function autoText(W) {
 function autoKarte(G, z) {
   if (!auto(z)) return H.karte5('Dienstwagen', '', '<p class="muted">In diesem Monat kein Dienstwagen auf der Abrechnung.</p>');
   const W = autoWerte(G, z), a = W.a;
-  const best = W.dw.bestellt;
-  const schnell = `<div class="ge-schnell"><button class="chip${!auto_ ? ' an' : ''}" data-ge-auto-zurueck>Wie heute (Abrechnung)</button>${best ? `<button class="chip${auto_ && auto_.preis === Math.round(best.listenpreis) && auto_.satz === best.satz_prozent ? ' an' : ''}" data-ge-auto-best>${H.esc(best.modell)}: ${e0(best.listenpreis)}, ${String(best.satz_prozent).replace('.', ',')} %</button>` : ''}</div>`;
+  const best = W.dw.bestellt, wagen = W.dw.wagen || (best ? [best] : []);
+  const wagenAn = (w) => auto_ && auto_.preis === Math.round(w.listenpreis) && auto_.satz === w.satz_prozent;
+  const schnell = `<div class="ge-schnell"><button class="chip${!auto_ ? ' an' : ''}" data-ge-auto-zurueck>Wie heute (Abrechnung)</button>${wagen.map((w, i) => `<button class="chip${wagenAn(w) ? ' an' : ''}" data-ge-auto-wagen="${i}" title="${w.preis_angenommen ? 'Listenpreis angenommen – wird durch den Wert aus der Abrechnung ersetzt, sobald sie da ist' : 'Bruttolistenpreis laut Bestellung'}">${H.esc(w.modell)}${w.ab ? ` ab ${H.monKurz(w.ab)}` : ''}: ${w.preis_angenommen ? '≈ ' : ''}${e0(w.listenpreis)}, ${String(w.satz_prozent).replace('.', ',')} %${w.km ? `, ${w.km} km` : ''}</button>`).join('')}</div>`;
   const knopf = SAETZE.map(([w, t, u]) => `<button data-ge-satz="${w}" class="${w === a.satz ? 'an' : ''}" title="${u}">${t}</button>`).join('');
   const regler = (id, label, min, max, step, wert, txt) => `<label class="ge-regler"><span>${label}</span><input type="range" data-ge-auto="${id}" min="${min}" max="${max}" step="${step}" value="${wert}"><b>${txt}</b></label>`;
-  const herkunft = `Heute laut Abrechnung ${H.monKurz(z.m)}: Privatfahrten ${e(z.privatfahrten)}, Wohnung–Arbeit ${e(z.whg_arbeit)}.${W.dw.hinweis ? ` ${H.esc(W.dw.hinweis)}` : ''}${best ? ` Bestellt: ${H.esc(best.modell)}, Bruttolistenpreis ${e(best.listenpreis)}${best.liefertermin ? `, Liefertermin ${H.esc(best.liefertermin)}` : ''} – als E-Auto bis 100.000 € gilt 0,25 %.` : ''}`;
+  const herkunft = `Heute laut Abrechnung ${H.monKurz(z.m)}: Privatfahrten ${e(z.privatfahrten)}, Wohnung–Arbeit ${e(z.whg_arbeit)}.${W.dw.hinweis ? ` ${H.esc(W.dw.hinweis)}` : ''}${wagen.map((w) => ` ${H.esc(w.modell)}${w.ab ? ` ab ${H.monKurz(w.ab)}` : ''}: ${w.preis_angenommen ? `Listenpreis angenommen (≈ ${e0(w.listenpreis)}; Grundpreis ≈ 54.000 €), der echte Wert ergibt sich aus der ersten Abrechnung mit dem Wagen` : `Bruttolistenpreis ${e(w.listenpreis)}`}${w.km ? `, dann ${w.km} km` : ''}.`).join('')} E-Autos bis 100.000 € Listenpreis: 0,25 %.`;
   return H.karte5('Dienstwagen', 'was er dich wirklich kostet – Versteuerung, Preis und Entfernung einstellbar',
     `${schnell}<div id="ge-auto-erg">${autoText(W)}</div>
     <div class="ge-autoregler">
@@ -908,9 +909,9 @@ function binden(el, G) {
     autoNeu(); autoSpeichern();
   });
   el.querySelector('[data-ge-auto-zurueck]')?.addEventListener('click', () => { auto_ = null; try { localStorage.removeItem('fd.dienstwagen'); } catch {} neu(); });
-  el.querySelector('[data-ge-auto-best]')?.addEventListener('click', () => {
-    const b = H.D.j.gehalt.dienstwagen.bestellt;
-    auto_ = { ...autoWerte(G, zA).a, preis: Math.round(b.listenpreis), satz: b.satz_prozent };
+  el.querySelectorAll('[data-ge-auto-wagen]').forEach((b) => b.onclick = () => {
+    const dw = H.D.j.gehalt.dienstwagen, w = (dw.wagen || [dw.bestellt])[+b.dataset.geAutoWagen], a0 = autoWerte(G, zA);
+    auto_ = { ...a0.a, preis: Math.round(w.listenpreis), satz: w.satz_prozent, km: w.km ?? Math.round(a0.kmAbr || a0.a.km) };
     autoSpeichern(); const y = window.scrollY; neu(); window.scrollTo({ top: y });
   });
   el.querySelector('#ge-excel')?.addEventListener('click', () => excel(G));

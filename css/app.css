@@ -1586,6 +1586,11 @@ button.ge-hz:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
   .ge-zt .kurz { display: inline; }
   .ge-zt td:first-child { white-space: normal; }
   .ge-zt td.r small { white-space: normal; }
+  .ge-zt td:first-child { hyphens: auto; overflow-wrap: anywhere; }
+}
+@media (max-width: 420px) {
+  .ge-zt { font-size: 11px; }
+  .ge-zt td, .ge-zt th { padding: 3px 2px; }
 }
 /* Abgleich mit den Jahresbescheinigungen */
 .ge-bel td small { display: block; font-size: 11px; color: var(--muted); }
