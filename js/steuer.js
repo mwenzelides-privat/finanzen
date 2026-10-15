@@ -261,7 +261,9 @@ function offEinordnung(r, p) {
     if (ps?.s === 'nicht') return { art: 'nein', text: `laut ${offName(O)} nicht angesetzt${ps.t ? `: ${ps.t}` : ''}` };
     if (ps?.s === 'fehlt') return { art: 'fehlt', text: ps.t || `fehlt in der ${offName(O)}` };
     if (ps?.s === 'fertig') return { art: 'fertig', text: `${offName(O)}: ${ps.t}` };
-    return ps?.t ? { art: 'info', text: `${offName(O)}: ${ps.t}` } : null;
+    if (ps?.t) return { art: 'info', text: `${offName(O)}: ${ps.t}` };
+    // Bescheid ergangen: was dort nicht steht, wurde nicht angesetzt – zu entscheiden gibt es dann nichts mehr
+    return O.art === 'Bescheid' ? { art: 'nein', text: `laut ${offName(O)} nicht angesetzt` } : null;
   }
   // Jahre ohne Unterlagen: was in den Vorjahren nie bzw. immer angesetzt wurde
   const vj = offJahre().filter((y) => y < r.y);
