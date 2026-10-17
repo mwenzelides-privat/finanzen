@@ -120,6 +120,10 @@ function pruefung(r, p) {
   if (p === 'ha-nebenkosten') return { art: 'pruefen',
     text: 'Abschläge für Strom, Gas, Wasser, Heizung oder Müll sind selbst nicht absetzbar. Absetzbar sind nur Arbeitsanteile (Hausmeister, Treppenhausreinigung, Gartenpflege, Schornsteinfeger) aus der jährlichen Neben- oder Hausgeldabrechnung.',
     rat: 'Monatliche Abschläge → ausschließen. Die Jahresabrechnung (mit § 35a-Ausweis) direkt der Steuerberaterin geben.', aktionen: [AUS, { t: 'Ist eine Jahresabrechnung – behalten', p: 'ha-nebenkosten' }] };
+  // Reiner Kindesunterhalt (ohne Hinweis auf Ehegatten-/Trennungsunterhalt) ist nie absetzbar
+  if (p === 'sa-unterhalt' && r.ukat === 'Kindesunterhalt' && !/gesamt|ehegatt|trennung|ehefrau/.test(norm(r.z))) return { art: 'pruefen',
+    text: 'Das ist Kindesunterhalt. Er ist steuerlich nicht absetzbar – Realsplitting (Anlage U) gilt nur für Unterhalt an den Ehegatten. Für die Kinder gibt es stattdessen Kindergeld bzw. Kinderfreibeträge.',
+    rat: 'Ausschließen.', klar: 'Kindesunterhalt', aktionen: [AUS, { t: 'Enthält auch Ehegattenunterhalt – behalten und Anteil notieren', p: 'sa-unterhalt', notiz: true }] };
   if (p === 'sa-unterhalt' && (/kind|gesamt/.test(norm(r.z)) || r.ukat === 'Kindesunterhalt')) return { art: 'pruefen',
     text: 'Die Zahlung enthält Kindes- und Ehegattenunterhalt. Absetzbar (Realsplitting, Anlage U) ist nur der Unterhalt für den Ehegatten, Kindesunterhalt nicht.',
     rat: 'Behalten und in der Notiz den Ehegattenanteil angeben, z. B. „davon 1.360 € Ehegattenunterhalt“.', aktionen: [{ t: 'Behalten und Ehegattenanteil notieren', p: 'sa-unterhalt', notiz: true }, AUS] };
@@ -462,7 +466,7 @@ export function steuerZeigen(el, c) {
   const aName = abschnittF && ABSCHNITTE.find((x) => x.id === abschnittF)?.name;
   const leiste = `<div class="st-leiste"><div class="seg st-filter">${knopf('zu', `Offen (${zuGruppen})`)}${knopf('erledigt', `Erledigt (${fertigG})`)}${knopf('alle', 'Alle')}</div>
     ${aName ? `<button class="chip" data-sabf="">nur ${esc(aName)}<span class="x">×</span></button>` : ''}
-    ${klar.length ? `<button class="btn sm" id="st-klar" title="Schließt aus, was eindeutig nicht absetzbar ist: Restaurants und Imbisse unter „Übernachtungen“, Einkäufe im Bau- oder Gartenmarkt unter „Handwerker“, Urlaub unter „Kinderbetreuung“. Mit Rückgängig.">${klar.length} eindeutige Fälle ausschließen</button>` : ''}</div>`;
+    ${klar.length ? `<button class="btn sm" id="st-klar" title="Schließt aus, was eindeutig nicht absetzbar ist: Restaurants und Imbisse unter „Übernachtungen“, Einkäufe im Bau- oder Gartenmarkt unter „Handwerker“, Urlaub unter „Kinderbetreuung“, reiner Kindesunterhalt unter „Unterhalt“. Mit Rückgängig.">${klar.length} eindeutige Fälle ausschließen</button>` : ''}</div>`;
 
   let h = `<div class="s5 st5">
     <div class="s5-kopf"><div class="s5-kopf-t"><h1>Steuer</h1><p class="s5-satz">${satz}</p></div>
