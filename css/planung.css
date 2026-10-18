@@ -1,0 +1,45 @@
+/* ============ Planung: Ausgabenrahmen (js/planung.js) ============ */
+.pl-liste { display: grid; }
+.pl-z { display: grid; grid-template-columns: minmax(0, 1.5fr) 96px minmax(60px, 1fr) 84px 84px; gap: 4px 12px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--border); min-width: 0; }
+.pl-z:last-child { border-bottom: 0; }
+.pl-kopf { font-size: 12px; color: var(--muted); padding-top: 0; }
+.pl-kopf span:nth-child(n+4) { text-align: right; }
+.pl-summe { border-bottom: 1px solid var(--border-strong); background: var(--surface-2); border-radius: 8px; padding: 7px 8px; margin: 0 -8px; }
+.pl-n { display: grid; gap: 1px; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+.pl-n small { font-size: 11.5px; color: var(--muted); }
+.pl-hinweis { color: var(--aus-text) !important; }
+.pl-alt .pl-n > .zl { color: var(--text-2); }
+.pl-e { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.pl-e input { width: 100%; min-width: 0; height: 32px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); font: inherit; font-size: 14px; text-align: right; }
+.pl-e input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.pl-e span { color: var(--muted); font-size: 13px; }
+b.pl-e { justify-content: flex-end; padding-right: 17px; font-size: 14px; }
+.pl-b { position: relative; display: block; height: 10px; border-radius: 5px; background: var(--surface-2); min-width: 0; }
+.pl-summe .pl-b { background: var(--surface); }
+.pl-b i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px; background: var(--variabel); }
+.pl-b.ueber i { background: var(--aus); }
+.pl-b b { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--text); }
+.pl-b.pl-ohne { height: auto; background: none; font-size: 12px; }
+.pl-w, .pl-r { text-align: right; font-size: 14px; white-space: nowrap; }
+.pl-r { font-weight: 650; }
+.pl-w { font-weight: 500; }
+.pl-knopf { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; }
+.pl-knopf:hover { text-decoration: underline; }
+.pl-leer { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.pl-link { color: var(--accent); font-weight: 600; }
+
+/* Handy: Name über der ganzen Breite, darunter Eingabe | ausgegeben | noch frei, darunter der Balken */
+@media (max-width: 640px) {
+  .pl-kopf { display: none; }
+  .pl-z { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "n n n" "e w r" "b b b"; gap: 6px 10px; }
+  .pl-n { grid-area: n; }
+  .pl-e { grid-area: e; }
+  .pl-w { grid-area: w; }
+  .pl-r { grid-area: r; }
+  .pl-b { grid-area: b; }
+  .pl-w::before, .pl-r::before { display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
+  .pl-w::before { content: "ausgegeben"; }
+  .pl-r::before { content: "noch frei"; }
+  b.pl-e { justify-content: flex-start; padding-right: 0; }
+  .pl-b.pl-ohne { display: none; }
+}

@@ -454,6 +454,15 @@ function einordnen(j) {
   return out;
 }
 
+// Summe eines Abschnitts (z. B. 'wk') in Cent, positiv – nur bestätigte/veranlagte Posten (offen = true: nur die noch offenen,
+// also Vorschlag, prüfen, aus WISO/Buhl); Posten in ohne bleiben weg (Steuer-Prognose)
+export function abschnittSumme(j, abschnitt, ohne = [], offen = false) {
+  if (!D || !geladen) return 0;
+  const fertig = (x) => x.status === 'bestaetigt' || x.status === 'veranlagt';
+  const s = einordnen(j).filter((x) => x.status !== 'ausgeschlossen' && fertig(x) !== offen && POSTEN_ID.get(x.p)?.abschnitt === abschnitt && !ohne.includes(x.p)).reduce((t, x) => t + x.r.c, 0);
+  return Math.max(0, abschnitt === 'einnahmen' ? s : -s);
+}
+
 // Für den Chat und zur Kontrolle: die Einordnung eines Jahres als einfache Liste – genau wie im Reiter Steuer (mit deinen
 // Entscheidungen, Regeln und den offiziellen Unterlagen), nach Posten und Datum. null, solange die Entscheidungen noch laden.
 export function steuerListe(j) {
@@ -676,6 +685,9 @@ function offKarte(j) {
   if (!O) {
     const vj = offJahre().filter((y) => y < j);
     const L = D?.j?.steuer_offiziell?.kuenftig || [];
+    // Steuer-Prognose (steuerprognose.js) statt der Liste – sie bringt „Was die Vorjahre bedeuten“ selbst mit
+    const p = ctx?.prognose?.(j);
+    if (p) return p;
     if (!vj.length || !L.length) return `<section class="card s5-karte"><div class="s5-kt"><div class="s5-kt-t"><h2>Unterlagen</h2><p class="s5-erkl">Für ${j} liegen noch keine Bescheide oder Erklärungen vor.</p></div></div></section>`;
     return `<section class="card s5-karte"><div class="s5-kt"><div class="s5-kt-t"><h2>Was die Vorjahre für ${j} bedeuten</h2><p class="s5-erkl">nach ${offJahreText(vj).replace(/^im /, 'dem ').replace(/^in /, '')}</p></div></div>
       <ul class="st-off-l">${L.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></section>`;

@@ -5,9 +5,15 @@ import * as Q from './quelle.js';
 import { alsExcel, alsCsv, herunterladen } from './export.js';
 import { chatStart, chatDaten, chatVergessen } from './chat.js';
 import { kontostaende, summeKonten, STATUS_TEXT } from './salden.js';
-import { steuerDaten, steuerZeigen, postenOptionen, steuerPosten, steuerZuordnen, steuerStand } from './steuer.js';
+import { steuerDaten, steuerZeigen, postenOptionen, steuerPosten, steuerZuordnen, steuerStand, abschnittSumme } from './steuer.js';
 import { gehaltZeigen } from './gehalt.js';
 import { entscheidungenAnwenden, entscheidungenLaden, pruefenSeite, pruefenBinden, pruefenGeoeffnet, det, gruppenSchluessel, offenZahl, ibanText } from './pruefen.js';
+import { prognoseLaden, prognoseKarte, prognoseBinden, prognoseFristen } from './steuerprognose.js';
+import { unterhaltLaden, unterhaltSeite, unterhaltBinden, unterhaltFristen, kinder, ausgleichTags } from './unterhalt.js';
+import { fristenLaden, fristenKarte, fristenListe, fristenBinden } from './fristen.js';
+import { waechterLaden, istNeu, waechterKarte, neuLeiste, chip, waechterBinden } from './waechter.js';
+import { planGehalt, saison, prognoseText, rahmenKarte, freiZeile, rahmenBinden } from './planung.js';
+import { vermoegenLaden, depotKarte, vermoegenKarte, vermoegenBinden, reisenSeite, reisenBinden } from './vermoegen.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -29,8 +35,11 @@ const FREMD_ART = new Set(['Kinderkonto', 'Gemeinschaftskonto']);
 const heuteLokal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
 let D = null;          // aufbereitete Daten
+let H = null;          // Helfer für die Zusatzmodule (modulHelfer), gebaut beim ersten Anzeigen
+// Zusatzmodule: ein Fehler darin soll die Seite nicht leeren – dann fehlt nur dieser Teil ('' = nichts anzeigen)
+const sicher = (f) => { try { return f() ?? ''; } catch (e) { console.error(e); return ''; } };
 let quelle = null;     // gespeicherte Fassung (Text + Herkunft)
-const S0 = { q: '', jahr: '', monat: '', konto: '', kat: '', ukat: '', art: 'alle', umb: false, tab: 'start', sort: 'datum', dir: -1, stichtag: '', wahl: '', kart: 'aus', fixtab: 'vertraege', zr: '', nf: '',
+const S0 = { q: '', jahr: '', monat: '', konto: '', kat: '', ukat: '', art: 'alle', umb: false, tab: 'start', sort: 'datum', dir: -1, stichtag: '', wahl: '', kart: 'aus', fixtab: 'vertraege', zr: '', nf: '', neu: '',
   // Auswahl in Steuer (Jahr, Filter, Abschnitt) und Gehalt (Monat, Vergleich, Tabellenjahr); leer = Grundeinstellung des Reiters
   sjahr: '', sfilter: '', sabf: '', gmonat: '', gbasis: '', gtjahr: '' };
 let S = { ...S0 };
@@ -126,6 +135,7 @@ const zrText = () => { const [a, b] = S.zr.split('_'); return `${MON[+a.slice(5)
 function filtern() {
   const conds = parse(S.q);
   F = D.rows.filter(pruefer(conds));
+  if (S.neu) F = F.filter((r) => sicher(() => istNeu(r)) === true);   // „nur neue“ seit dem letzten Besuch (waechter.js)
   return conds;
 }
 
@@ -199,6 +209,7 @@ function filterZeigen(conds) {
   $('#f-mehr-knopf').classList.toggle('aktiv', mehrAktiv.length > 0);
   $('#f-mehr-n').hidden = !mehrAktiv.length; $('#f-mehr-n').textContent = mehrAktiv.length;
   if (!filterMehr) for (const [k, t] of mehrAktiv) chips.push(`<button class="chip" data-mehr="${k}" title="Filter entfernen">${t}<span class="x">×</span></button>`);
+  if (S.neu) chips.push('<button class="chip" data-neu="1" title="Wieder alle Buchungen zeigen">nur neue<span class="x">×</span></button>');
   if (S.nf) chips.push(`<button class="chip" data-nf="1" title="Auch feste Verträge zeigen">ohne feste Verträge<span class="x">×</span></button>`);
   if (S.zr) chips.push(`<button class="chip" data-zr="1" title="Zeitraum entfernen">Zeitraum <b>${esc(zrText())}</b><span class="x">×</span></button>`);
   if (S.ukat) chips.push(`<button class="chip" data-ukat="1" title="Unterkategorie-Filter entfernen">Unterkategorie <b>${esc(S.ukat)}</b><span class="x">×</span></button>`);
@@ -210,8 +221,9 @@ function filterZeigen(conds) {
   $('#chips').querySelector('[data-ukat]')?.addEventListener('click', () => setze({ ukat: '' }));
   $('#chips').querySelector('[data-zr]')?.addEventListener('click', () => setze({ zr: '' }));
   $('#chips').querySelector('[data-nf]')?.addEventListener('click', () => setze({ nf: '' }));
+  $('#chips').querySelector('[data-neu]')?.addEventListener('click', () => setze({ neu: '' }));
   $('#chips').querySelectorAll('[data-mehr]').forEach((b) => b.onclick = () => setze(({ konto: { konto: '' }, kat: { kat: '', ukat: '' }, art: { art: 'alle' }, umb: { umb: false } })[b.dataset.mehr]));
-  const aktiv = S.q || S.jahr || S.monat || S.zr || S.nf || S.konto || S.kat || S.ukat || S.art !== 'alle' || S.umb;
+  const aktiv = S.q || S.jahr || S.monat || S.zr || S.nf || S.neu || S.konto || S.kat || S.ukat || S.art !== 'alle' || S.umb;
   $('#btn-reset').hidden = !abweichend();
   $('#btn-zurueck').hidden = stufe <= 0;
 }
@@ -514,7 +526,7 @@ function springe(sel, sanft = true) {
   z.classList.remove('blink'); void z.offsetWidth; z.classList.add('blink');
 }
 // Ziele für Klicks: Buchungen mit genau dem passenden Zeitraum (die gewählten Konten bleiben), das Gehalt, einzelne Monate
-const zuBuchungen = (x = {}) => ({ tab: 'buchungen', q: '', jahr: '', monat: '', zr: '', nf: '', kat: '', ukat: '', art: 'alle', ...x });
+const zuBuchungen = (x = {}) => ({ tab: 'buchungen', q: '', jahr: '', monat: '', zr: '', nf: '', neu: '', kat: '', ukat: '', art: 'alle', ...x });
 function zeitZiel(ms) {
   if (!ms.length) return {};
   const jahre = [...new Set(ms.map((k) => k.slice(0, 4)))];
@@ -553,6 +565,7 @@ const linieMit = (id, wert, text, farbe, oben = true) => ({
   },
 });
 // Prognosebereich ab Index: grau hinterlegt, oben beschriftet
+const PROGNOSE = 'Prognose (berechnet: Plan-Gehalt + Saisonprofil)';
 const prognoseMit = (ab, text = 'Prognose') => ({
   id: 'prognose',
   beforeDatasetsDraw(ch) {
@@ -561,7 +574,9 @@ const prognoseMit = (ab, text = 'Prognose') => ({
     const links = x.getPixelForValue(ab) - b / 2;
     c.save(); c.fillStyle = 'rgba(128, 128, 128, 0.08)'; c.fillRect(links, a.top, a.right - links, a.bottom - a.top);
     c.fillStyle = css('--muted'); c.font = `700 10px ${css('--font')}`; c.textAlign = 'left'; c.textBaseline = 'top';
-    c.fillText(text.toUpperCase(), links + 5, a.top + 3);
+    let t = text.toUpperCase();
+    if (c.measureText(t).width > a.right - links - 8) t = text.split(' (')[0].toUpperCase();   // schmal (Handy): nur „Prognose“
+    c.fillText(t, links + 5, a.top + 3);
     c.restore();
   },
 });
@@ -607,6 +622,10 @@ function monatsRechnung() {
 }
 const lebenName = () => (lebenWahl === 'eigen' && lebenEigen ? 'dein eigener Wert' : lebenWahl === 'typisch' ? 'typischer Monat' : 'Ø 12 Monate');
 
+// Prognose ehrlicher (planung.js): Plan-Gehalt eines Monats aus den Abrechnungen (null = aktuelles Gehalt) und
+// Saisonfaktor der Lebenshaltung je Kalendermonat (Σ = 12; ohne Profil überall 1)
+const planG = (k) => { try { return planGehalt(H, k); } catch (e) { console.error(e); return null; } };
+const saisonF = (k) => { try { return saison(H).f[+k.slice(5) - 1] ?? 1; } catch (e) { console.error(e); return 1; } };
 // Die letzten 12 abgeschlossenen Monate, der laufende Monat (bisher + erwartet) und 3 Monate Prognose,
 // je mit Ergebnis und Kontostand am Monatsende. Prognose: normaler Monat, feste Abbuchungen im jeweiligen Monat.
 function verlauf5() {
@@ -633,7 +652,7 @@ function verlauf5() {
   if (laeuft) {
     const x = w(jetzt), ende = monatsletzter(`${jetzt}-01`);
     const offenFest = R.vertraege.reduce((t, f) => t + faellig(f, plusTage(heute, 1), ende), 0);
-    const gehaltKommt = x.lohn > 0 ? 0 : R.gehalt, sonstKommt = Math.max(0, R.sonst - (x.ein - x.lohn)), varKommt = Math.max(0, R.leben - x.var);
+    const gehaltKommt = x.lohn > 0 ? 0 : (planG(jetzt) ?? R.gehalt), sonstKommt = Math.max(0, R.sonst - (x.ein - x.lohn)), varKommt = Math.max(0, Math.round(R.leben * saisonF(jetzt)) - x.var);
     const ein = x.ein + gehaltKommt + sonstKommt, aus = x.aus + offenFest + varKommt;
     weiter(gehaltKommt + sonstKommt - offenFest - varKommt + Math.min(0, spar - x.spar));
     lauf = { k: jetzt, art: 'laeuft', ein, aus, erg: ein - aus, x, offenFest, gehaltKommt, varKommt, tag: +heute.slice(8), tage: +ende.slice(8), stand };
@@ -642,9 +661,10 @@ function verlauf5() {
   for (let i = 1; i <= 3; i++) {
     const k = mVor(jetzt, i), ende = monatsletzter(`${k}-01`);
     const fest = R.vertraege.reduce((t, f) => t + faellig(f, `${k}-01`, ende), 0);
-    const ein = R.gehalt + R.sonst, aus = R.leben + fest;
+    const pg = planG(k), sf = saisonF(k);
+    const ein = (pg ?? R.gehalt) + R.sonst, aus = Math.round(R.leben * sf) + fest;
     weiter(ein - aus + spar);
-    monate.push({ k, art: 'prognose', ein, aus, erg: ein - aus, fest, stand });
+    monate.push({ k, art: 'prognose', ein, aus, erg: ein - aus, fest, stand, plan: pg != null, sf });
   }
   const n = R.ref.length || 1, summe = (f) => monate.filter((m) => m.art === 'ist').reduce((t, m) => t + f(m), 0);
   const schnitt = { ein: summe((m) => m.ein) / n, aus: summe((m) => m.aus) / n, erg: summe((m) => m.erg) / n, lohn: summe((m) => m.lohn) / n };
@@ -687,7 +707,7 @@ function naechstesGehalt() {
   let k = D.bis.slice(0, 7);
   if (!(V.lauf && V.lauf.gehaltKommt)) k = mVor(k, 1);
   const am = `${k}-${String(Math.min(R.gt, tageImMonat(k))).padStart(2, '0')}`;
-  return am > D.bis && am <= plusTage(D.bis, 30) ? { am, c: R.gehalt } : null;
+  return am > D.bis && am <= plusTage(D.bis, 30) ? { am, c: planG(k) ?? R.gehalt } : null;
 }
 // Abbuchungen je Tag: Tag mit Summe als Kopf, die Verträge eingerückt darunter; n = höchstens so viele Verträge
 function termineHtml(l, n = 99) {
@@ -767,6 +787,7 @@ function startSeite() {
         ${zeile('Noch fällig (feste Abbuchungen)', eur0(lauf.offenFest), '', { tab: 'fix', fixtab: 'kalender', konto: '' })}
         ${zeile(lauf.gehaltKommt ? `Gehalt erwartet${R.gt ? ` um den ${R.gt}.` : ''}` : 'Gehalt ist da', `+${eur0(lauf.gehaltKommt || lauf.x.lohn)}`, 'pos', zuGehalt())}
         ${zeile('Erwartet zum Monatsende', `≈ ${plusMinus(lauf.erg)}`, lauf.erg >= 0 ? 'pos' : 'neg', zuB(monatZiel(lauf.k)))}
+        ${sicher(() => freiZeile(H))}
       </dl>`;
   }
   const st = steuerStand();
@@ -777,13 +798,16 @@ function startSeite() {
   box.innerHTML = kopf5(`Übersicht <span class="s5-stand">Daten bis ${dde(D.bis)}</span>`, satz)
     + `<div class="s5-zahlen">${zahlen}</div>
     <div class="s5-raster s5-start">
-      ${karte5('Was am Monatsende übrig blieb', `Einnahmen minus Ausgaben je Monat. Grün = Plus, rot = Minus, schraffiert = erwartet. Gestrichelt: Durchschnitt der letzten 12 Monate. Säule anklicken: Buchungen des Monats.`, '<div class="s5-chart fuell"><canvas id="c-s5-erg"></canvas></div>', 's5-b2', zl('alle 12 Monate →', zuB(zeitZiel(ref))))}
+      ${karte5('Was am Monatsende übrig blieb', `Einnahmen minus Ausgaben je Monat. Grün = Plus, rot = Minus, schraffiert = erwartet (${esc(sicher(() => prognoseText(H)) || 'berechnet')}). Gestrichelt: Durchschnitt der letzten 12 Monate. Säule anklicken: Buchungen des Monats.`, '<div class="s5-chart fuell"><canvas id="c-s5-erg"></canvas></div>', 's5-b2', zl('alle 12 Monate →', zuB(zeitZiel(ref))))}
       ${karte5('Ein normaler Monat ab jetzt', 'Mit deinem aktuellen Gehalt, den laufenden Verträgen und deiner üblichen Lebenshaltung · Zeile anklicken: Einzelheiten', rechnung + tipp, 's5-mr')}
       ${karte5('Kontostand', `Summe deiner Konten am Monatsende (ohne Depot, gemeinsame und Kinderkonten). Gestrichelt: Prognose. Punkt anklicken: Kontostände an diesem Tag.${lueckenText(ms.map((m) => m.summe))}`, '<div class="s5-chart klein fuell"><canvas id="c-s5-stand"></canvas></div>')}
       ${karte5(lauf ? `${monatJ} bisher` : 'Dieser Monat', lauf ? 'Was schon gebucht ist und was bis Monatsende noch kommt' : '', monat || '<div class="leer klein">Der Monat ist abgeschlossen.</div>')}
       ${karte5('Nächste 30 Tage', 'Feste Abbuchungen aus deinen Verträgen · anklicken: alle Zahlungen des Vertrags', termineHtml(termine, 6), '', zl(`<span class="s5-wert">${eur0(tSumme)}</span>`, { tab: 'fix', fixtab: 'kalender', konto: '' }))}
+      ${sicher(() => waechterKarte(H))}${sicher(() => fristenKarte(H))}
     </div>`;
   gehBinden(box);
+  sicher(() => waechterBinden(box, H)); sicher(() => fristenBinden(box, H)); sicher(() => rahmenBinden(box, H));
+  freiFuellen(box);
   s5ErgebnisZeichnen(V);
   s5StandZeichnen(V);
 }
@@ -800,7 +824,7 @@ function s5ErgebnisZeichnen(V) {
     y: { ...achsenStil(), ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 5 } },
   };
   o.plugins.tooltip.callbacks = {
-    title: (it) => { const m = ms[it[0].dataIndex]; return `${monLang(m.k)}${m.art === 'prognose' ? ' – Prognose' : m.art === 'laeuft' ? ' – erwartet bis Monatsende' : ''}`; },
+    title: (it) => { const m = ms[it[0].dataIndex]; return `${monLang(m.k)}${m.art === 'prognose' ? ` – Prognose (berechnet: ${m.plan ? 'Plan-Gehalt' : 'aktuelles Gehalt'} + Saisonprofil)` : m.art === 'laeuft' ? ' – erwartet bis Monatsende' : ''}`; },
     label: (it) => { const m = ms[it.dataIndex]; return ` ${m.erg >= 0 ? 'Überschuss' : 'Fehlbetrag'}: ${EUR0.format(m.erg / 100)}`; },
     afterBody: (it) => { const m = ms[it[0].dataIndex]; return [`Einnahmen ${eur0(m.ein)}`, `Ausgaben ${eur0(m.aus)}`, m.art === 'ist' ? 'Klick: Buchungen des Monats' : '']; },
   };
@@ -810,7 +834,7 @@ function s5ErgebnisZeichnen(V) {
     type: 'bar',
     data: { labels: ms.map((m) => monKurz(m.k)), datasets: [{ data: ms.map((m) => m.erg / 100), backgroundColor: ms.map((m) => (m.art === 'ist' ? alpha(m.erg >= 0 ? cP : cN, 0.85) : m.erg >= 0 ? pP : pN)), hoverBackgroundColor: ms.map((m) => (m.erg >= 0 ? cP : cN)), borderRadius: 4, maxBarThickness: 34 }] },
     options: o,
-    plugins: [prognoseMit(ab), linieMit('schnitt', V.schnitt.erg / 100, `Ø ${plusMinus(V.schnitt.erg)}`, css('--text-2'), V.schnitt.erg >= 0), saeulenWerteMit({ groesse: 10.5, fmt: vorzeichenKurz })],
+    plugins: [prognoseMit(ab, PROGNOSE), linieMit('schnitt', V.schnitt.erg / 100, `Ø ${plusMinus(V.schnitt.erg)}`, css('--text-2'), V.schnitt.erg >= 0), saeulenWerteMit({ groesse: 10.5, fmt: vorzeichenKurz })],
   });
 }
 
@@ -837,7 +861,7 @@ function s5StandZeichnen(V) {
       pointRadius: ms.map((m, i) => (i === letzteIst || i === ms.length - 1 ? 4 : 2)), pointBackgroundColor: ms.map((m) => (m.art === 'ist' ? c : css('--surface'))), pointBorderColor: c, pointBorderWidth: 2,
       segment: { borderDash: (sg) => (ab >= 0 && sg.p1DataIndex >= ab ? [6, 4] : undefined) } }] },
     options: o,
-    plugins: [prognoseMit(ab), punktWerteMit([0, letzteIst, ms.length - 1].filter((i, j, a) => i >= 0 && a.indexOf(i) === j), (v, i) => `${i > letzteIst ? '≈ ' : ''}${kurzWert(v)}`)],
+    plugins: [prognoseMit(ab, PROGNOSE), punktWerteMit([0, letzteIst, ms.length - 1].filter((i, j, a) => i >= 0 && a.indexOf(i) === j), (v, i) => `${i > letzteIst ? '≈ ' : ''}${kurzWert(v)}`)],
   });
 }
 
@@ -1001,10 +1025,18 @@ function k5MonateZeichnen(P, a, R) {
 // Ausgaben in zwei Blöcken: überwiegend feste Kosten (mindestens die Hälfte sind Verträge) und frei gestaltbare – dort
 // lässt sich am ehesten sparen. Einnahmen: Gehalt und sonstige. Rechts die Einzelheiten der gewählten Kategorie.
 let kat2Grafik = null;
+// Kopf rechts im Reiter Kategorien: Ausgaben / Einnahmen / Reisen / Prüfen, dazu Konten und Zeitraum (ohne P nur die Auswahl –
+// Reisen gelten für alle Jahre und alle eigenen Konten)
+function katRechts(P = null) {
+  const nP = offenZahl(D), an = (k) => (k === (['ein', 'tags', 'pruefen'].includes(S.kart) ? S.kart : 'aus') ? 'an' : '');
+  return `<div class="seg" role="group" aria-label="Ausgaben, Einnahmen, Reisen oder Prüfen"><button data-k2art="aus" class="${an('aus')}">Ausgaben</button><button data-k2art="ein" class="${an('ein')}">Einnahmen</button><button data-k2art="tags" class="${an('tags')}" title="Reisen und Projekte aus deinen Finanzguru-Tags">Reisen</button><button data-k2art="pruefen" title="Buchungen ohne passende Kategorie ansehen und selbst einordnen">Prüfen${nP ? ` <small class="pr-zahl">${NUM.format(nP)}</small>` : ''}</button></div>${P ? `${kontoWahlHtml()}${zeitSeg(P)}` : ''}`;
+}
 function tabKategorien() {
-  if (S.kart === 'pruefen') return pruefenSeite(pruefHelfer());
-  const P = periode(), aus = S.kart !== 'ein', nP = offenZahl(D);
-  const rechts = `<div class="seg" role="group" aria-label="Ausgaben, Einnahmen oder Prüfen"><button data-k2art="aus" class="${aus ? 'an' : ''}">Ausgaben</button><button data-k2art="ein" class="${aus ? '' : 'an'}">Einnahmen</button><button data-k2art="pruefen" title="Buchungen ohne passende Kategorie ansehen und selbst einordnen">Prüfen${nP ? ` <small class="pr-zahl">${NUM.format(nP)}</small>` : ''}</button></div>${kontoWahlHtml()}${zeitSeg(P)}`;
+  // Prüfen bringt die Auswahl selbst mit (pruefen.js) – dort fehlt nur der Knopf „Reisen“
+  if (S.kart === 'pruefen') return pruefenSeite(pruefHelfer()).replace('<button data-k2art="pruefen" class="an">', '<button data-k2art="tags" title="Reisen und Projekte aus deinen Finanzguru-Tags">Reisen</button><button data-k2art="pruefen" class="an">');
+  if (S.kart === 'tags') { kat2Grafik = null; return sicher(() => reisenSeite(H, katRechts())) || kopf5('Reisen und Projekte', 'Die Reisen konnten nicht berechnet werden.', katRechts()); }
+  const P = periode(), aus = S.kart !== 'ein';
+  const rechts = katRechts(P);
   if (!P.monate.length) { kat2Grafik = null; return kopf5('Kategorien', 'In diesem Jahr ist noch kein Monat abgeschlossen.', rechts); }
   const a = sammle(P.monate, aus ? 'aus' : 'ein'), v = P.vor.length ? sammle(P.vor, aus ? 'aus' : 'ein') : null;
   const liste = [...a.g.values()].filter((x) => x.c > 0).sort((x, y) => y.c - x.c);
@@ -1113,12 +1145,24 @@ function tabKategorien() {
   return kopf5('Kategorien', satz, rechts) + `<div class="s5-zahlen">${zahlen}</div><div class="kl${aus ? '' : ' ein'}">
     ${karte5(`${aus ? 'Ausgaben' : 'Einnahmen'} nach ${aus ? 'Kategorie' : 'Herkunft'}`, `Ø je Monat ${esc(monatsText(P.monate))} · Zeile anklicken: Einzelheiten rechts`, listeHtml, 'kl-liste')}
     ${detail}</div>
+    ${aus ? sicher(() => rahmenKarte(H)) : ''}
     <details class="card s5-details"><summary>Monat für Monat je ${aus ? 'Kategorie' : 'Einnahme'} <span class="muted">· in Euro · rot: deutlich über dem eigenen Ø · Zahl anklicken: Buchungen</span></summary>${tabelle}</details>`;
 }
 
 // Helfer für js/pruefen.js
 const pruefHelfer = () => ({ D: () => D, S: () => S, setze: (p) => setze(p), neuZeichnen: () => tabelle(parse(S.q)), neuAufbauen, toast, esc, eur, eur0, dde, NUM,
   kopf5, zahl5, geh, zuBuchungen, schoen, norm, herunterladen, alsExcel, DIENST, einlesen });
+
+// Helfer für die Zusatzmodule (steuerprognose, unterhalt, fristen, waechter, planung, vermoegen) – D und S über Funktionen,
+// damit H nach neuAufbauen() gültig bleibt
+function modulHelfer() {
+  return { D: () => D, S: () => S, setze, neuZeichnen: () => aktualisieren(), toast, esc, eur, eur0, dde, NUM, MON, MONAT, kopf5, karte5, zahl5, zl, zs, geh, gehBinden,
+    balkenListe, freiFuellen, zuBuchungen, monatZiel, zeitZiel, mVor, mkey, monKurz, monLang, plusTage, monatsletzter, tageImMonat, heuteLokal, tagKurz, plusMinus, norm,
+    fremd: (x) => fremd(typeof x === 'number' ? D.konten[x] : x), istGemeinsam, median, fixIds, fixkostenErkennen, faellig, ausstehend, naechsteRegulaer, zahltag,
+    gehaltstag, vertragName, vertragsKey, monatsRechnung, verlauf5, lebenshaltung, sammle, periode, abgeschlosseneMonate, einkommen, kontenSumme, vollSumme, summeText,
+    schoen, det: (r) => det(r, D.j), gruppenSchluessel, kvLesen: Q.kvLesen, kvSchreiben: Q.kvSchreiben, alsExcel, alsCsv, herunterladen, zeichne, basis, achsenStil,
+    css, alpha, achse, kurzWert, schraffur, steuerSumme: abschnittSumme, kinder, ausgleichTags, fristQuellen: [prognoseFristen, unterhaltFristen] };
+}
 
 // Monatsbalken der gewählten Kategorie mit dem Durchschnitt als beschriftete Linie
 function kat2Zeichnen() {
@@ -1260,6 +1304,7 @@ function tabKonten() {
         ${karte5('Verlauf', `Summe ${ks ? 'der gewählten Konten' : 'deiner Konten'} am Monatsende${V ? ' · gestrichelt: Prognose' : ''} · Punkt anklicken: Stand an diesem Tag.${lueckenText(kontenGrafik.summen)}`, '<div class="s5-chart klein"><canvas id="c-konten-verlauf"></canvas></div>')}
         ${karte5('Monatsenden', `Summe am Monatsende und Veränderung zum Vormonat · anklicken: Stand an diesem Tag${reihe.some((x) => !x.s.voll) ? ' · „+ ?“: für ein Konto fehlt an dem Tag der Stand' : ''}`, monatsenden + verteilung + bewegungen + ecken, '', zs('je Konto ↓', '#kon-tab'))}
       </div>
+      ${sicher(() => vermoegenKarte(H))}${sicher(() => depotKarte(H))}
     </div>
     <details class="card s5-details" id="kon-tab"><summary>Kontostände je Konto an den Monatsenden <span class="muted">· in Euro</span></summary>${tabelle}</details>` + eingangHtml();
 }
@@ -1291,7 +1336,7 @@ function kontenGrafikZeichnen() {
   zeichne('c-konten-verlauf', { type: 'line', data: { labels, datasets: [{ data: werte, borderColor: c, backgroundColor: alpha(c, 0.1), fill: 'origin', cubicInterpolationMode: 'monotone', borderWidth: 2.5,
     pointRadius: tage.map((d, i) => (i === iTag || i === letzteIst || i === tage.length - 1 ? 4 : 0)), pointBackgroundColor: tage.map((_, i) => (ab >= 0 && i >= ab ? css('--surface') : c)), pointBorderColor: c, pointBorderWidth: 2, pointHoverRadius: 5,
     segment: { borderDash: (sg) => (ab >= 0 && sg.p1DataIndex >= ab ? [6, 4] : undefined) } }] },
-    options: o, plugins: [prognoseMit(ab), punktWerteMit([0, letzteIst, tage.length - 1].filter((i, j, a) => i >= 0 && a.indexOf(i) === j), (v, i) => `${ab >= 0 && i >= ab ? '≈ ' : ''}${kurzWert(v)}`)] });
+    options: o, plugins: [prognoseMit(ab, PROGNOSE), punktWerteMit([0, letzteIst, tage.length - 1].filter((i, j, a) => i >= 0 && a.indexOf(i) === j), (v, i) => `${ab >= 0 && i >= ab ? '≈ ' : ''}${kurzWert(v)}`)] });
 }
 
 // ======================================================================= Tabellen
@@ -1338,7 +1383,8 @@ let buchGrafik = null;
 function tabBuchungen(conds) {
   const rows = sortiert();
   buchGrafik = null;
-  if (!rows.length) return keineTreffer(conds);
+  // bei „nur neue“ sagt die Leiste schon, dass nichts Neues da ist – die Suche in anderen Jahren passt dann nicht
+  if (!rows.length) return sicher(() => neuLeiste(H)) + (S.neu ? '' : keineTreffer(conds));
   const w = highlightWords(conds);
   const re = w.length ? new RegExp('(' + w.map(escRe).join('|') + ')', 'gi') : null;
   const mk = (s) => (re ? esc(s).replace(re, '<mark>$1</mark>') : esc(s));
@@ -1384,7 +1430,7 @@ function tabBuchungen(conds) {
     const auf = offen.has(r.i);
     h += `<div class="bz mit-datum${auf ? ' offen' : ''}${gruppiert && erster ? ' tag-anfang' : ''}" data-i="${r.i}" role="button" tabindex="0" aria-expanded="${auf ? 'true' : 'false'}" title="Anklicken: Einzelheiten">
       <span class="bz-d">${erster ? datum(r.d) : ''}</span>
-      <span class="bz-n"><b>${mk(r.g || r.z || '–')}</b>${r.g && r.z ? `<small>${mk(r.z)}</small>` : ''}</span>
+      <span class="bz-n"><b>${mk(r.g || r.z || '–')}</b>${r.g && r.z ? `<small>${mk(r.z)}</small>` : ''}${sicher(() => chip(r))}</span>
       <span class="bz-k"><span>${esc(schoen(r.kat))}</span><small>${esc(schoen(r.ukat))}${r.ukat ? ' · ' : ''}${esc(kn(r))}</small></span>
       <b class="bz-b ${cls(r.c)}">${eur(r.c)}</b></div>`;
     if (auf) h += buchDetail(r);
@@ -1395,6 +1441,7 @@ function tabBuchungen(conds) {
   return `<div class="bt">
     <div class="s5-zahlen bt-zahlen">${zahlen}</div>
     ${buchGrafik ? `<div class="bt-grafik"><div class="bt-g-t"><b>Je ${buchGrafik.jahre ? 'Jahr' : 'Monat'}</b><span class="muted klein">Ausgaben orange, Einnahmen grün${nExtra ? ' (ohne Sparen/Umbuchungen)' : ''} · Säule anklicken: nur ${buchGrafik.jahre ? 'dieses Jahr' : 'dieser Monat'}</span></div><div class="s5-chart bt-chart"><canvas id="c-buch"></canvas></div></div>` : ''}
+    ${sicher(() => neuLeiste(H))}
     <div class="bt-leiste"><span class="muted klein">${gruppiert ? 'Nach Datum, bei mehreren Buchungen am Tag mit Tagessumme' : S.sort === 'betrag' ? 'Nach Betrag sortiert' : 'Nach Empfänger sortiert'} · Zeile anklicken: Einzelheiten</span>${sortKnoepfe}</div>
     <div class="bt-liste">${h}</div>${fuss}</div>`;
 }
@@ -1509,7 +1556,8 @@ function tabelle(conds) {
   $('#tabelle-card').classList.toggle('frei', frei);
   $('#tabelle-card .card-h').hidden = frei;
   if (S.tab === 'steuer') {
-    steuerZeigen(el, { einJahr, toast, setze: (p) => setze(p), neuZeichnen: () => tabelle(conds), S });
+    steuerZeigen(el, { einJahr, toast, setze: (p) => setze(p), neuZeichnen: () => tabelle(conds), S, prognose: (j) => sicher(() => prognoseKarte(H, j)) });
+    sicher(() => prognoseBinden(el, H));
     $('.dl').hidden = true;
     return;
   }
@@ -1540,6 +1588,7 @@ function tabelle(conds) {
     if (e.target.closest('.bz-detail')) return;
     aufklappen(tr);
   });
+  if (S.tab === 'buchungen') sicher(() => waechterBinden(el, H));
   el.querySelectorAll('[data-weiter]').forEach((b) => b.onclick = () => setze(JSON.parse(b.dataset.weiter)));
   detailKnoepfe(el);
   $('#mehr')?.addEventListener('click', () => { limit += 500; tabelle(conds); });
@@ -1560,9 +1609,14 @@ function tabelle(conds) {
     tabelle(conds);
   });
   if (S.tab === 'fix') planBinden();
+  if (S.tab === 'fix' && S.fixtab === 'unterhalt') sicher(() => unterhaltBinden(el, H));
+  if (S.tab === 'fix' && S.fixtab === 'kalender') sicher(() => fristenBinden(el, H));
   if (S.tab === 'konten') kontenGrafikZeichnen();
+  if (S.tab === 'konten') sicher(() => vermoegenBinden(el, H));
   if (S.tab === 'buchungen') buchGrafikZeichnen();
-  if (S.tab === 'uebersicht' && S.kart === 'pruefen') { pruefenBinden(el); pruefenGeoeffnet(); } else if (S.tab === 'uebersicht') kat2Zeichnen();
+  if (S.tab === 'uebersicht' && S.kart === 'pruefen') { pruefenBinden(el); pruefenGeoeffnet(); }
+  else if (S.tab === 'uebersicht' && S.kart === 'tags') sicher(() => reisenBinden(el, H));
+  else if (S.tab === 'uebersicht') { kat2Zeichnen(); if (S.kart !== 'ein') sicher(() => rahmenBinden(el, H)); }
   $('#stichtag')?.addEventListener('change', (e) => { const v = e.target.value; if (/^\d{4}-\d{2}-\d{2}$/.test(v)) setze({ stichtag: v }); });
   el.querySelectorAll('[data-st]').forEach((b) => b.onclick = () => setze({ stichtag: b.dataset.st === D.bis && !S.jahr ? '' : b.dataset.st }));
   el.querySelectorAll('tr[data-konto]').forEach((tr) => tr.onclick = () => setze({ konto: tr.dataset.konto, tab: 'buchungen' }));
@@ -1940,8 +1994,9 @@ function tabFixkosten() {
       </details>
     </section>`;
   const reiter = (k, t) => `<button data-fixtab="${k}" class="${S.fixtab === k ? 'an' : ''}">${t}</button>`;
-  h += `<div class="fix-tabs"><div class="seg">${reiter('vertraege', `Verträge <small>${aktiv.length}</small>`)}${reiter('kalender', 'Wann abgebucht wird')}${reiter('plan', 'Was wäre wenn …')}</div></div>`;
-  h += S.fixtab === 'kalender' ? `<div class="card fix-zk k3">${zahlungskalenderHtml(aktiv)}</div>`
+  h += `<div class="fix-tabs"><div class="seg">${reiter('vertraege', `Verträge <small>${aktiv.length}</small>`)}${reiter('kalender', 'Wann abgebucht wird')}${reiter('plan', 'Was wäre wenn …')}${reiter('unterhalt', 'Unterhalt')}</div></div>`;
+  h += S.fixtab === 'kalender' ? `<div class="card fix-zk k3">${zahlungskalenderHtml(aktiv)}</div>${sicher(() => fristenListe(H))}`
+    : S.fixtab === 'unterhalt' ? `<div class="s5">${sicher(() => unterhaltSeite(H)) || '<div class="card leer">Die Unterhalts-Übersicht konnte nicht berechnet werden.</div>'}</div>`
     : S.fixtab === 'plan' ? `<div class="card fix-plan k3" id="fix-plan">${planHtml()}</div>`
       : fixVertraegeAnsicht({ liste, arten, ueber, pct, pm, vomGemeinsamen, aktiv, alle, nFrueher, nAelter, termine, tSumme, R });
   h += `<details class="fix-fuss muted klein"><summary>So wird gerechnet</summary><p>Fixkosten sind automatisch erkannte regelmäßige Zahlungen (gleicher Empfänger und Verwendungszweck, regelmäßiger Abstand; jährliche anteilig je Monat). Deine Überweisungen aufs Gemeinschaftskonto zählen mit, was von dort abgeht, nicht noch einmal. Normaler Monat = Gehalt + typische sonstige Einnahmen − Fixkosten − Lebenshaltung. Stand ${dde(D.bis)}.</p></details>`;
@@ -1995,7 +2050,7 @@ function fixVertraegeAnsicht(o) {
         <b class="vg-zw">${f.aktiv ? eur0(f.proMonat) : '–'}</b><span class="vg-zp">${f.aktiv ? pct(f.proMonat) : ''}</span></button>`;
     };
     return `<section class="vg" id="${fvId(g.art)}" style="--vg:${farbe(g.art)}">
-      <div class="vg-k"><span class="vg-n"><b>${esc(g.art)}</b><small>${g.laufend ? anzahl(g.laufend) : 'beendet'}${g.fs.length > g.laufend && g.laufend ? ` · ${g.fs.length - g.laufend} beendet` : ''}</small></span>
+      <div class="vg-k"><span class="vg-n"><b>${esc(g.art)}</b><small>${g.laufend ? anzahl(g.laufend) : 'beendet'}${g.fs.length > g.laufend && g.laufend ? ` · ${g.fs.length - g.laufend} beendet` : ''}${['Kindesunterhalt', 'Trennungsunterhalt'].includes(g.art) ? ` · ${zl('Monat für Monat →', { fixtab: 'unterhalt' })}` : ''}</small></span>
         <span class="vg-b"><i style="width:${Math.max(1, (g.summe / maxG) * 100)}%"></i></span><b class="vg-w">${g.summe ? eur0(g.summe) : '–'}</b><span class="vg-p">${g.summe ? pct(g.summe) : ''}</span></div>
       <div class="vg-l">${fs.map(kind).join('')}</div></section>`;
   };
@@ -2339,7 +2394,7 @@ function vorschlagNehmen(i) {
 // Knopf „Zurück“ führen zur vorherigen Ansicht. Beim Tippen zählt ein ganzes Suchwort als ein Schritt.
 let tippt = false;
 let stufe = 0;   // eigene Schritte im Browser-Verlauf
-const ZUSTAND = ['q', 'jahr', 'monat', 'konto', 'kat', 'ukat', 'art', 'umb', 'tab', 'stichtag', 'wahl', 'kart', 'fixtab', 'zr', 'nf', 'sjahr', 'sfilter', 'sabf', 'gmonat', 'gbasis', 'gtjahr'];
+const ZUSTAND = ['q', 'jahr', 'monat', 'konto', 'kat', 'ukat', 'art', 'umb', 'tab', 'stichtag', 'wahl', 'kart', 'fixtab', 'zr', 'nf', 'neu', 'sjahr', 'sfilter', 'sabf', 'gmonat', 'gbasis', 'gtjahr'];
 const zustand = (x) => JSON.stringify(ZUSTAND.map((k) => x[k]));
 
 function setze(p, { tippen = false } = {}) {
@@ -2372,8 +2427,7 @@ function aktualisieren(hist = 'ersetzen') {
   $('#seite-kennzahlen').hidden = t !== 'kennzahlen';
   $('#tabelle-card').hidden = t === 'start' || t === 'kennzahlen';
   filterZeigen(conds);
-  // jede Grafik für sich: ein Fehler in einer soll die anderen nicht leer lassen
-  const sicher = (f) => { try { return f(); } catch (e) { console.error(e); return null; } };
+  // jede Grafik für sich: ein Fehler in einer soll die anderen nicht leer lassen (sicher, oben)
   if (t === 'start') sicher(startSeite);
   else if (t === 'kennzahlen') sicher(k5Seite);
   else tabelle(conds);
@@ -2391,7 +2445,7 @@ function schnellSuche() {
 
 function hashSchreiben(hist = 'ersetzen') {
   const p = new URLSearchParams();
-  for (const k of ['q', 'jahr', 'monat', 'zr', 'nf', 'konto', 'kat', 'ukat', 'stichtag', 'wahl', 'sjahr', 'sfilter', 'sabf', 'gmonat', 'gbasis', 'gtjahr']) if (S[k]) p.set(k, S[k]);
+  for (const k of ['q', 'jahr', 'monat', 'zr', 'nf', 'neu', 'konto', 'kat', 'ukat', 'stichtag', 'wahl', 'sjahr', 'sfilter', 'sabf', 'gmonat', 'gbasis', 'gtjahr']) if (S[k]) p.set(k, S[k]);
   if (S.kart !== 'aus') p.set('kart', S.kart);
   if (S.fixtab !== 'vertraege') p.set('fixtab', S.fixtab);
   if (S.art !== 'alle') p.set('art', S.art);
@@ -2425,11 +2479,12 @@ function hashLesen() {
   for (const k of ['q', 'konto', 'kat', 'ukat', 'wahl']) if (p.get(k)) S[k] = p.get(k);
   if (/^\d{4}(,\d{4})*$/.test(p.get('jahr') || '')) S.jahr = p.get('jahr');
   if (/^\d{1,2}(,\d{1,2})*$/.test(p.get('monat') || '')) S.monat = p.get('monat');
-  if (['ein', 'pruefen'].includes(p.get('kart'))) S.kart = p.get('kart');
-  if (['kalender', 'plan'].includes(p.get('fixtab'))) S.fixtab = p.get('fixtab');
+  if (['ein', 'pruefen', 'tags'].includes(p.get('kart'))) S.kart = p.get('kart');
+  if (['kalender', 'plan', 'unterhalt'].includes(p.get('fixtab'))) S.fixtab = p.get('fixtab');
   if (/^\d{4}-\d{2}-\d{2}$/.test(p.get('stichtag') || '')) S.stichtag = p.get('stichtag');
   if (/^\d{4}-\d{2}_\d{4}-\d{2}$/.test(p.get('zr') || '')) S.zr = p.get('zr');
   if (p.get('nf') === '1') S.nf = '1';
+  if (p.get('neu') === '1') S.neu = '1';
   if (['aus', 'ein'].includes(p.get('art'))) S.art = p.get('art');
   S.umb = p.get('umb') === '1';
   if (/^\d{4}$/.test(p.get('sjahr') || '')) S.sjahr = p.get('sjahr');
@@ -2481,6 +2536,9 @@ function anzeigen(v) {
   chatDaten(D);
   entscheidungenLaden(j).then((fehlen) => { if (fehlen && D?.j === j) { neuAufbauen(); aktualisieren(); } });
   steuerDaten(D).then(() => { if (S.tab === 'steuer') tabelle(parse(S.q)); else if (S.tab === 'start' && startOhneSteuer) { try { startSeite(); } catch (e) { console.error(e); } } });
+  // Zusatzmodule: eigene Angaben aus diesem Gerät (IndexedDB) einmal laden, danach neu zeichnen; neuAufbauen() braucht das nicht
+  H ??= modulHelfer();
+  Promise.all([prognoseLaden, unterhaltLaden, fristenLaden, waechterLaden, vermoegenLaden].map((f) => Promise.resolve().then(() => f(H)).catch(console.error))).then(() => { if (D?.j === j) aktualisieren(); });
   hashLesen();
   selectsFuellen();
   $('#start').hidden = true;

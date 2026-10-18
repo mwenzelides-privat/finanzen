@@ -1,0 +1,53 @@
+/* Wächter „Was auffällt“ und „Neu seit deinem letzten Besuch“ (js/waechter.js) */
+/* Karte über die volle Breite des Rasters: steht immer da, die übrigen Karten behalten ihre Reihen */
+.s5-raster > .wa-karte { grid-column: 1 / -1; }
+.wa-raster { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; align-items: stretch; flex: 1 1 auto; }
+.wa-teil { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.wa-teil > h3 { margin: 0; font-size: 13px; font-weight: 650; color: var(--text-2); }
+.wa-teil + .wa-teil { border-left: 1px solid var(--border); padding-left: 20px; }
+.wa-karte p { margin: 0; }
+.wa-karte .klein { font-size: 12.5px; }
+.wa-zahl { font-weight: 700; font-size: 14px; white-space: nowrap; }
+.wa-ruhig { color: var(--text-2); font-size: 13.5px; }
+.wa-hinweis { padding: 8px 11px; border-radius: 9px; background: var(--accent-soft); font-size: 13px; line-height: 1.45; color: var(--text-2); }
+.wa-neu-satz { font-size: 14px; line-height: 1.5; }
+.wa-knoepfe { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* neue Buchungen: Datum | Gegenseite und Kategorie | Betrag, darunter die Knöpfe */
+.wa-nl { display: grid; }
+.wa-nz { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 2px 10px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+.wa-nz:last-child { border-bottom: 0; }
+.wa-nz-d { color: var(--muted); font-size: 12.5px; }
+.wa-nz-n { min-width: 0; }
+.wa-nz-n b { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-nz-n small { display: block; font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-nz-b { font-weight: 650; white-space: nowrap; text-align: right; }
+.wa-nz-k { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 3px; }
+
+/* Treffer des Wächters */
+.wa-tl { display: grid; gap: 6px; }
+.wa-t { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); font-size: 13.5px; line-height: 1.45; }
+.wa-t-text { min-width: 0; overflow-wrap: anywhere; }
+.wa-t-text small { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); }
+.wa-t-text b.neg, .wa-t-text .neg { color: var(--aus-text); }
+.wa-gid { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.wa-mehr > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-2); padding: 2px 0; }
+.wa-mehr[open] > summary { margin-bottom: 6px; }
+.wa-mehr > p { margin-bottom: 6px; }
+
+/* Buchungen: Leiste über der Liste (Filter „neu“) und Chips je Zeile */
+.wa-leiste { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 9px 12px; margin-bottom: 8px; border-radius: 10px; background: var(--accent-soft); font-size: 13.5px; }
+.wa-leiste > span:first-child { min-width: 0; }
+.wa-leiste small { display: block; font-size: 12px; color: var(--muted); }
+.wa-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.wa-chip { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 99px; border: 0; font: inherit; font-size: 11.5px; font-weight: 650; line-height: 1.5; white-space: nowrap; }
+.wa-chip.neu { background: var(--accent-soft); color: var(--accent); cursor: pointer; }
+.wa-chip.neu:hover { background: var(--accent); color: #fff; }
+.wa-chip.warn { background: rgba(224, 96, 46, .12); color: var(--aus-text); cursor: help; }
+
+@media (max-width: 900px) {
+  .wa-raster { grid-template-columns: minmax(0, 1fr); }
+  .wa-teil + .wa-teil { border-left: 0; padding-left: 0; border-top: 1px solid var(--border); padding-top: 10px; }
+  .wa-nz { grid-template-columns: 38px minmax(0, 1fr) auto; gap: 2px 8px; }
+  .wa-leiste .wa-knoepfe { width: 100%; }
+}

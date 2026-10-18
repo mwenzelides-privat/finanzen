@@ -751,7 +751,8 @@ main { max-width: 1600px; padding: 18px 20px 48px; }
 .st-mehr > summary::-webkit-details-marker { display: none; }
 .st-mehr > summary:hover, .st-mehr[open] > summary { background: var(--surface-2); color: var(--text); }
 .st-mehr-box { position: absolute; right: 0; top: 34px; z-index: 20; display: grid; gap: 8px; padding: 12px; width: 300px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 8px 28px rgba(0, 0, 0, .16); }
-.st-mehr-box label { display: grid; gap: 4px; color: var(--text-2); }
+.st-mehr-box label { display: grid; gap: 4px; color: var(--text-2); min-width: 0; }
+.st-mehr-box > * { min-width: 0; }   /* lange Auswahltexte dürfen das Menü nicht verbreitern */
 .st-knoepfe .st-mehr-box select { max-width: none; width: 100%; height: 34px; font-size: 13.5px; border-radius: 8px; }
 .st-mehr-box .btn { justify-self: start; }
 

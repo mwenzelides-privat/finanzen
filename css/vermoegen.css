@@ -1,0 +1,66 @@
+/* Vermögen und Reisen (js/vermoegen.js): Depot und Sparpläne, Vermögen (Reiter Konten), Reisen und Projekte (Reiter Kategorien) */
+
+/* ---------------------------------------------------------------- Depot und Vermögen */
+.vm5 { margin-top: 12px; }
+.dp-zahlen { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.dp-z { display: grid; gap: 1px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); min-width: 0; }
+.dp-z span { font-size: 12px; font-weight: 600; color: var(--muted); }
+.dp-z b { font-size: 18px; font-weight: 750; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dp-z small { font-size: 11.5px; color: var(--text-2); line-height: 1.35; }
+.dp-rahmen { min-width: 0; }
+.dp-t { table-layout: auto; }
+.dp-t td small { white-space: normal; }
+.dp-n { min-width: 0; word-break: break-word; }
+.dp-n b { font-weight: 600; }
+.dp-handy { display: none !important; }
+.dp-t tr.dp-mehr { display: none; }
+.dp-t.dp-offen tr.dp-mehr { display: table-row; }
+.dp-alle { align-self: flex-start; }
+.dp-hinw { margin: 0; padding: 8px 11px 8px 26px; border-radius: 9px; background: var(--surface-2); font-size: 12.5px; line-height: 1.45; color: var(--text-2); }
+.dp-fuss { margin-top: auto; }
+
+.vm-karte { justify-content: flex-start; }
+.vm-dl dt small, .vm-summe dt small { display: block; font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+.vm-dl dd, .vm-summe dd { white-space: nowrap; }
+.vm-dl .vm-info dt, .vm-dl .vm-info dd { color: var(--muted); }
+.vm-l { list-style: none; margin: -4px 0 0; padding: 0 0 0 10px; display: grid; gap: 2px; border-left: 2px solid var(--border); }
+.vm-l li { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; font-size: 13px; }
+.vm-l li span { min-width: 0; color: var(--text-2); }
+.vm-l li small { display: block; font-size: 11.5px; color: var(--muted); }
+.vm-l li b { font-weight: 600; white-space: nowrap; }
+.vm-alt { color: var(--aus-text); font-weight: 650; }
+.vm-summe { margin-top: auto; border-top: 1.5px solid var(--border-strong); }
+.vm-summe dd { font-size: 17px; }
+.vm-ein > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--accent); }
+.vm-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.vm-form .vm-notiz { grid-column: 1 / -1; }
+.vm-form input { min-width: 0; width: 100%; }
+.vm-knoepfe { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---------------------------------------------------------------- Reisen und Projekte */
+.rs-k .s5-kt h2 small.rs-u { font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-soft); border-radius: 6px; padding: 1px 6px; vertical-align: 2px; }
+.rs-weg { flex: none; width: 28px; height: 28px; border-radius: 8px; border: 1px solid transparent; background: none; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
+.rs-weg:hover { border-color: var(--border); background: var(--surface-2); color: var(--text); }
+.rs-summe { display: grid; gap: 1px; text-align: left; padding: 6px 8px; margin: -2px -4px 0; border: 0; border-radius: 9px; background: none; font: inherit; color: inherit; cursor: pointer; }
+.rs-summe:hover { background: var(--surface-2); }
+.rs-summe b { font-size: 24px; font-weight: 750; letter-spacing: -.02em; }
+.rs-summe span { font-size: 12.5px; color: var(--text-2); }
+.rs-k .bl-z { grid-template-columns: minmax(80px, 1.25fr) minmax(40px, 1fr) 76px 34px; }
+.rs-k .fuell-aus + .fuell-aus, .rs-k .bl + div > .bl { margin-top: 1px; }
+.rs-unten { margin-top: auto; display: grid; gap: 4px; }
+.rs-vgl, .rs-info { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--text-2); }
+.rs-info { color: var(--muted); }
+.rs-fuss { margin-top: 12px; }
+.rs-ein { font: inherit; font-size: 12.5px; padding: 1px 7px; margin: 2px 0; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); color: var(--text-2); cursor: pointer; }
+.rs-ein:hover { border-color: var(--accent); }
+
+@media (max-width: 1180px) {
+  .vm5 > .vm-karte { grid-column: 1 / -1; }
+}
+@media (max-width: 640px) {
+  .dp-zahlen { grid-template-columns: minmax(0, 1fr); }
+  .dp-m, .dp-m2 { display: none; }
+  .dp-handy { display: block !important; }
+  .dp-t th, .dp-t td { padding-left: 4px; padding-right: 4px; }
+  .rs-k .bl-z { grid-template-columns: minmax(70px, 1.2fr) minmax(30px, .8fr) 70px 30px; gap: 6px; }
+}

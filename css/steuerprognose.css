@@ -1,0 +1,54 @@
+/* Steuer-Prognose (Reiter Steuer, Jahr ohne Bescheid). Die Karte richtet sich nach ihrer eigenen Breite (Container
+   Query): schmal – im Raster neben „Was du geltend machen kannst“ oder am Handy – steht je Posten der Name in der ersten
+   Zeile, Quelle und Beträge in der zweiten; breit eine Zeile je Posten. Kein seitliches Scrollen. */
+.stp { container-type: inline-size; }
+.stp-innen { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+
+/* Kacheln: schmal untereinander, breit nebeneinander */
+.stp-zahlen { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.stp .s5-z { box-shadow: none; background: var(--surface-2); padding: 9px 12px 10px; }
+.stp .s5-z-w { font-size: 21px; }
+@container (min-width: 520px) {
+  .stp-zahlen { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .stp .s5-z-w { font-size: 24px; }
+}
+
+.stp-naechst, .stp-status { margin: 0; font-size: 13px; line-height: 1.45; color: var(--text-2); }
+.stp-naechst .muted { display: block; font-size: 12px; }
+
+/* Rechenweg */
+.stp-tab { display: grid; font-size: 13px; min-width: 0; }
+.stp-z { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "t t t" "q o m"; column-gap: 12px; row-gap: 1px;
+  padding: 5px 0; border-top: 1px solid var(--grid); align-items: baseline; min-width: 0; }
+.stp-t { grid-area: t; min-width: 0; overflow-wrap: anywhere; }
+.stp-o { grid-area: o; }
+.stp-m { grid-area: m; }
+.stp-q { grid-area: q; min-width: 0; font-size: 11.5px; line-height: 1.35; color: var(--muted); overflow-wrap: anywhere; }
+.stp-w { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; min-width: 72px; }
+.stp-kopf { border-top: 0; padding-top: 0; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.stp-kopf .stp-w { white-space: normal; }
+.stp-kopf .stp-t, .stp-kopf .stp-q { display: none; }
+.stp-z.sum { font-weight: 650; border-top-color: var(--border-strong); }
+.stp-z.unter { border-top: 0; }
+.stp-z.erg { font-weight: 700; font-size: 14px; border-top: 2px solid var(--border-strong); }
+.stp-eins .stp-m { display: none; }
+.stp-eins .stp-z { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "t t" "q o"; }
+@container (min-width: 620px) {
+  .stp-z { grid-template-columns: minmax(0, 1.25fr) 104px 104px minmax(0, 1fr); grid-template-areas: "t o m q"; }
+  .stp-eins .stp-z { grid-template-columns: minmax(0, 1.25fr) 104px minmax(0, 1fr); grid-template-areas: "t o q"; }
+  .stp-kopf .stp-t, .stp-kopf .stp-q { display: block; }
+}
+
+/* Kennzeichen: Plan, berechnet, Regel */
+.stp-art { font-style: normal; font-size: 10.5px; font-weight: 600; padding: 0 5px; border-radius: 6px; white-space: nowrap;
+  background: var(--accent-soft); color: var(--accent); vertical-align: 1px; }
+.stp-art.plan { background: var(--mark); color: var(--text); }
+.stp-art.regel { background: var(--surface-2); color: var(--muted); }
+
+.stp-h { margin: 0; }
+
+/* Deine Angaben */
+.stp-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 4px 0 6px; }
+.stp-form .feld { min-width: 0; }
+.stp-form .feld span { font-size: 12px; line-height: 1.3; }
+.stp-form input { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; color: inherit; }

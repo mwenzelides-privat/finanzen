@@ -1,0 +1,64 @@
+/* Fristen und Termine (js/fristen.js): Karte „Nächste Fristen“ auf der Übersicht und die Liste unter
+   Fixkosten › Wann abgebucht wird (#fr-liste) mit eigenen Einträgen und Kalender-Datei */
+.fr-l { display: grid; align-content: start; }
+.fr-karte > .fr-l { flex: 1; }
+/* Übersicht: unter der vollen Karte „Was auffällt“ stünde die Karte sonst allein mit leerer Fläche daneben */
+.s5-start > .fr-karte { grid-column: 1 / -1; }
+.fr-z { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 2px 10px; align-items: baseline; padding: 6px 4px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.fr-z:last-child { border-bottom: 0; }
+.fr-mit .fr-z { grid-template-columns: 20px 112px minmax(0, 1fr) 28px; }
+.fr-d { display: grid; line-height: 1.3; min-width: 0; }
+.fr-d b { font-weight: 700; white-space: nowrap; }
+.fr-d span { font-size: 12px; color: var(--muted); }
+.fr-d span.neg, .fr-z.ueber .fr-d b { color: var(--aus-text); }
+.fr-d span.neg { font-weight: 600; }
+.fr-t { min-width: 0; line-height: 1.45; overflow-wrap: anywhere; }
+.fr-t small { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); }
+.fr-m { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 600; line-height: 18px; white-space: nowrap; vertical-align: 1px; }
+.fr-m.fr-or { background: rgba(250, 178, 25, .2); color: #8a5a00; cursor: help; }
+.fr-h { display: inline-flex; align-self: center; }
+.fr-h input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.fr-x { align-self: center; width: 28px; height: 28px; border: 0; border-radius: 7px; background: none; color: var(--muted); font-size: 17px; line-height: 1; cursor: pointer; }
+.fr-x:hover { background: var(--surface-2); color: var(--aus-text); }
+.fr-z.erl .fr-t > .zl, .fr-z.erl .fr-t > b { text-decoration: line-through; text-decoration-color: var(--muted); }
+.fr-z.erl { color: var(--text-2); }
+.fr-hinw { margin: 0; padding: 8px 11px; border-radius: 9px; background: var(--surface-2); font-size: 12.5px; line-height: 1.45; color: var(--text-2); }
+.fr-erl summary { cursor: pointer; padding: 4px 0; font-size: 13px; color: var(--text-2); }
+
+/* eigener Termin, Optionen und Kalender-Datei */
+.fr-neu, .fr-ics { display: grid; gap: 8px 12px; align-items: end; padding-top: 12px; border-top: 1px solid var(--border); }
+.fr-neu { grid-template-columns: 160px minmax(0, 1fr) minmax(0, 1fr) auto auto; }
+.fr-ics { grid-template-columns: minmax(0, 1fr) auto auto auto; }
+.fr-neu .feld input, .fr-ics .feld input { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; color: var(--text); }
+.fr-cb { display: inline-flex; gap: 7px; align-items: center; min-height: 38px; font-size: 13px; color: var(--text-2); cursor: pointer; }
+.fr-cb input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.fr-opt { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px 16px; }
+.fr-ics-t b { font-size: 14px; }
+.fr-ics-t .s5-erkl { margin-top: 2px; }
+.fr-eur { display: flex; align-items: center; gap: 6px; }
+.fr-schw .fr-eur input { width: 96px; }
+#fr-liste { margin-top: 12px; }
+
+@media (max-width: 1000px) {
+  .fr-neu { grid-template-columns: 160px minmax(0, 1fr); }
+  .fr-neu-n { grid-column: 1 / -1; }
+  .fr-ics { grid-template-columns: minmax(0, 1fr) auto; }
+  .fr-ics-t { grid-column: 1 / -1; }
+}
+/* Handy: einspaltig – Datum über dem Titel */
+@media (max-width: 560px) {
+  .fr-z { grid-template-columns: minmax(0, 1fr); }
+  .fr-d { display: flex; flex-wrap: wrap; gap: 0 8px; align-items: baseline; }
+  .fr-mit .fr-z { grid-template-columns: 20px minmax(0, 1fr) 28px; }
+  .fr-mit .fr-d { grid-column: 2; grid-row: 1; }
+  .fr-mit .fr-t { grid-column: 2; grid-row: 2; }
+  .fr-mit .fr-h { grid-column: 1; grid-row: 1 / span 2; }
+  .fr-mit .fr-z > :last-child:not(.fr-t) { grid-column: 3; grid-row: 1 / span 2; }
+  .fr-neu, .fr-ics { grid-template-columns: minmax(0, 1fr); }
+  .fr-neu .btn, .fr-ics .btn { width: 100%; }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .fr-m.fr-or { background: rgba(240, 185, 58, .16); color: #f0b93a; }
+}
+:root[data-theme="dark"] .fr-m.fr-or { background: rgba(240, 185, 58, .16); color: #f0b93a; }
