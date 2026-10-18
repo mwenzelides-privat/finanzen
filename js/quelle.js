@@ -40,6 +40,8 @@ export const kvSchreiben = (k, v) => tx('readwrite', (s) => s.put(v, k));
 export async function geraetLeeren() {
   await tx('readwrite', (s) => s.clear()).catch(() => {});
   abmelden();
+  // auch alle übrigen Einstellungen der App (Chat-Schlüssel, Annahmen, Ansicht …)
+  try { Object.keys(localStorage).filter((k) => k.startsWith('fd.')).forEach((k) => localStorage.removeItem(k)); } catch {}
 }
 
 // ---------- Prüfen, ob die Datei zum Dashboard passt
@@ -61,10 +63,10 @@ export function dateiWaehlen() {
       if (!f) return rej(new Error('Keine Datei gewählt.'));
       try {
         const text = await f.text();
-        pruefen(text);
+        const j = pruefen(text);
         const v = { text, quelle: 'datei', name: f.name, geaendert: new Date(f.lastModified).toISOString(), geladen: new Date().toISOString() };
         await cacheSchreiben(v);
-        res(v);
+        res({ ...v, j });
       } catch (e) { rej(e); }
     };
     inp.click();
@@ -84,10 +86,10 @@ async function pcLesen(h, aktuell) {
   const geaendert = new Date(f.lastModified).toISOString();
   if (aktuell?.quelle === 'pc' && aktuell.geaendert === geaendert) return null;
   const text = await f.text();
-  pruefen(text);
+  const j = pruefen(text);
   const v = { text, quelle: 'pc', name: f.name, geaendert, geladen: new Date().toISOString() };
   await cacheSchreiben(v);
-  return v;
+  return { ...v, j };   // j = schon geprüfte Daten, nur im Speicher
 }
 
 // Zustand der Leseerlaubnis: 'granted' | 'prompt' | 'denied' | null (keine Datei verknüpft)
@@ -185,7 +187,7 @@ async function api(url) {
 }
 
 async function dateiSuchen() {
-  const q = encodeURIComponent(`name='${CONFIG.dataFileName}' and trashed=false`);
+  const q = encodeURIComponent(`name='${CONFIG.dataFileName}' and 'me' in owners and trashed=false`);
   const r = await api(`${API}?q=${q}&spaces=drive&orderBy=modifiedTime desc&pageSize=5&fields=files(id,name,modifiedTime,size)`);
   const f = (await r.json()).files?.[0];
   if (!f) throw new Error(`„${CONFIG.dataFileName}“ wurde in deinem Google Drive nicht gefunden. Liegt sie im Ordner „10 Finanzen/Auswertung“?`);
@@ -197,16 +199,16 @@ export async function driveLaden(aktuell) {
   const f = await dateiSuchen();
   if (aktuell?.quelle === 'drive' && aktuell.id === f.id && aktuell.geaendert === f.modifiedTime) return null;
   const text = await (await api(`${API}/${f.id}?alt=media`)).text();
-  pruefen(text);
+  const j = pruefen(text);
   const v = { text, quelle: 'drive', id: f.id, name: f.name, geaendert: f.modifiedTime, geladen: new Date().toISOString() };
   await cacheSchreiben(v);
-  return v;
+  return { ...v, j };
 }
 
 // Dateien, die im Eingang (Google Drive › 10 Finanzen › Eingang) auf den PC warten – übernommene liegen in „verarbeitet“
 export async function eingangDateien() {
   const ordner = async (name, parent) => {
-    const q = encodeURIComponent(`name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parent ? ` and '${parent}' in parents` : ''}`);
+    const q = encodeURIComponent(`name='${name}' and mimeType='application/vnd.google-apps.folder' and 'me' in owners and trashed=false${parent ? ` and '${parent}' in parents` : ''}`);
     return (await (await api(`${API}?q=${q}&spaces=drive&pageSize=5&fields=files(id)`)).json()).files?.[0]?.id;
   };
   const fin = await ordner('10 Finanzen'), ein = fin && (await ordner('Eingang', fin));
@@ -221,6 +223,6 @@ export async function lokalLaden() {
   const r = await fetch('daten/' + CONFIG.dataFileName, { cache: 'no-store' });
   if (!r.ok) throw new Error('keine lokalen Testdaten');
   const text = await r.text();
-  pruefen(text);
-  return { text, quelle: 'lokal', name: CONFIG.dataFileName, geaendert: r.headers.get('last-modified') || '', geladen: new Date().toISOString() };
+  const j = pruefen(text);
+  return { text, j, quelle: 'lokal', name: CONFIG.dataFileName, geaendert: r.headers.get('last-modified') || '', geladen: new Date().toISOString() };
 }

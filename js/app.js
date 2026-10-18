@@ -4,7 +4,7 @@ import { norm, parse, matcher, highlightWords } from './suche.js';
 import * as Q from './quelle.js';
 import { alsExcel, alsCsv, herunterladen } from './export.js';
 import { chatStart, chatDaten, chatVergessen } from './chat.js';
-import { kontostaende, STATUS_TEXT } from './salden.js';
+import { kontostaende, summeKonten, STATUS_TEXT } from './salden.js';
 import { steuerDaten, steuerZeigen, postenOptionen, steuerPosten, steuerZuordnen, steuerStand } from './steuer.js';
 import { gehaltZeigen } from './gehalt.js';
 import { entscheidungenAnwenden, entscheidungenLaden, pruefenSeite, pruefenBinden, pruefenGeoeffnet, det, gruppenSchluessel, offenZahl, ibanText } from './pruefen.js';
@@ -25,10 +25,14 @@ const LOKAL = ['localhost', '127.0.0.1'].includes(location.hostname);
 // Konten, die nicht zu deinen Finanzen zählen: die der Kinder und die gemeinsamen mit Kathrin (dort zählen nur deine Einzahlungen)
 const fremd = (k) => !!(k?.kind || k?.gemeinsam);
 const FREMD_ART = new Set(['Kinderkonto', 'Gemeinschaftskonto']);
+// Heutiges Datum in Ortszeit (JJJJ-MM-TT) – toISOString() wäre UTC, zwischen 0 und 2 Uhr also noch der Vortag
+const heuteLokal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
 let D = null;          // aufbereitete Daten
 let quelle = null;     // gespeicherte Fassung (Text + Herkunft)
-const S0 = { q: '', jahr: '', monat: '', konto: '', kat: '', ukat: '', art: 'alle', umb: false, tab: 'start', sort: 'datum', dir: -1, stichtag: '', wahl: '', kart: 'aus', fixtab: 'vertraege', zr: '', nf: '' };
+const S0 = { q: '', jahr: '', monat: '', konto: '', kat: '', ukat: '', art: 'alle', umb: false, tab: 'start', sort: 'datum', dir: -1, stichtag: '', wahl: '', kart: 'aus', fixtab: 'vertraege', zr: '', nf: '',
+  // Auswahl in Steuer (Jahr, Filter, Abschnitt) und Gehalt (Monat, Vergleich, Tabellenjahr); leer = Grundeinstellung des Reiters
+  sjahr: '', sfilter: '', sabf: '', gmonat: '', gbasis: '', gtjahr: '' };
 let S = { ...S0 };
 let F = [];            // gefilterte Buchungen (nach Datum aufsteigend)
 let limit = 150;
@@ -59,7 +63,7 @@ function aufbereiten(j) {
     e.n++; e.c += r.c;
   }
   return {
-    j, konten, rows, von: j.von, bis: j.bis > new Date().toISOString().slice(0, 10) ? new Date().toISOString().slice(0, 10) : j.bis,   // Valuta in der Zukunft verschiebt „heute“ nicht
+    j, konten, rows, von: j.von, bis: j.bis > heuteLokal() ? heuteLokal() : j.bis,   // Valuta in der Zukunft verschiebt „heute“ nicht
     jahre: [...new Set(rows.map((r) => r.y))].sort((a, b) => a - b),
     kats: K.filter(Boolean).sort((a, b) => a.localeCompare(b, 'de')),
     ukatZu, emp: [...emp.values()].sort((a, b) => b.n - a.n),
@@ -69,7 +73,7 @@ function aufbereiten(j) {
 }
 
 // ======================================================================= Filtern
-// Gewählte Jahre: S.jahr ist „2025“ oder „2023,2025“ (mehrere = Vergleich)
+// Gewählte Jahre: S.jahr ist „2025“ oder „2023,2025“ (mehrere = zusammen anzeigen)
 const jahreWahl = () => (S.jahr ? String(S.jahr).split(',').map(Number).filter(Boolean).sort((a, b) => a - b) : []);
 const einJahr = () => { const j = jahreWahl(); return j.length === 1 ? j[0] : 0; };
 // Gewählte Monate: S.monat ist „3“ oder „1,2,3“
@@ -148,14 +152,14 @@ function selectsFuellen() {
   $('#f-kat').innerHTML = opt('', 'Alle Kategorien') + D.kats.map((k) => opt(k, schoen(k))).join('');
 }
 
-// Zeitraum-Menü: Kästchen = Jahr an/aus (mehrere = Vergleich), Jahreszahl = nur dieses Jahr
+// Zeitraum-Menü: Kästchen = Jahr an/aus (mehrere = zusammen), Jahreszahl = nur dieses Jahr
 function jahrListeBauen() {
   const n = new Map();
   for (const r of D.rows) n.set(r.y, (n.get(r.y) || 0) + 1);
   const liste = $('#f-jahr-liste');
   liste.innerHTML = `<button class="auswahl-alle" data-jalle>Alle Jahre <small>${NUM.format(D.rows.length)} Buchungen</small></button>
-    <div class="auswahl-jahre">${[...D.jahre].reverse().map((y) => `<div class="auswahl-zeile"><input type="checkbox" id="jchk-${y}" data-jchk="${y}" aria-label="${y} zum Vergleich"><button type="button" data-jnur="${y}" title="Nur ${y} zeigen">${y}</button><small>${NUM.format(n.get(y) || 0)}</small></div>`).join('')}</div>
-    <div class="auswahl-fuss">Kästchen anhaken: mehrere Jahre vergleichen<br>Jahreszahl anklicken: nur dieses Jahr</div>`;
+    <div class="auswahl-jahre">${[...D.jahre].reverse().map((y) => `<div class="auswahl-zeile"><input type="checkbox" id="jchk-${y}" data-jchk="${y}" aria-label="${y} dazunehmen"><button type="button" data-jnur="${y}" title="Nur ${y} zeigen">${y}</button><small>${NUM.format(n.get(y) || 0)}</small></div>`).join('')}</div>
+    <div class="auswahl-fuss">Kästchen anhaken: mehrere Jahre zusammen anzeigen<br>Jahreszahl anklicken: nur dieses Jahr</div>`;
   liste.querySelector('[data-jalle]').onclick = () => { jahrMenu(false); setze({ jahr: '', zr: '' }); };
   liste.querySelectorAll('[data-jnur]').forEach((b) => b.onclick = () => { jahrMenu(false); setze({ jahr: b.dataset.jnur, zr: '' }); });
   liste.querySelectorAll('[data-jchk]').forEach((c) => c.onchange = () => {
@@ -172,7 +176,7 @@ function jahrMenu(auf) {
 let filterMehr = (() => { try { return localStorage.getItem('fd.filtermehr') === '1'; } catch { return false; } })();
 function filterZeigen(conds) {
   const jw = jahreWahl();
-  $('#f-jahr-text').textContent = !jw.length ? 'Alle Jahre' : jw.length === 1 ? String(jw[0]) : jw.length <= 3 ? `${jw.join(', ')} · Vergleich` : `${jw.length} Jahre · Vergleich`;
+  $('#f-jahr-text').textContent = !jw.length ? 'Alle Jahre' : jw.length === 1 ? String(jw[0]) : jw.length <= 3 ? jw.join(', ') : `${jw.length} Jahre`;
   if (S.zr && !jw.length) $('#f-jahr-text').textContent = zrText();
   $('#f-jahr').classList.toggle('aktiv', jw.length > 0 || !!S.zr);
   $('#f-jahr-liste').querySelectorAll('[data-jchk]').forEach((c) => { c.checked = jw.includes(+c.dataset.jchk); });
@@ -238,7 +242,8 @@ function basis() {
     scales: {},
   };
 }
-const achsenStil = () => ({ grid: { color: css('--grid') }, border: { display: false }, ticks: { color: css('--muted'), font: { size: 12 } } });
+// negative Achsenwerte rot wie alle Minuswerte (bei Kategorie-Achsen ist value der Index, also nie negativ)
+const achsenStil = () => { const grau = css('--muted'), rot = css('--aus-text'); return { grid: { color: css('--grid') }, border: { display: false }, ticks: { color: (c) => (c.tick?.value < 0 ? rot : grau), font: { size: 12 } } }; };
 
 function zeichne(id, cfg) {
   if (!window.Chart) return;
@@ -280,7 +285,7 @@ const saeulenWerteMit = (opt) => ({
         const v = ds.data[i];
         if (v == null || (!linie && (!v || el.width < 15))) return;
         const neg = v < 0;
-        ctx.fillStyle = linie ? ds.borderColor : css('--text-2');
+        ctx.fillStyle = neg ? css('--aus-text') : linie ? ds.borderColor : css('--text-2');   // Minuswerte rot
         ctx.textBaseline = neg && !linie ? 'top' : 'bottom';
         const y = linie ? el.y - 6 : neg ? Math.max(el.y, el.base) + 3 : Math.min(el.y, el.base) - 3;
         const text = linie ? opt.linie(v) : (opt.fmt || kurzWert)(v);
@@ -308,10 +313,31 @@ const mVor = (k, n) => { let [y, m] = k.split('-').map(Number); m += n; while (m
 const monKurz = (k) => `${MON[+k.slice(5) - 1]} ${k.slice(2, 4)}`;
 const monLang = (k) => `${MONAT[+k.slice(5) - 1]} ${k.slice(0, 4)}`;
 const plusMinus = (c) => `${c >= 0 ? '+' : '−'}${eur0(Math.abs(c))}`;
+// dasselbe mitten im Satz: Minus rot (minusRot() erkennt nur Text am Anfang eines Elements)
+const pmHtml = (c) => `<span class="${c < 0 ? 'neg' : ''}">${plusMinus(c)}</span>`;
 const tagKurz = (iso) => { const d = new Date(`${iso}T12:00:00Z`); return `${WTAG[d.getUTCDay()]} ${+iso.slice(8)}.${+iso.slice(5, 7)}.`; };
 const monatsText = (ms) => (!ms.length ? '' : ms.length === 1 ? monKurz(ms[0]) : `${monKurz(ms[0])} – ${monKurz(ms[ms.length - 1])}`);
-// Summe aller eigenen Konten an einem Tag (ohne Depot, gemeinsame und Kinderkonten)
-const kontenSumme = (tag) => (tag < D.von ? null : kontostaende(D, tag).filter((x) => !fremd(x.k) && x.c != null && x.status !== 'unbekannt').reduce((t, x) => t + x.c, 0));
+// Summe aller eigenen Konten an einem Tag (ohne Depot, gemeinsame und Kinderkonten; mit ks nur diese Konten):
+// { c, voll, fehlt, abw, geschaetzt } – unvollständig, wenn sich der Stand eines Kontos an dem Tag nicht berechnen lässt
+// oder der Tag vor Beginn seiner Daten liegt (ob es das Konto damals schon gab, ist dann nicht belegt)
+const kontenSumme = (tag, ks = null) => (tag < D.von ? null : summeKonten(kontostaende(D, tag).filter((x) => !fremd(x.k) && (!ks || ks.has(x.i)))));
+// Zum Weiterrechnen (Veränderungen, Grafiken, Prognose) nur eine vollständige Summe, sonst null („–“)
+const vollSumme = (s) => (s?.voll ? s.c : null);
+// Welche Konten fehlen und warum: nicht berechenbar (PayPal vor der letzten Abweichung) oder vor Beginn der Daten
+const fehltText = (s) => {
+  const n = s.fehlt.filter((x) => x.status !== 'unbekannt'), u = s.fehlt.filter((x) => x.status === 'unbekannt');
+  return `ohne ${[n.length ? `${n.map((x) => x.k.name).join(', ')} (an dem Tag nicht berechenbar)` : '', ...u.map((x) => `${x.k.name} (Daten erst ab ${dde(x.k.von).slice(3)})`)].filter(Boolean).join(', ')}`;
+};
+// Summe als Text: unvollständig „1.234 € + ?“, ungefähr bzw. teils geschätzt „≈ 1.234 €“
+const summeText = (s, fmt = eur0) => (!s ? '–' : !s.voll ? `${fmt(s.c)} + ?` : `${s.abw || s.geschaetzt ? '≈ ' : ''}${fmt(s.c)}`);
+const summeHinweis = (s) => (!s ? '' : !s.voll ? fehltText(s) : s.abw ? `± ${eur0(s.abw)}` : s.geschaetzt ? 'teils geschätzt' : '');
+// Veränderung zwischen zwei Summen – nur wenn beide vollständig sind
+const diffSumme = (a, b) => (vollSumme(a) == null || vollSumme(b) == null ? null : b.c - a.c);
+// Hinweis unter einer Kontostand-Grafik, wenn Monatsenden fehlen (Lücke statt einer zu niedrigen Summe)
+const lueckenText = (summen) => {
+  const l = summen.filter((s) => s && !s.voll);
+  return l.length ? ` Lücke: ${l.length === 1 ? 'ein Monatsende' : `${l.length} Monatsenden`} nicht vollständig berechenbar (${esc([...new Set(l.flatMap((s) => s.fehlt.map((x) => x.k.name)))].join(', '))}).` : '';
+};
 
 // Buchungen, die zu einem erkannten Fixkosten-Vertrag gehören (auch deine festen Einzahlungen aufs Gemeinschaftskonto)
 function fixIds() {
@@ -319,26 +345,45 @@ function fixIds() {
   return D.fixIds;
 }
 
-// Zahlungen eines laufenden Vertrags zwischen von und bis (ISO, beide inklusive)
-function faellig(f, von, bis) {
+// Ausstehende Zahlung eines laufenden Vertrags: fällig, aber noch nicht gebucht (Datum, sonst ''). Monatlich: der Zahltag
+// dieses Monats ist vorbei, gebucht ist in diesem Monat nichts. Sonst: der nächste Termin nach der letzten Zahlung liegt
+// schon vor dem Datenstand. Für alle Anzeigen gilt dieselbe Regel: Sie kommt noch – in „Noch fällig“, in den nächsten
+// Abbuchungen (als „noch nicht gebucht“) und in der Prognose; der Vertrag zählt ja auch in den Fixkosten weiter.
+function ausstehend(f) {
+  if (!f.aktiv) return '';
   if (f.rh.proJahr === 12) {
-    let n = 0;
+    const k = D.bis.slice(0, 7), tag = `${k}-${String(Math.min(zahltag(f), tageImMonat(k))).padStart(2, '0')}`;
+    return f.zuletzt.slice(0, 7) !== k && tag <= D.bis ? tag : '';
+  }
+  const t = new Date(Date.parse(f.zuletzt) + f.rh.tage * 864e5).toISOString().slice(0, 10);
+  return t <= D.bis ? t : '';
+}
+
+// Zahlungen eines laufenden Vertrags zwischen von und bis (ISO, beide inklusive); eine ausstehende Zahlung zählt im
+// ersten Zeitraum nach dem Datenstand mit (Rest des laufenden Monats bzw. erster Prognosemonat)
+function faellig(f, von, bis) {
+  let n = von === plusTage(D.bis, 1) && ausstehend(f) ? 1 : 0;
+  if (f.rh.proJahr === 12) {
     for (let k = von.slice(0, 7); k <= bis.slice(0, 7); k = mVor(k, 1)) {
       const letzter = +monatsletzter(`${k}-01`).slice(8), tag = `${k}-${String(Math.min(zahltag(f), letzter)).padStart(2, '0')}`;
       if (f.zuletzt.slice(0, 7) === k) continue;   // in diesem Monat schon bezahlt
       if (tag >= von && tag <= bis) n++;
-      else if (k === D.bis.slice(0, 7) && tag <= D.bis && von > D.bis) n++;   // diesen Monat noch nicht abgebucht: kommt noch
     }
     return n * f.betrag;
   }
-  let t = Date.parse(f.zuletzt), n = 0;
+  let t = Date.parse(f.zuletzt);
   const a = Date.parse(von), b = Date.parse(bis) + 864e5 - 1;
   for (let i = 0; i < 40 && t <= b; i++) { t += f.rh.tage * 864e5; if (t >= a && t <= b) n++; }
   return n * f.betrag;
 }
 
-// Nächste Abbuchung eines laufenden Vertrags (monatlich: am üblichen Tag, sonst nach Rhythmus)
+// Nächste Abbuchung eines laufenden Vertrags (monatlich: am üblichen Tag, sonst nach Rhythmus); eine ausstehende Zahlung
+// kommt zuerst – ihr Datum liegt dann vor dem Datenstand
 function naechsteAbbuchung(f) {
+  return f.aktiv ? ausstehend(f) || naechsteRegulaer(f) : '';
+}
+// Nächster regulärer Termin nach dem Datenstand – ohne eine ausstehende Zahlung (die zählt zusätzlich, wie in faellig())
+function naechsteRegulaer(f) {
   if (!f.aktiv) return '';
   if (f.rh.proJahr !== 12) return naechsteZahlung(f);
   const tag = zahltag(f), im = (y, m) => `${mkey(y, m)}-${String(Math.min(tag, tageImMonat(mkey(y, m)))).padStart(2, '0')}`;
@@ -358,16 +403,23 @@ function abgeschlosseneMonate() {
   for (let k = mkey(y, m); k <= D.bis.slice(0, 7); k = mkey(y, m)) { if (k !== laufend) out.push(k); if (++m > 12) { m = 1; y++; } }
   return out;
 }
+// Hat das gewählte Jahr noch keinen abgeschlossenen Monat (Januar, sobald die erste Buchung des neuen Jahres da ist),
+// gelten die letzten 12 Monate – mit Hinweis, statt einer leeren Seite.
 function periode() {
-  const alle = abgeschlosseneMonate(), j = einJahr();
+  const alle = abgeschlosseneMonate(), gewaehlt = einJahr();
+  const leer = !!gewaehlt && alle.length > 0 && !alle.some((k) => +k.slice(0, 4) === gewaehlt), j = leer ? 0 : gewaehlt;
   const monate = j ? alle.filter((k) => +k.slice(0, 4) === j) : alle.slice(-12);
   const vor = monate.map((k) => mkey(+k.slice(0, 4) - 1, +k.slice(5))).filter((k) => k >= D.von.slice(0, 7));
   const label = !monate.length ? '' : j ? (monate.length === 12 ? `im Jahr ${j}` : `${j} (${MON[+monate[0].slice(5) - 1]}–${MON[+monate.at(-1).slice(5) - 1]})`)
     : `in den letzten 12 Monaten (${monKurz(monate[0])} – ${monKurz(monate.at(-1))})`;
-  return { monate, vor: vor.length === monate.length ? vor : [], label, jahr: j };
+  const jw = jahreWahl();
+  const hinweis = leer ? `<span class="muted">${gewaehlt} hat noch keinen abgeschlossenen Monat – deshalb die letzten 12 Monate.</span> `
+    : jw.length > 1 ? `<span class="muted">Mehrere Jahre (${jw.join(', ')}) zeigt nur die Seite Buchungen zusammen – hier deshalb die letzten 12 Monate.</span> ` : '';
+  return { monate, vor: vor.length === monate.length ? vor : [], label, jahr: j, hinweis };
 }
-function zeitSeg() {
-  const j = einJahr();
+// Zeitraum-Knöpfe; markiert ist der Zeitraum, der wirklich gezeigt wird (P aus periode())
+function zeitSeg(P = null) {
+  const j = P ? P.jahr : einJahr();
   return `<div class="seg s5-zeit" role="group" aria-label="Zeitraum">${[['', '12 Monate'], ...D.jahre.slice(-4).reverse().map((y) => [String(y), String(y)])]
     .map(([v, t]) => `<button data-zeit="${v}" class="${(v ? +v === j : !j) ? 'an' : ''}">${t}</button>`).join('')}</div>`;
 }
@@ -376,17 +428,18 @@ function zeitSeg() {
 // (Ausgaben nach Kategorie, Einnahmen nach Unterkategorie) mit Unterkategorien, Empfängern und Monaten
 function sammle(monate, art = 'aus') {
   const set = new Set(monate), fx = fixIds(), ks = kontoSet(), g = new Map(), mon = new Map(monate.map((k) => [k, { ein: 0, lohn: 0, aus: 0, fix: 0, spar: 0, n: 0 }]));
-  let ein = 0, aus = 0, fix = 0, spar = 0, lohn = 0, n = 0, groesste = null;
+  let ein = 0, aus = 0, fix = 0, spar = 0, sparRein = 0, sparRaus = 0, lohn = 0, n = 0, groesste = null;
   for (const r of D.rows) {
     const k = r.d.slice(0, 7), m = mon.get(k);
     if (!m || !set.has(k) || (ks && !ks.has(r.k))) continue;
-    if (r.art === 'Sparen') { spar -= r.c; m.spar -= r.c; continue; }
+    // Sparen/Depot: spar = netto eingezahlt (negativ = mehr entnommen, z. B. Wertpapierverkäufe), dazu beide Richtungen einzeln
+    if (r.art === 'Sparen') { spar -= r.c; m.spar -= r.c; if (r.c < 0) sparRein -= r.c; else sparRaus += r.c; continue; }
     if (r.art !== 'Einnahme' && r.art !== 'Ausgabe') continue;
     n++; m.n++;
     if (r.art === 'Einnahme') { ein += r.c; m.ein += r.c; if (r.ukat === 'Lohn / Gehalt') { m.lohn += r.c; lohn += r.c; } }
     else { aus -= r.c; m.aus -= r.c; if (fx.has(r.i)) { fix -= r.c; m.fix -= r.c; } if (!groesste || r.c < groesste.c) groesste = r; }
     if ((art === 'aus') !== (r.art === 'Ausgabe')) continue;
-    const key = art === 'aus' ? r.kat || 'Sonstiges' : r.ukat || 'Sonstige Einnahmen';
+    const key = art === 'aus' ? r.kat || 'Sonstiges' : einSchluessel(r);
     const c = art === 'aus' ? -r.c : r.c;
     let x = g.get(key);
     if (!x) g.set(key, (x = { k: key, c: 0, unter: new Map(), empf: new Map(), mon: new Map(), rows: [] }));
@@ -396,8 +449,14 @@ function sammle(monate, art = 'aus') {
     ee.c += c; ee.n++; x.empf.set(e, ee);
     x.mon.set(k, (x.mon.get(k) || 0) + c);
   }
-  return { n: monate.length, ein, aus, fix, spar, lohn, erg: ein - aus, g, mon, buchungen: n, groesste, monate };
+  return { n: monate.length, ein, aus, fix, spar, sparRein, sparRaus, lohn, erg: ein - aus, g, mon, buchungen: n, groesste, monate };
 }
+
+// Einnahmen werden nach Unterkategorie gruppiert, egal unter welcher Hauptkategorie sie stehen (Steuererstattung unter
+// „Finanzen“, Urlaubserstattung unter „Freizeit“ …); ohne Unterkategorie nach der Hauptkategorie („Nicht zugeordnet“).
+// einFilter: der passende Buchungsfilter zu einer solchen Gruppe – nie mit fester Hauptkategorie „Einnahmen“.
+const einSchluessel = (r) => r.ukat || r.kat || 'Sonstige Einnahmen';
+const einFilter = (k) => (D.ukatZu.has(k) ? { kat: '', ukat: k } : { kat: D.kats.includes(k) ? k : '', ukat: '' });
 
 // ---------------------------------------------------------------- Bausteine
 const kopf5 = (titel, satz, rechts = '') => `<div class="s5-kopf"><div class="s5-kopf-t"><h1>${titel}</h1>${satz ? `<p class="s5-satz">${satz}</p>` : ''}</div>${rechts ? `<div class="s5-kopf-r">${rechts}</div>` : ''}</div>`;
@@ -565,15 +624,18 @@ function verlauf5() {
   }
   const w = (k) => ist.get(k) || leer();
   const spar = R.ref.length ? Math.min(0, median(R.ref.map((k) => w(k).spar))) : 0;   // was üblicherweise aufs Depot geht
-  const monate = R.ref.map((k) => { const x = w(k); return { k, art: 'ist', ein: x.ein, aus: x.aus, erg: x.ein - x.aus, fest: x.aus - x.var, lohn: x.lohn, stand: kontenSumme(monatsletzter(`${k}-01`)) }; });
-  const heuteStand = kontenSumme(heute);
-  let stand = heuteStand ?? 0, lauf = null;
+  // Kontostand je Monatsende nur, wenn die Summe vollständig ist (sonst null: Lücke in der Grafik, Hinweis in fehlt)
+  const monate = R.ref.map((k) => { const x = w(k), s = kontenSumme(monatsletzter(`${k}-01`)); return { k, art: 'ist', ein: x.ein, aus: x.aus, erg: x.ein - x.aus, fest: x.aus - x.var, lohn: x.lohn, stand: vollSumme(s), summe: s }; });
+  const heuteSumme = kontenSumme(heute), heuteStand = vollSumme(heuteSumme);
+  // Prognose ab dem heutigen Stand – ist er unvollständig, gibt es auch keine Prognose des Kontostands
+  let stand = heuteStand, lauf = null;
+  const weiter = (d) => (stand == null ? null : (stand += d));
   if (laeuft) {
     const x = w(jetzt), ende = monatsletzter(`${jetzt}-01`);
     const offenFest = R.vertraege.reduce((t, f) => t + faellig(f, plusTage(heute, 1), ende), 0);
     const gehaltKommt = x.lohn > 0 ? 0 : R.gehalt, sonstKommt = Math.max(0, R.sonst - (x.ein - x.lohn)), varKommt = Math.max(0, R.leben - x.var);
     const ein = x.ein + gehaltKommt + sonstKommt, aus = x.aus + offenFest + varKommt;
-    stand += gehaltKommt + sonstKommt - offenFest - varKommt + Math.min(0, spar - x.spar);
+    weiter(gehaltKommt + sonstKommt - offenFest - varKommt + Math.min(0, spar - x.spar));
     lauf = { k: jetzt, art: 'laeuft', ein, aus, erg: ein - aus, x, offenFest, gehaltKommt, varKommt, tag: +heute.slice(8), tage: +ende.slice(8), stand };
     monate.push(lauf);
   }
@@ -581,7 +643,7 @@ function verlauf5() {
     const k = mVor(jetzt, i), ende = monatsletzter(`${k}-01`);
     const fest = R.vertraege.reduce((t, f) => t + faellig(f, `${k}-01`, ende), 0);
     const ein = R.gehalt + R.sonst, aus = R.leben + fest;
-    stand += ein - aus + spar;
+    weiter(ein - aus + spar);
     monate.push({ k, art: 'prognose', ein, aus, erg: ein - aus, fest, stand });
   }
   const n = R.ref.length || 1, summe = (f) => monate.filter((m) => m.art === 'ist').reduce((t, m) => t + f(m), 0);
@@ -592,7 +654,7 @@ function verlauf5() {
   const lohnMed = lohnRows.length ? median(lohnRows.map((r) => r.c)) : 0;
   const sonder = D.rows.filter((r) => eigen(r) && (r.ukat === 'Lohn / Gehalt' ? lohnMed && r.c > lohnMed * 1.3 : r.c >= 100000))
     .map((r) => ({ r, extra: r.ukat === 'Lohn / Gehalt' ? r.c - lohnMed : r.c })).sort((a, b) => b.extra - a.extra);
-  return (D.v5 = { monate, R, lauf, heuteStand, spar, schnitt, sonder, jetzt });
+  return (D.v5 = { monate, R, lauf, heuteStand, heuteSumme, spar, schnitt, sonder, jetzt });
 }
 const sonderText = (l) => l.map(({ r }) => zl(`${r.ukat === 'Lohn / Gehalt' ? 'dem hohen Gehalt' : esc(schoen(r.ukat || 'Einnahme'))} im ${MONAT[+r.d.slice(5, 7) - 1]} ${r.d.slice(0, 4)} (${eur0(r.c)})`, zuBuchungen({ konto: '', art: 'ein', kat: r.kat, ukat: r.ukat, ...monatZiel(r.d.slice(0, 7)) }))).join(' und ');
 
@@ -600,7 +662,7 @@ const sonderText = (l) => l.map(({ r }) => zl(`${r.ukat === 'Lohn / Gehalt' ? 'd
 // je Art) und Lebenshaltung, grün = was bleibt, rot schraffiert = was fehlt
 function geldBalken(R, teile = null) {
   const E = R.ein, aus = R.fix + R.leben, max = Math.max(E, aus, 1), w = (c) => (Math.max(0, c) / max) * 100, rest = E - aus;
-  const t = (cls_, x) => (x.c > 0 ? `<i class="gb-t ${cls_}${w(x.c) >= 7.5 ? ' lbl' : ''}${w(x.c) >= 20 ? ' gross' : ''}" style="width:${w(x.c)}%"${x.ziel ? geh(x.ziel) : ''}${x.springe ? ` data-springe="${x.springe}"` : ''} title="${esc(x.tip || `${x.n}: ${eur0(x.c)}`)}">${w(x.c) >= 7.5 ? `<span>${x.n}</span><b>${eur0(x.c)}</b>` : ''}</i>` : '');
+  const t = (cls_, x) => (x.c > 0 ? `<i class="gb-t ${cls_}${w(x.c) >= 7.5 ? ' lbl' : ''}${w(x.c) >= 20 ? ' gross' : ''}" style="width:${w(x.c)}%"${x.ziel ? geh(x.ziel) : ''}${x.springe ? ` data-springe="${x.springe}"` : ''}${x.ziel || x.springe ? ' role="button" tabindex="0"' : ''} title="${esc(x.tip || `${x.n}: ${eur0(x.c)}`)}">${w(x.c) >= 7.5 ? `<span>${x.n}</span><b>${eur0(x.c)}</b>` : ''}</i>` : '');
   const fest = (teile || [{ n: 'Fixkosten', c: R.fix, ziel: { tab: 'fix', fixtab: 'vertraege' } }]).map((x) => t('gb-fest', x)).join('');
   return `<div class="gb">
     <div class="gb-balken">${fest}${t('gb-leben', { n: 'Lebenshaltung', c: R.leben, ziel: { tab: 'fix', fixtab: 'vertraege', _springe: '#fix-leben' }, tip: `Lebenshaltung ${eur0(R.leben)} im Monat – anklicken: wofür` })}${rest > 0 ? t('gb-rest', { n: 'bleibt', c: rest }) : ''}
@@ -609,10 +671,13 @@ function geldBalken(R, teile = null) {
   </div>`;
 }
 
-// Feste Abbuchungen der nächsten Tage
+// Feste Abbuchungen der nächsten Tage, vorneweg die ausstehenden (fällig, noch nicht gebucht); ein Vertrag mit
+// ausstehender Zahlung steht zusätzlich an seinem regulären Termin, wenn der in den Zeitraum fällt (wie in faellig())
 function naechsteTermine(vs, tage = 30) {
   const bis = plusTage(D.bis, tage), l = [];
-  for (const f of vs) { const am = naechsteAbbuchung(f); if (am && am > D.bis && am <= bis) l.push({ f, am }); }
+  for (const f of vs) {
+    for (const am of [ausstehend(f), naechsteRegulaer(f)]) if (am && am <= bis) l.push({ f, am });
+  }
   return l.sort((a, b) => (a.am < b.am ? -1 : a.am > b.am ? 1 : b.f.betrag - a.f.betrag));
 }
 // Wann das nächste Gehalt erwartet wird (in den nächsten 30 Tagen), damit man sieht, was davor und danach abgeht
@@ -637,7 +702,8 @@ function termineHtml(l, n = 99) {
     if (frei <= 0 && !lohn) { weg.push(...fs); continue; }
     const zeig = fs.slice(0, Math.max(0, frei)), summe = fs.reduce((t, f) => t + f.betrag, 0);
     weg.push(...fs.slice(zeig.length)); frei -= zeig.length;
-    h += `<div class="nt-tag"><div class="nt-k"><span class="nt-d">${tagKurz(am)}</span><span class="nt-a">${fs.length ? `${fs.length} ${fs.length === 1 ? 'Abbuchung' : 'Abbuchungen'}` : ''}</span><b>${fs.length ? `−${eur0(summe)}` : ''}</b></div>
+    const offen = am <= D.bis;   // ausstehend: fällig, aber bis zum Datenstand nicht gebucht
+    h += `<div class="nt-tag"><div class="nt-k"${offen ? ' title="Fällig, aber bis zum Datenstand nicht gebucht – zählt als „kommt noch“"' : ''}><span class="nt-d">${offen ? 'seit ' : ''}${tagKurz(am)}</span><span class="nt-a">${fs.length ? `${fs.length} ${fs.length === 1 ? 'Abbuchung' : 'Abbuchungen'}${offen ? ' · noch nicht gebucht' : ''}` : ''}</span><b class="${fs.length ? 'neg' : ''}">${fs.length ? `−${eur0(summe)}` : ''}</b></div>
       ${lohn ? `<button class="nt-z nt-lohn"${geh(zuGehalt())} title="Anklicken: alle Gehälter"><span class="nt-n">Gehalt erwartet</span><b>+${eur0(g.c)}</b></button>` : ''}
       ${zeig.map((f) => `<button class="nt-z" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="${esc(vertragName(f))} · ${esc(f.rh.name)} – alle Zahlungen anzeigen"><span class="nt-n">${esc(vertragName(f))}${f.rh.proJahr < 12 ? ` <small>${esc(f.rh.name)}</small>` : ''}</span><b>${eur0(f.betrag)}</b></button>`).join('')}</div>`;
   }
@@ -646,10 +712,12 @@ function termineHtml(l, n = 99) {
 }
 
 // ---------------------------------------------------------------- Übersicht: Wie stehe ich da – und wohin läuft es?
+let startOhneSteuer = false;   // Startseite wurde gezeichnet, bevor die Steuer-Entscheidungen geladen waren
 function startSeite() {
+  startOhneSteuer = true;
   const box = $('#s5'), V = verlauf5(), R = V.R, ms = V.monate, lauf = V.lauf, letzte = ms[ms.length - 1];
-  const gMon = monLang(R.gehaltMonat), heute = V.heuteStand ?? 0, s = V.schnitt;
-  const anfang = kontenSumme(plusTage(`${V.jetzt}-01`, -1));
+  const gMon = monLang(R.gehaltMonat), hs = V.heuteSumme, heute = hs?.c ?? 0, s = V.schnitt;
+  const anfang = kontenSumme(plusTage(`${V.jetzt}-01`, -1)), seitAnfang = diffSumme(anfang, hs), prog = letzte.stand;
   const monatJ = MONAT[+V.jetzt.slice(5) - 1], monatE = MONAT[+letzte.k.slice(5) - 1];
   const ref = V.monate.filter((m) => m.art === 'ist').map((m) => m.k);
   const zuB = (x) => zuBuchungen({ konto: '', ...x });   // die Übersicht rechnet immer mit allen Konten
@@ -659,13 +727,15 @@ function startSeite() {
   const schnittZ = zl(`<b class="${s.erg >= 0 ? 'pos' : 'neg'}">${plusMinus(s.erg)}</b>`, { tab: 'kennzahlen', jahr: '', monat: '', zr: '', konto: '' });
   if (s.erg - R.erg > 20000 && V.sonder.length) satz += ` In den letzten 12 Monaten waren es im Schnitt ${schnittZ} – dank Sonderzahlungen wie ${sonderText(V.sonder.slice(0, 2))}.`;
   else satz += ` In den letzten 12 Monaten waren es im Schnitt ${schnittZ} im Monat.`;
-  satz += ` Läuft alles so weiter, stehen Ende ${monatE} etwa ${zl(`<b>${eur0(letzte.stand)}</b>`, { tab: 'konten', stichtag: '', konto: '' })} auf deinen Konten.`;
+  if (prog != null) satz += ` Läuft alles so weiter, stehen Ende ${monatE} etwa ${zl(`<b class="${prog < 0 ? 'neg' : ''}">${eur0(prog)}</b>`, { tab: 'konten', stichtag: '', konto: '' })} auf deinen Konten.`;
 
+  // Kontostand heute und seit Monatsanfang – bei einer unvollständigen Summe steht dabei, welches Konto fehlt
+  const seitText = anfang ? `${seitAnfang == null ? '–' : `<span class="${seitAnfang < 0 ? 'neg' : ''}">${plusMinus(seitAnfang)}</span>`} seit 1. ${monatJ}` : '';
   const zahlen = [
-    zahl5('Auf deinen Konten', eur0(heute), `heute · ${anfang != null ? `${plusMinus(heute - anfang)} seit 1. ${monatJ}` : ''}${lauf?.gehaltKommt ? ' – das Gehalt kommt noch' : ''}`, { cls: heute < 0 ? 'neg' : '', ziel: { tab: 'konten', stichtag: '', konto: '' } }),
+    zahl5('Auf deinen Konten', summeText(hs), `heute · ${hs && !hs.voll ? `${esc(fehltText(hs))} · ` : ''}${seitText}${lauf?.gehaltKommt ? ' – das Gehalt kommt noch' : ''}`, { cls: heute < 0 ? 'neg' : '', ziel: { tab: 'konten', stichtag: '', konto: '' } }),
     zahl5('Gehalt aktuell', eur0(R.gehalt), `netto im ${gMon}${R.gt ? ` · kommt um den ${R.gt}.` : ''} · anklicken: alle Gehälter`, { ziel: zuGehalt() }),
     zahl5(R.erg >= 0 ? 'Normaler Monat: bleibt' : 'Normaler Monat: fehlt', plusMinus(R.erg), 'Gehalt + Sonstiges − Fixkosten − Lebenshaltung', { cls: R.erg >= 0 ? 'pos' : 'neg', ziel: { tab: 'fix', fixtab: 'vertraege', konto: '' } }),
-    zahl5(`Prognose Ende ${monatE}`, `≈ ${eur0(letzte.stand)}`, `auf deinen Konten · ${plusMinus(letzte.stand - heute)} ggü. heute`, { cls: letzte.stand < 0 ? 'neg' : '', ziel: { tab: 'konten', stichtag: '', konto: '' } }),
+    zahl5(`Prognose Ende ${monatE}`, prog == null ? '–' : `≈ ${eur0(prog)}`, prog == null ? 'nicht berechenbar: der Stand heute ist unvollständig' : `auf deinen Konten · <span class="${prog - heute < 0 ? 'neg' : ''}">${plusMinus(prog - heute)}</span> ggü. heute`, { cls: prog < 0 ? 'neg' : '', ziel: { tab: 'konten', stichtag: '', konto: '' } }),
   ].join('');
 
   // Ein normaler Monat ab jetzt – als Blöcke wie bei Kennzahlen und Fixkosten; jede Zeile führt zu den Einzelheiten
@@ -700,6 +770,7 @@ function startSeite() {
       </dl>`;
   }
   const st = steuerStand();
+  startOhneSteuer = !st;
   if (st) monat += `<button class="s5-hinweis"${geh({ tab: 'steuer' })}><b>Steuer ${st.jahr}</b> ${st.offen ? `· ${st.offen} Entscheidungen offen` : '· alles entschieden'} <span class="link">→</span></button>`;
 
   const termine = naechsteTermine(R.vertraege), tSumme = termine.reduce((t, x) => t + x.f.betrag, 0);
@@ -708,7 +779,7 @@ function startSeite() {
     <div class="s5-raster s5-start">
       ${karte5('Was am Monatsende übrig blieb', `Einnahmen minus Ausgaben je Monat. Grün = Plus, rot = Minus, schraffiert = erwartet. Gestrichelt: Durchschnitt der letzten 12 Monate. Säule anklicken: Buchungen des Monats.`, '<div class="s5-chart fuell"><canvas id="c-s5-erg"></canvas></div>', 's5-b2', zl('alle 12 Monate →', zuB(zeitZiel(ref))))}
       ${karte5('Ein normaler Monat ab jetzt', 'Mit deinem aktuellen Gehalt, den laufenden Verträgen und deiner üblichen Lebenshaltung · Zeile anklicken: Einzelheiten', rechnung + tipp, 's5-mr')}
-      ${karte5('Kontostand', 'Summe deiner Konten am Monatsende (ohne Depot, gemeinsame und Kinderkonten). Gestrichelt: Prognose. Punkt anklicken: Kontostände an diesem Tag.', '<div class="s5-chart klein fuell"><canvas id="c-s5-stand"></canvas></div>')}
+      ${karte5('Kontostand', `Summe deiner Konten am Monatsende (ohne Depot, gemeinsame und Kinderkonten). Gestrichelt: Prognose. Punkt anklicken: Kontostände an diesem Tag.${lueckenText(ms.map((m) => m.summe))}`, '<div class="s5-chart klein fuell"><canvas id="c-s5-stand"></canvas></div>')}
       ${karte5(lauf ? `${monatJ} bisher` : 'Dieser Monat', lauf ? 'Was schon gebucht ist und was bis Monatsende noch kommt' : '', monat || '<div class="leer klein">Der Monat ist abgeschlossen.</div>')}
       ${karte5('Nächste 30 Tage', 'Feste Abbuchungen aus deinen Verträgen · anklicken: alle Zahlungen des Vertrags', termineHtml(termine, 6), '', zl(`<span class="s5-wert">${eur0(tSumme)}</span>`, { tab: 'fix', fixtab: 'kalender', konto: '' }))}
     </div>`;
@@ -746,7 +817,8 @@ function s5ErgebnisZeichnen(V) {
 // Kontostand am Monatsende: 12 Monate, dann gestrichelt die Prognose
 function s5StandZeichnen(V) {
   if (!$('#c-s5-stand')) return;
-  const ms = V.monate.filter((m) => m.stand != null), ab = ms.findIndex((m) => m.art !== 'ist'), c = css('--accent');
+  // Monatsenden ohne vollständige Summe bleiben als Lücke stehen (stand = null), damit kein zu niedriger Wert erscheint
+  const ms = V.monate, ab = ms.findIndex((m) => m.art !== 'ist'), c = css('--accent');
   const o = basis();
   o.layout = { padding: { top: 22, left: 4, right: 8 } };
   o.interaction = { mode: 'index', intersect: false };
@@ -754,14 +826,14 @@ function s5StandZeichnen(V) {
     x: { ...achsenStil(), grid: { display: false }, ticks: { ...achsenStil().ticks, font: { size: 11 }, maxRotation: 0, autoSkip: true, autoSkipPadding: 8 } },
     y: { ...achsenStil(), ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 4 } },
   };
-  o.plugins.tooltip.callbacks = { title: (it) => `Ende ${monLang(ms[it[0].dataIndex].k)}${ms[it[0].dataIndex].art !== 'ist' ? ' – erwartet' : ''}`, label: (it) => ` Konten: ${EUR0.format(it.raw)}` };
+  o.plugins.tooltip.callbacks = { title: (it) => `Ende ${monLang(ms[it[0].dataIndex].k)}${ms[it[0].dataIndex].art !== 'ist' ? ' – erwartet' : ''}`, label: (it) => (it.raw == null ? ' nicht vollständig berechenbar' : ` Konten: ${EUR0.format(it.raw)}`) };
   const letzteIst = ab < 0 ? ms.length - 1 : ab - 1;
   // Klick: Kontostände an diesem Monatsende (Prognose: Reiter Konten mit Verlauf)
   o.onClick = (_, el) => { if (!el.length) return; const m = ms[el[0].index]; setze({ tab: 'konten', konto: '', stichtag: m.art === 'ist' ? monatsletzter(`${m.k}-01`) : '' }); };
   o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
   zeichne('c-s5-stand', {
     type: 'line',
-    data: { labels: ms.map((m) => monKurz(m.k)), datasets: [{ data: ms.map((m) => m.stand / 100), borderColor: c, backgroundColor: alpha(c, 0.1), fill: 'origin', cubicInterpolationMode: 'monotone', borderWidth: 2.5,
+    data: { labels: ms.map((m) => monKurz(m.k)), datasets: [{ data: ms.map((m) => (m.stand == null ? null : m.stand / 100)), borderColor: c, backgroundColor: alpha(c, 0.1), fill: 'origin', cubicInterpolationMode: 'monotone', borderWidth: 2.5,
       pointRadius: ms.map((m, i) => (i === letzteIst || i === ms.length - 1 ? 4 : 2)), pointBackgroundColor: ms.map((m) => (m.art === 'ist' ? c : css('--surface'))), pointBorderColor: c, pointBorderWidth: 2,
       segment: { borderDash: (sg) => (ab >= 0 && sg.p1DataIndex >= ab ? [6, 4] : undefined) } }] },
     options: o,
@@ -773,13 +845,13 @@ function s5StandZeichnen(V) {
 // Aufbau: der Durchschnittsmonat als Tabelle (Einnahmen → Ausgaben → Ergebnis, je mit Vorjahr), was sich verändert hat,
 // Monat für Monat als Grafik, Jahr für Jahr als Tabelle, darunter eine Leiste mit Auffälligem.
 function k5Seite() {
-  const box = $('#k2'), P = periode(), rechts = kontoWahlHtml() + zeitSeg();
+  const box = $('#k2'), P = periode(), rechts = kontoWahlHtml() + zeitSeg(P);
   if (!P.monate.length) { box.innerHTML = kopf5('Kennzahlen', 'In diesem Jahr ist noch kein Monat abgeschlossen.', rechts); gehBinden(box); kennzahlenBinden(box); return; }
   const a = sammle(P.monate), v = P.vor.length ? sammle(P.vor) : null, ein = sammle(P.monate, 'ein'), einV = v ? sammle(P.vor, 'ein') : null, R = monatsRechnung();
   const pm = (x, c) => c / x.n, quote = (x) => (x.ein ? Math.round((x.erg / x.ein) * 100) : null);
   const P0 = `${P.label[0].toUpperCase()}${P.label.slice(1)}`;
   const zeit = zeitZiel(P.monate);
-  let satz = `${P0} kamen im Schnitt ${zl(`<b>${eur0(pm(a, a.ein))}</b>`, { tab: 'uebersicht', kart: 'ein', wahl: '' })} im Monat herein und ${zl(`<b>${eur0(pm(a, a.aus))}</b>`, { tab: 'uebersicht', kart: 'aus', wahl: '' })} gingen raus – ${a.erg >= 0 ? 'übrig blieben' : 'es fehlten'} ${zs(`<b class="${a.erg >= 0 ? 'pos' : 'neg'}">${eur0(Math.abs(pm(a, a.erg)))}</b>`, '#k5-tab')} im Monat.`;
+  let satz = `${P.hinweis}${P0} kamen im Schnitt ${zl(`<b>${eur0(pm(a, a.ein))}</b>`, { tab: 'uebersicht', kart: 'ein', wahl: '' })} im Monat herein und ${zl(`<b>${eur0(pm(a, a.aus))}</b>`, { tab: 'uebersicht', kart: 'aus', wahl: '' })} gingen raus – ${a.erg >= 0 ? 'übrig blieben' : 'es fehlten'} ${zs(`<b class="${a.erg >= 0 ? 'pos' : 'neg'}">${eur0(Math.abs(pm(a, a.erg)))}</b>`, '#k5-tab')} im Monat.`;
   if (v) {
     const dA = pm(a, a.aus) - pm(v, v.aus), dE = pm(a, a.ein) - pm(v, v.ein);
     satz += ` Gegenüber dem Vorjahr: Einnahmen <b class="${dE >= 0 ? 'pos' : 'neg'}">${plusMinus(dE)}</b>, Ausgaben <b class="${dA <= 0 ? 'pos' : 'neg'}">${plusMinus(dA)}</b> im Monat.`;
@@ -794,7 +866,10 @@ function k5Seite() {
     zahl5('Einnahmen im Monat', eur0(pm(a, a.ein)), `Ø · davon Gehalt ${eur0(a.lohn / a.n)}${vgl(pm(a, a.ein), v && pm(v, v.ein), true)}`, { cls: 'pos', ziel: { tab: 'uebersicht', kart: 'ein', wahl: '' } }),
     zahl5('Ausgaben im Monat', eur0(pm(a, a.aus)), `Ø · davon fest ${eur0(a.fix / a.n)}${vgl(pm(a, a.aus), v && pm(v, v.aus), false)}`, { cls: 'neg', ziel: { tab: 'uebersicht', kart: 'aus', wahl: '' } }),
     zahl5(a.erg >= 0 ? 'Übrig im Monat' : 'Fehlbetrag im Monat', plusMinus(pm(a, a.erg)), `Ø · Sparquote ${quote(a) ?? '–'} %${v ? ` (Vorjahr ${quote(v)} %)` : ''} · je Monat →`, { cls: a.erg >= 0 ? 'pos' : 'neg', springe: '#k5-tab' }),
-    zahl5('Aufs Spar- und Depotkonto', a.spar > 0 ? eur0(a.spar / a.n) : '–', a.spar > 0 ? `Ø im Monat · zusammen ${eur0(a.spar)} – zusätzlich zum Ergebnis` : 'in diesem Zeitraum nichts', { ziel: zuBuchungen({ kat: 'Sparen', ...zeit }) }),
+    // Spar- und Depotkonto mit Vorzeichen: + = gespart, − = mehr entnommen als eingezahlt (das deckt dann einen Teil des Ergebnisses)
+    zahl5(a.spar >= 0 ? 'Aufs Spar- und Depotkonto' : 'Spar- und Depotkonto', a.sparRein || a.sparRaus ? plusMinus(a.spar / a.n) : '–',
+      !(a.sparRein || a.sparRaus) ? 'in diesem Zeitraum nichts' : `Ø im Monat ${a.spar >= 0 ? 'gespart' : 'entnommen (mehr raus als rein)'} · eingezahlt ${eur0(a.sparRein)}, entnommen ${eur0(a.sparRaus)}`,
+      { cls: a.spar < 0 ? 'neg' : '', ziel: zuBuchungen({ kat: 'Sparen', ...zeit }) }),
   ].join('');
 
   // Der Durchschnittsmonat: drei Blöcke wie bei den Verträgen, je Zeile Ø jetzt, Ø Vorjahr und Veränderung
@@ -827,7 +902,7 @@ function k5Seite() {
       ${zeile('Fixkosten', 'Verträge, Miete, Unterhalt', a.fix / a.n, vm(v, v?.fix), false, { tab: 'fix', fixtab: 'vertraege' })}
       ${zeile('Lebenshaltung', 'alle übrigen Ausgaben', (a.aus - a.fix) / a.n, v ? (v.aus - v.fix) / v.n : null, false, zuBuchungen({ art: 'aus', nf: '1', ...zeit }))}</div></section>
     <section class="vg" style="--vg:${a.erg >= 0 ? 'var(--ein-text)' : 'var(--aus-text)'}">${zeile(a.erg >= 0 ? '= übrig' : '= Fehlbetrag', `Sparquote ${quote(a) ?? '–'} %${v ? ` · Vorjahr ${quote(v)} %` : ''}`, a.erg / a.n, ergV, true, { springe: '#k5-tab' }, true).replace(`<b class="dm-w">${eur0(a.erg / a.n)}</b>`, `<b class="dm-w ${a.erg >= 0 ? 'pos' : 'neg'}">${plusMinus(a.erg / a.n)}</b>`)}
-      ${a.spar > 0 || v?.spar > 0 ? `<div class="vg-l">${zeile('Aufs Spar- und Depotkonto', 'zusätzlich gespart, nicht in den Ausgaben', Math.max(0, a.spar) / a.n, v ? Math.max(0, v.spar) / v.n : null, true, zuBuchungen({ kat: 'Sparen', ...zeit }))}</div>` : ''}</section>
+      ${a.spar || v?.spar ? `<div class="vg-l">${zeile('Spar- und Depotkonto', a.spar >= 0 ? 'zusätzlich gespart, nicht in den Ausgaben' : 'mehr entnommen als eingezahlt (minus)', a.spar / a.n, v ? v.spar / v.n : null, true, zuBuchungen({ kat: 'Sparen', ...zeit })).replace('<b class="dm-w">-', '<b class="dm-w neg">-').replace('<span class="dm-v">-', '<span class="dm-v" style="color:var(--aus-text)">-')}</div>` : ''}</section>
   </div>`;
 
   // Was sich verändert hat (Kategorien je Monat ggü. Vorjahr)
@@ -929,7 +1004,7 @@ let kat2Grafik = null;
 function tabKategorien() {
   if (S.kart === 'pruefen') return pruefenSeite(pruefHelfer());
   const P = periode(), aus = S.kart !== 'ein', nP = offenZahl(D);
-  const rechts = `<div class="seg" role="group" aria-label="Ausgaben, Einnahmen oder Prüfen"><button data-k2art="aus" class="${aus ? 'an' : ''}">Ausgaben</button><button data-k2art="ein" class="${aus ? '' : 'an'}">Einnahmen</button><button data-k2art="pruefen" title="Buchungen ohne passende Kategorie ansehen und selbst einordnen">Prüfen${nP ? ` <small class="pr-zahl">${NUM.format(nP)}</small>` : ''}</button></div>${kontoWahlHtml()}${zeitSeg()}`;
+  const rechts = `<div class="seg" role="group" aria-label="Ausgaben, Einnahmen oder Prüfen"><button data-k2art="aus" class="${aus ? 'an' : ''}">Ausgaben</button><button data-k2art="ein" class="${aus ? '' : 'an'}">Einnahmen</button><button data-k2art="pruefen" title="Buchungen ohne passende Kategorie ansehen und selbst einordnen">Prüfen${nP ? ` <small class="pr-zahl">${NUM.format(nP)}</small>` : ''}</button></div>${kontoWahlHtml()}${zeitSeg(P)}`;
   if (!P.monate.length) { kat2Grafik = null; return kopf5('Kategorien', 'In diesem Jahr ist noch kein Monat abgeschlossen.', rechts); }
   const a = sammle(P.monate, aus ? 'aus' : 'ein'), v = P.vor.length ? sammle(P.vor, aus ? 'aus' : 'ein') : null;
   const liste = [...a.g.values()].filter((x) => x.c > 0).sort((x, y) => y.c - x.c);
@@ -943,8 +1018,8 @@ function tabKategorien() {
   const top = liste.slice(0, 3).map((x) => `${zl(`<b>${esc(schoen(x.k))}</b>`, { wahl: x.k })} (${anteil(x.c)} %)`);
   const verb = top.length > 1 ? `${top.slice(0, -1).join(', ')} und ${top.at(-1)}` : top[0];
   const gesZ = zl(`<b>${eur0(ges / a.n)}</b>`, alleZiel);
-  let satz = aus ? `${P.label[0].toUpperCase()}${P.label.slice(1)} gingen im Schnitt ${gesZ} im Monat raus – am meisten für ${verb}.`
-    : `${P.label[0].toUpperCase()}${P.label.slice(1)} kamen im Schnitt ${gesZ} im Monat herein – vor allem aus ${verb}.`;
+  let satz = P.hinweis + (aus ? `${P.label[0].toUpperCase()}${P.label.slice(1)} gingen im Schnitt ${gesZ} im Monat raus – am meisten für ${verb}.`
+    : `${P.label[0].toUpperCase()}${P.label.slice(1)} kamen im Schnitt ${gesZ} im Monat herein – vor allem aus ${verb}.`);
   let s2 = null;
   if (v) {
     s2 = [...liste].filter((x) => Math.abs(dM(x)) >= 3000).sort((x, y) => (aus ? dM(y) - dM(x) : dM(x) - dM(y)))[0];
@@ -1002,7 +1077,8 @@ function tabKategorien() {
   const wd = dM(wahl), wv = vorM(wahl);
   const unter = [...(aus ? wahl.unter : new Map())].filter(([, c]) => c > 0).sort((x, y) => y[1] - x[1]);
   const empf = [...wahl.empf].filter(([, x]) => x.c > 0).sort((x, y) => y[1].c - x[1].c).slice(0, 5);
-  const katZiel = (z) => zuBuchungen(aus ? { art: 'aus', kat: wahl.k, ...z } : { art: 'ein', kat: 'Einnahmen', ukat: wahl.k, ...z });
+  // Einnahmen sind nur nach Unterkategorie gruppiert (Steuererstattung z. B. unter „Finanzen“) – also ohne Hauptkategorie filtern
+  const katZiel = (z) => zuBuchungen(aus ? { art: 'aus', kat: wahl.k, ...z } : { art: 'ein', ...einFilter(wahl.k), ...z });
   kat2Grafik = { monate: P.monate, werte: P.monate.map((k) => (wahl.mon.get(k) || 0) / 100), schnitt: wahl.c / a.n / 100, aus, ziel: (k) => katZiel(monatZiel(k)) };
   const festAnteil = aus ? wahl.fest / wahl.c : 0;
   const jahrWert = (wahl.c / a.n) * 12;
@@ -1071,32 +1147,38 @@ const KONTO_GRUPPEN = [
 let kontenGrafik = null;
 function tabKonten() {
   const tag = stichtag(), ks = kontoSet(), drin = (i) => !ks || ks.has(i);
-  const offen = kontostaende(D, tag).filter((x) => !['nicht_eroeffnet', 'geschlossen'].includes(x.status));
+  const amTag = kontostaende(D, tag);
+  const offen = amTag.filter((x) => !['nicht_eroeffnet', 'geschlossen'].includes(x.status));
   const stand = offen.filter((x) => !fremd(x.k));
   const vj = +D.bis.slice(0, 4) - 1;
   const schnell = [[D.bis, 'Heute'], [`${vj}-12-31`, `31.12.${vj}`], [`${vj - 1}-12-31`, `31.12.${vj - 1}`]];
   const rechts = `${kontoWahlHtml()}<div class="kon5-tag"><label for="stichtag" class="muted klein">Stand am</label><input type="date" id="stichtag" value="${tag}" min="${D.von}" max="${D.bis}">
     <div class="seg">${schnell.map(([d, t]) => `<button class="${d === tag ? 'an' : ''}" data-st="${d}">${t}</button>`).join('')}</div></div>`;
-  kontenGrafik = { tag };
   const m = stand.filter((x) => x.status !== 'unbekannt');
   const unbekannt = offen.filter((x) => x.status === 'unbekannt');
+  // Verlauf (24 Monatsenden) schon hier, damit die Erklärung Lücken nennen kann
+  const vTage = [];
+  { let [y, mo] = D.bis.slice(0, 7).split('-').map(Number); for (let i = 0; i < 24; i++) { const d = monatsletzter(`${mkey(y, mo)}-01`); vTage.unshift(d > D.bis ? D.bis : d); if (--mo === 0) { mo = 12; y--; } } }
+  kontenGrafik = { tag, tage: vTage, summen: vTage.map((d) => kontenSumme(d, ks)) };
   if (!m.length) return kopf5('Konten', 'Am gewählten Tag gab es keine passenden Konten.', rechts) + eingangHtml();
-  const jb = `${+tag.slice(0, 4) - 1}-12-31`;
-  const anfang = new Map(kontostaende(D, jb < D.von ? D.von : jb).map((x) => [x.i, x.c]));
+  const jb = `${+tag.slice(0, 4) - 1}-12-31`, jbTag = jb < D.von ? D.von : jb;
+  const anfang = new Map(kontostaende(D, jbTag).map((x) => [x.i, x.c]));
   const gew = m.filter((x) => drin(x.i) && x.c != null);
-  const saldo = gew.reduce((t, x) => t + x.c, 0), saldoJb = gew.reduce((t, x) => t + (anfang.get(x.i) ?? 0), 0);
+  // Summen der (gewählten) eigenen Konten – unvollständig, wenn ein Konto an dem Tag nicht berechenbar ist; dann keine Veränderung
+  const sT = summeKonten(amTag.filter((x) => !fremd(x.k) && drin(x.i))), sJb = kontenSumme(jbTag, ks);
+  const saldo = sT.c, seitJb = diffSumme(sJb, sT), offenZ = sT.voll ? '' : ' + ?';
   const kaution = gew.filter((x) => /kaution/i.test(x.k.name)).reduce((t, x) => t + x.c, 0);
   const heute = tag === D.bis, V = heute && !ks ? verlauf5() : null, ende = V?.monate.at(-1);
   const kautionK = gew.find((x) => /kaution/i.test(x.k.name));
   const jahrZiel = zuBuchungen({ jahr: tag.slice(0, 4), monat: '' });
-  let satz = `Am ${dde(tag)} liegen auf ${ks ? 'den gewählten Konten' : 'deinen Konten'} ${zs(`<b class="${saldo < 0 ? 'neg' : ''}">${eur0(saldo)}</b>`, '.kon5 .ko')}${kaution ? ` – davon ${zl(`${eur0(kaution)} Mietkaution`, zuBuchungen({ konto: kautionK.k.name }))}, frei verfügbar also <b>${eur0(saldo - kaution)}</b>` : ''}.`;
-  if (tag.slice(5) !== '12-31') satz += ` Seit Jahresbeginn ${zl(`<b class="${saldo - saldoJb >= 0 ? 'pos' : 'neg'}">${plusMinus(saldo - saldoJb)}</b>`, jahrZiel)}.`;
-  if (ende) satz += ` Läuft alles so weiter wie geplant, sind es Ende ${MONAT[+ende.k.slice(5) - 1]} etwa ${zl(`<b>${eur0(ende.stand)}</b>`, { tab: 'start' })}.`;
+  let satz = `Am ${dde(tag)} liegen auf ${ks ? 'den gewählten Konten' : 'deinen Konten'} ${zs(`<b class="${saldo < 0 ? 'neg' : ''}">${summeText(sT)}</b>`, '.kon5 .ko')}${sT.voll ? '' : ` – ${esc(fehltText(sT))}`}${kaution ? ` – davon ${zl(`${eur0(kaution)} Mietkaution`, zuBuchungen({ konto: kautionK.k.name }))}, frei verfügbar also <b class="${saldo - kaution < 0 ? 'neg' : ''}">${eur0(saldo - kaution)}${offenZ}</b>` : ''}.`;
+  if (tag.slice(5) !== '12-31' && seitJb != null) satz += ` Seit Jahresbeginn ${zl(`<b class="${seitJb >= 0 ? 'pos' : 'neg'}">${plusMinus(seitJb)}</b>`, jahrZiel)}.`;
+  if (ende?.stand != null) satz += ` Läuft alles so weiter wie geplant, sind es Ende ${MONAT[+ende.k.slice(5) - 1]} etwa ${zl(`<b class="${ende.stand < 0 ? 'neg' : ''}">${eur0(ende.stand)}</b>`, { tab: 'start' })}.`;
   const zahlen = [
-    zahl5(heute ? 'Heute auf den Konten' : `Stand ${dde(tag)}`, eur0(saldo), ks ? `${gew.length} gewählte Konten` : 'ohne Depot, gemeinsame und Kinderkonten · je Konto ↓', { cls: saldo < 0 ? 'neg' : '', springe: '.kon5 .ko' }),
-    zahl5('Frei verfügbar', eur0(saldo - kaution), kaution ? `ohne Mietkaution (${eur0(kaution)}) · Kautionskonto →` : 'keine Kaution gebunden', kaution ? { ziel: zuBuchungen({ konto: kautionK.k.name }) } : { springe: '.kon5 .ko' }),
-    zahl5(`Seit 1. Januar ${tag.slice(0, 4)}`, plusMinus(saldo - saldoJb), `Stand 31.12.: ${eur0(saldoJb)} · Buchungen ${tag.slice(0, 4)} →`, { cls: saldo - saldoJb >= 0 ? 'pos' : 'neg', ziel: jahrZiel }),
-    ende ? zahl5(`Prognose Ende ${MONAT[+ende.k.slice(5) - 1]}`, `≈ ${eur0(ende.stand)}`, `wenn alles läuft wie ein normaler Monat (${plusMinus(V.R.erg)})`, { cls: ende.stand < 0 ? 'neg' : '', ziel: { tab: 'start' } })
+    zahl5(heute ? 'Heute auf den Konten' : `Stand ${dde(tag)}`, summeText(sT), !sT.voll ? esc(fehltText(sT)) : `${ks ? `${gew.length} gewählte Konten` : 'ohne Depot, gemeinsame und Kinderkonten · je Konto ↓'}${summeHinweis(sT) ? ` · ${summeHinweis(sT)}` : ''}`, { cls: saldo < 0 ? 'neg' : '', springe: '.kon5 .ko' }),
+    zahl5('Frei verfügbar', `${eur0(saldo - kaution)}${offenZ}`, kaution ? `ohne Mietkaution (${eur0(kaution)}) · Kautionskonto →` : 'keine Kaution gebunden', { cls: saldo - kaution < 0 ? 'neg' : '', ...(kaution ? { ziel: zuBuchungen({ konto: kautionK.k.name }) } : { springe: '.kon5 .ko' }) }),
+    zahl5(`Seit 1. Januar ${tag.slice(0, 4)}`, seitJb == null ? '–' : plusMinus(seitJb), seitJb == null ? `nicht berechenbar: ${esc(fehltText(sJb && !sJb.voll ? sJb : sT))}` : `Stand 31.12.: ${summeText(sJb)} · Buchungen ${tag.slice(0, 4)} →`, { cls: seitJb == null ? '' : seitJb >= 0 ? 'pos' : 'neg', ziel: jahrZiel }),
+    ende ? zahl5(`Prognose Ende ${MONAT[+ende.k.slice(5) - 1]}`, ende.stand == null ? '–' : `≈ ${eur0(ende.stand)}`, ende.stand == null ? 'nicht berechenbar: der Stand heute ist unvollständig' : `wenn alles läuft wie ein normaler Monat (${pmHtml(V.R.erg)})`, { cls: ende.stand < 0 ? 'neg' : '', ziel: { tab: 'start' } })
       : zahl5('Konten', NUM.format(gew.length), unbekannt.length ? `${unbekannt.length} ohne Daten für diesen Tag` : 'mit Daten zu diesem Tag', { springe: '.kon5 .ko' }),
   ].join('');
 
@@ -1104,10 +1186,11 @@ function tabKonten() {
   const letzte = new Map();
   for (const r of D.rows) if (r.d <= tag && (!letzte.has(r.k) || r.d > letzte.get(r.k))) letzte.set(r.k, r.d);
   const maxC = Math.max(1, ...offen.filter((x) => x.status !== 'unbekannt').map((x) => Math.abs(x.c || 0)));
+  const fragezeichen = (tip) => `<span class="muted" role="button" tabindex="0" title="${esc(tip)}" data-tipp="${esc(tip)}">?</span>`;
   const zeile = (x, g) => {
     const a0 = anfang.get(x.i), d = x.c != null && a0 != null ? x.c - a0 : null;
     const zusatz = { geschaetzt: 'geschätzt', ungefaehr: `± ${eur0(Math.round((x.abw || 0) * 100))}` }[x.status];
-    const wert = x.status === 'unsicher' ? `<span class="muted" title="${esc(STATUS_TEXT.unsicher)}">?</span>` : `${zusatz ? '≈ ' : ''}${eur0(x.c)}`;
+    const wert = x.status === 'unsicher' ? fragezeichen(STATUS_TEXT.unsicher) : `${zusatz ? '≈ ' : ''}${eur0(x.c)}`;
     const unter = [x.k.vollstaendig ? '✓ lückenlos' : `Daten ab ${dde(x.k.von).slice(3)}`, letzte.has(x.i) ? `letzte Buchung ${dde(letzte.get(x.i)).slice(0, 6)}` : '', zusatz].filter(Boolean).join(' · ');
     return `<button class="vg-z ko-z${g.fremd || drin(x.i) ? '' : ' aus'}${x.c < 0 ? ' minus' : ''}"${geh(zuBuchungen({ konto: x.k.name, jahr: tag.slice(0, 4) }))} title="Anklicken: Buchungen von ${esc(x.k.name)}">
       <span class="vg-zn">${esc(x.k.name)}<small>${esc(unter)}</small></span>
@@ -1117,74 +1200,87 @@ function tabKonten() {
   const gruppen = KONTO_GRUPPEN.map((g) => {
     const l = offen.filter((x) => x.status !== 'unbekannt' && g.test(x.k)).sort((a, b) => (b.c ?? -1e12) - (a.c ?? -1e12));
     if (!l.length) return '';
-    const summe = l.filter((x) => g.fremd || drin(x.i)).reduce((t, x) => t + (x.c || 0), 0);
+    // fehlt ein Konto (auch eines ohne Daten für diesen Tag, das unten genannt wird), steht wie bei ihm ein „?“
+    const gs = summeKonten(offen.filter((x) => g.test(x.k) && (g.fremd || drin(x.i))));
     const farbe = g.fremd ? 'var(--muted)' : g.id === 'frei' ? 'var(--accent)' : g.id === 'karte' ? 'var(--aus)' : 'color-mix(in srgb, var(--accent) 45%, var(--surface))';
     return `<section class="vg kg${g.fremd ? ' fremd' : ''}" id="kg-${g.id}" style="--vg:${farbe}">
-      <div class="vg-k"><span class="vg-n"><b>${g.titel}</b><small>${g.erkl}</small></span><span class="vg-b leer"></span><b class="vg-w ${summe < 0 ? 'neg' : ''}">${eur0(summe)}</b><span class="vg-p">${l.length} ${l.length === 1 ? 'Konto' : 'Konten'}</span></div>
+      <div class="vg-k"><span class="vg-n"><b>${g.titel}</b><small>${g.erkl}</small></span><span class="vg-b leer"></span><b class="vg-w ${gs.voll && gs.c < 0 ? 'neg' : ''}">${gs.voll ? summeText(gs) : fragezeichen(`${eur0(gs.c)} ${fehltText(gs)}`)}</b><span class="vg-p">${l.length} ${l.length === 1 ? 'Konto' : 'Konten'}</span></div>
       <div class="vg-l">${l.map((x) => zeile(x, g)).join('')}</div></section>`;
   }).join('');
 
-  // Monatsenden: Summe deiner (gewählten) Konten und die Veränderung zum Vormonat
+  // Monatsenden: Summe aller (gewählten) eigenen Konten an diesem Tag und die Veränderung zum Vormonat
   const enden = [];
   { let [y, mo] = tag.slice(0, 7).split('-').map(Number); for (let i = 0; i < 13; i++) { if (--mo === 0) { mo = 12; y--; } const d = monatsletzter(`${mkey(y, mo)}-01`); if (d >= D.von) enden.unshift(d); } }
-  const st = enden.map((d) => new Map(kontostaende(D, d).map((x) => [x.i, x.c])));
-  const sumAm = (s2) => gew.reduce((t, x) => t + (s2.get(x.i) || 0), 0);
-  const reihe = [...enden.map((d, i) => ({ d, c: sumAm(st[i]) })), { d: tag, c: saldo, jetzt: true }];
-  const monatsenden = `<div class="me">${reihe.slice(1).reverse().map((x, i, a) => {
-    const vor = reihe[reihe.length - 2 - i], diff = x.c - vor.c;
-    return `<button class="me-z${i >= 6 ? ' fuell-aus' : ''}"${i >= 6 ? ` data-fuell="${i}" data-stopp` : ''} data-st="${x.d}" title="Anklicken: Kontostände an diesem Tag"><span>${x.jetzt ? (heute ? 'heute' : dde(x.d).slice(0, 6)) : `Ende ${monKurz(x.d.slice(0, 7))}`}</span><b>${eur0(x.c)}</b><span class="${diff >= 0 ? 'pos' : 'neg'}">${plusMinus(diff)}</span></button>`;
+  const st = enden.map((d) => kontostaende(D, d));
+  const sumAm = (l) => summeKonten(l.filter((x) => !fremd(x.k) && drin(x.i)));
+  const reihe = [...enden.map((d, i) => ({ d, s: sumAm(st[i]) })), { d: tag, s: sT, jetzt: true }];
+  const diffHtml = (d, nach = '') => (d == null ? `<span class="muted" title="nicht berechenbar: an einem der beiden Tage fehlt ein Konto">–</span>` : `<span class="${d >= 0 ? 'pos' : 'neg'}">${plusMinus(d)}${nach}</span>`);
+  const monatsenden = `<div class="me">${reihe.slice(1).reverse().map((x, i) => {
+    const vor = reihe[reihe.length - 2 - i];
+    return `<button class="me-z${i >= 6 ? ' fuell-aus' : ''}"${i >= 6 ? ` data-fuell="${i}" data-stopp` : ''} data-st="${x.d}" title="${x.s.voll ? 'Anklicken: Kontostände an diesem Tag' : esc(`Unvollständig: ${fehltText(x.s)} – anklicken: Kontostände an diesem Tag`)}"><span>${x.jetzt ? (heute ? 'heute' : dde(x.d).slice(0, 6)) : `Ende ${monKurz(x.d.slice(0, 7))}`}</span><b class="${x.s.c < 0 ? 'neg' : ''}">${summeText(x.s)}</b>${diffHtml(diffSumme(vor.s, x.s))}</button>`;
   }).join('')}</div>`;
-  // Verteilung nach Zweck und größte Bewegungen des Monats – nur wenn neben der Kontenliste Platz ist
-  const gruppenSumme = KONTO_GRUPPEN.filter((g) => !g.fremd).map((g) => ({ g, c: gew.filter((x) => g.test(x.k)).reduce((t, x) => t + x.c, 0) })).filter((x) => x.c);
-  const positiv = gruppenSumme.filter((x) => x.c > 0), posS = positiv.reduce((t, x) => t + x.c, 0) || 1;
+  // Verteilung nach Zweck und größte Bewegungen des Monats – nur wenn neben der Kontenliste Platz ist.
+  // Gruppen aus allen eigenen Konten (auch ohne Daten für diesen Tag), damit sie dieselbe Lücke melden wie die Summe oben;
+  // Anteile und Balken nur, wenn jede Gruppe vollständig ist – sonst wären die Prozente aus einem Teil gerechnet.
+  const gruppenSumme = KONTO_GRUPPEN.filter((g) => !g.fremd).map((g) => ({ g, s: summeKonten(stand.filter((x) => drin(x.i) && g.test(x.k))) })).map((x) => ({ ...x, c: x.s.c })).filter((x) => x.c || !x.s.voll);
+  const alleVoll = gruppenSumme.every((x) => x.s.voll);
+  const positiv = alleVoll ? gruppenSumme.filter((x) => x.c > 0) : [], posS = positiv.reduce((t, x) => t + x.c, 0) || 1;
   const gFarbe = { frei: 'var(--accent)', gebunden: 'color-mix(in srgb, var(--accent) 45%, var(--surface))', karte: 'var(--aus)' };
   const verteilung = `<div class="s5-teil fuell-aus" data-fuell="20"><h3>Wo dein Geld liegt</h3>
-    <div class="wf5-b">${positiv.map((x) => `<i style="width:${(x.c / posS) * 100}%;background:${gFarbe[x.g.id]}" data-springe="#kg-${x.g.id}" title="${x.g.titel}: ${eur0(x.c)}"></i>`).join('')}</div>
-    <div class="wf5">${gruppenSumme.map((x) => `<button class="wf5-z" data-springe="#kg-${x.g.id}"><i style="background:${gFarbe[x.g.id]}"></i><span class="wf5-n">${x.g.titel}</span><b class="${x.c < 0 ? 'neg' : ''}">${eur0(x.c)}</b><span class="wf5-p">${x.c > 0 ? `${Math.round((x.c / posS) * 100)} %` : ''}</span></button>`).join('')}</div></div>`;
+    ${alleVoll ? `<div class="wf5-b">${positiv.map((x) => `<i style="width:${(x.c / posS) * 100}%;background:${gFarbe[x.g.id]}" data-springe="#kg-${x.g.id}" title="${x.g.titel}: ${summeText(x.s)}"></i>`).join('')}</div>` : '<p class="s5-erkl">Ohne Anteile: an diesem Tag fehlt der Stand eines Kontos („+ ?“).</p>'}
+    <div class="wf5">${gruppenSumme.map((x) => `<button class="wf5-z" data-springe="#kg-${x.g.id}"><i style="background:${gFarbe[x.g.id]}"></i><span class="wf5-n">${x.g.titel}</span><b class="${x.c < 0 ? 'neg' : ''}">${summeText(x.s)}</b><span class="wf5-p">${alleVoll && x.c > 0 ? `${Math.round((x.c / posS) * 100)} %` : ''}</span></button>`).join('')}</div></div>`;
   const monatK = tag.slice(0, 7), eigene = new Set(gew.map((x) => x.i));
   const bewegt = D.rows.filter((r) => r.d.startsWith(monatK) && r.d <= tag && eigene.has(r.k) && r.art !== 'Umbuchung').sort((a, b) => Math.abs(b.c) - Math.abs(a.c)).slice(0, 5);
   const bewegungen = bewegt.length ? `<div class="s5-teil fuell-aus" data-fuell="21"><h3>Größte Bewegungen im ${MONAT[+monatK.slice(5) - 1]}</h3><div class="nt">${bewegt.map((r) => `<button class="nt-z bw-z"${geh(zuBuchungen({ q: r.g ? `"${r.g}"` : '', ...monatZiel(monatK) }))} title="Anklicken: Buchungen"><span class="nt-n">${dde(r.d).slice(0, 6)} ${esc(r.g || r.z || '–')}</span><b class="${cls(r.c)}">${eur0(r.c)}</b></button>`).join('')}</div></div>` : '';
-  const r12 = reihe.slice(-13), hoch = r12.reduce((m, x) => (x.c > m.c ? x : m), r12[0]), tief = r12.reduce((m, x) => (x.c < m.c ? x : m), r12[0]), vorJahr = reihe.length >= 13 ? reihe[reihe.length - 13] : null;
+  // Höchster und tiefster Stand nur, wenn jede Summe des Zeitraums vollständig ist – fehlt ein Monatsende, kann es
+  // dort höher oder tiefer gewesen sein (und nur, wenn es mindestens zwei gibt)
+  const r13 = reihe.slice(-13), r12 = r13.every((x) => x.s.voll) ? r13 : [], vorJahr = reihe.length >= 13 ? reihe[reihe.length - 13] : null;
+  const hoch = r12.reduce((a, x) => (!a || x.s.c > a.s.c ? x : a), null), tief = r12.reduce((a, x) => (!a || x.s.c < a.s.c ? x : a), null);
+  const zeitraum = r13.length >= 13 ? '12 Monate' : `seit Ende ${monKurz(r13[0].d.slice(0, 7))}`;
+  const ecke = (t, x) => (x && r12.length > 1 ? `<div class="klick" data-st="${x.d}"><dt>${t} (${zeitraum})</dt><dd class="${x.s.c < 0 ? 'neg' : ''}">${summeText(x.s)} <small class="inl">${x.jetzt ? 'heute' : `Ende ${monKurz(x.d.slice(0, 7))}`}</small></dd></div>` : '');
   const ecken = `<dl class="s5-dl fuell-aus" data-fuell="22">
-    <div class="klick" data-st="${hoch.d}"><dt>Höchster Stand (12 Monate)</dt><dd>${eur0(hoch.c)} <small class="inl">${hoch.jetzt ? 'heute' : `Ende ${monKurz(hoch.d.slice(0, 7))}`}</small></dd></div>
-    <div class="klick" data-st="${tief.d}"><dt>Tiefster Stand (12 Monate)</dt><dd>${eur0(tief.c)} <small class="inl">${tief.jetzt ? 'heute' : `Ende ${monKurz(tief.d.slice(0, 7))}`}</small></dd></div>
-    ${vorJahr ? `<div class="klick" data-st="${vorJahr.d}"><dt>Vor einem Jahr</dt><dd>${eur0(vorJahr.c)} <small class="inl ${saldo - vorJahr.c >= 0 ? 'pos' : 'neg'}">${plusMinus(saldo - vorJahr.c)} bis heute</small></dd></div>` : ''}</dl>`;
-  const endenT = enden.slice(-6), stT = st.slice(-6);
+    ${ecke('Höchster Stand', hoch)}${ecke('Tiefster Stand', tief)}
+    ${vorJahr ? `<div class="klick" data-st="${vorJahr.d}"><dt>Vor einem Jahr</dt><dd class="${vorJahr.s.c < 0 ? 'neg' : ''}">${summeText(vorJahr.s)} <small class="inl">${diffHtml(diffSumme(vorJahr.s, sT), ' bis heute')}</small></dd></div>` : ''}</dl>`;
+  // je Konto an den letzten 6 Monatsenden: alle (gewählten) eigenen Konten, die an einem dieser Tage geführt wurden
+  const endenT = enden.slice(-6), stT = st.slice(-6), sumT = reihe.slice(-7, -1).map((x) => x.s);
   const alt = (i) => (i < endenT.length - 3 ? ' m-alt' : '');
+  const gefuehrt = (x) => x && !['nicht_eroeffnet', 'geschlossen'].includes(x.status);
+  const tabZeilen = D.konten.map((k, i) => i).filter((i) => !fremd(D.konten[i]) && drin(i) && [...stT, amTag].some((l) => gefuehrt(l[i])));
+  const zelle = (x) => (!gefuehrt(x) || x.status === 'unbekannt' ? '<span class="muted">–</span>' : x.c == null ? fragezeichen(STATUS_TEXT[x.status]) : `<span class="${x.c < 0 ? 'neg' : ''}">${NUM.format(Math.round(x.c / 100))}</span>`);
+  const zahl = (c) => NUM.format(Math.round(c / 100));
   const tabelle = `<div class="t3-rahmen"><table class="t3 t3-eng"><thead><tr><th>Konto</th>${endenT.map((d, i) => `<th class="r${alt(i)}">${monKurz(d.slice(0, 7))}</th>`).join('')}<th class="r">${dde(tag).slice(0, 6)}</th></tr></thead><tbody>
-    ${gew.map((x) => `<tr><td class="t3-n">${esc(x.k.name)}</td>${stT.map((s2, i) => `<td class="r${alt(i)}">${s2.get(x.i) == null ? '<span class="muted">–</span>' : NUM.format(Math.round(s2.get(x.i) / 100))}</td>`).join('')}<td class="r"><b>${NUM.format(Math.round(x.c / 100))}</b></td></tr>`).join('')}</tbody>
-    <tfoot><tr><td>Zusammen</td>${stT.map((s2, i) => `<td class="r${alt(i)}">${NUM.format(Math.round(sumAm(s2) / 100))}</td>`).join('')}<td class="r">${NUM.format(Math.round(saldo / 100))}</td></tr></tfoot></table></div>`;
+    ${tabZeilen.map((i) => `<tr><td class="t3-n">${esc(D.konten[i].name)}</td>${stT.map((l, j) => `<td class="r${alt(j)}">${zelle(l[i])}</td>`).join('')}<td class="r"><b>${zelle(amTag[i])}</b></td></tr>`).join('')}</tbody>
+    <tfoot><tr><td>Zusammen</td>${sumT.map((s, j) => `<td class="r${alt(j)}${s.c < 0 ? ' neg' : ''}"${s.voll ? '' : ` title="${esc(fehltText(s))}"`}>${summeText(s, zahl)}</td>`).join('')}<td class="r${saldo < 0 ? ' neg' : ''}">${summeText(sT, zahl)}</td></tr></tfoot></table></div>`;
   return kopf5('Konten', satz, rechts) + `<div class="s5-zahlen">${zahlen}</div>
     <div class="s5-raster kon5">
       ${karte5('Alle Konten', `Stand ${dde(tag)} · nach Zweck gruppiert · rechts: Veränderung seit 1.1. · anklicken: Buchungen${ks ? ' · blass: nicht gewählt' : ''}`,
         `<div class="ko vgs"><div class="vg-kopf"><span>Konto</span><span></span><span>Stand</span><span>seit 1.1.</span></div>${gruppen}</div>
         ${unbekannt.length ? `<p class="s5-erkl">Für diesen Tag noch ohne Daten: ${unbekannt.map((x) => `${esc(x.k.name)} (ab ${dde(x.k.von)})`).join(', ')}.</p>` : ''}`, 's5-b2')}
       <div class="s5-spalte">
-        ${karte5('Verlauf', `Summe ${ks ? 'der gewählten Konten' : 'deiner Konten'} am Monatsende${V ? ' · gestrichelt: Prognose' : ''} · Punkt anklicken: Stand an diesem Tag`, '<div class="s5-chart klein"><canvas id="c-konten-verlauf"></canvas></div>')}
-        ${karte5('Monatsenden', 'Summe am Monatsende und Veränderung zum Vormonat · anklicken: Stand an diesem Tag', monatsenden + verteilung + bewegungen + ecken, '', zs('je Konto ↓', '#kon-tab'))}
+        ${karte5('Verlauf', `Summe ${ks ? 'der gewählten Konten' : 'deiner Konten'} am Monatsende${V ? ' · gestrichelt: Prognose' : ''} · Punkt anklicken: Stand an diesem Tag.${lueckenText(kontenGrafik.summen)}`, '<div class="s5-chart klein"><canvas id="c-konten-verlauf"></canvas></div>')}
+        ${karte5('Monatsenden', `Summe am Monatsende und Veränderung zum Vormonat · anklicken: Stand an diesem Tag${reihe.some((x) => !x.s.voll) ? ' · „+ ?“: für ein Konto fehlt an dem Tag der Stand' : ''}`, monatsenden + verteilung + bewegungen + ecken, '', zs('je Konto ↓', '#kon-tab'))}
       </div>
     </div>
     <details class="card s5-details" id="kon-tab"><summary>Kontostände je Konto an den Monatsenden <span class="muted">· in Euro</span></summary>${tabelle}</details>` + eingangHtml();
 }
 
-// Summe der Kontostände je Monatsende (24 Monate), ohne Kontenauswahl zusätzlich die Prognose
+// Summe der Kontostände je Monatsende (24 Monate), ohne Kontenauswahl zusätzlich die Prognose.
+// Unvollständige Summen (ein Konto an dem Tag nicht berechenbar) bleiben eine Lücke.
 function kontenGrafikZeichnen() {
   if (!kontenGrafik || !$('#c-konten-verlauf')) return;
-  const ks = kontoSet(), tage = [];
-  let [y, mo] = D.bis.slice(0, 7).split('-').map(Number);
-  for (let i = 0; i < 24; i++) { const d = new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10); tage.unshift(d > D.bis ? D.bis : d); if (--mo === 0) { mo = 12; y--; } }
-  const werte = tage.map((d) => kontostaende(D, d).filter((x) => (ks ? ks.has(x.i) : !fremd(x.k)) && x.c != null && x.status !== 'unbekannt').reduce((t, x) => t + x.c, 0) / 100);
+  const ks = kontoSet(), tage = [...kontenGrafik.tage];
+  const werte = kontenGrafik.summen.map((s) => (vollSumme(s) == null ? null : s.c / 100));
   const labels = tage.map((d) => (d === D.bis ? 'heute' : monKurz(d.slice(0, 7))));
   let ab = -1;
   if (!ks) {
     const prog = verlauf5().monate.filter((m) => m.art !== 'ist');
     ab = tage.length;
-    for (const m of prog) { tage.push(monatsletzter(`${m.k}-01`)); werte.push(m.stand / 100); labels.push(monKurz(m.k)); }
+    for (const m of prog) { tage.push(monatsletzter(`${m.k}-01`)); werte.push(m.stand == null ? null : m.stand / 100); labels.push(monKurz(m.k)); }
   }
   const c = css('--accent'), o = basis();
   o.interaction = { mode: 'index', intersect: false };
   o.layout = { padding: { top: 22, right: 8 } };
-  o.plugins.tooltip.callbacks = { title: (it) => { const i = it[0].dataIndex; return `${ab >= 0 && i >= ab ? 'erwartet ' : 'Stand '}${dde(tage[i])}`; }, label: (it) => ` ${ks ? 'gewählte Konten' : 'alle Konten'}: ${EUR0.format(it.raw)}` };
+  o.plugins.tooltip.callbacks = { title: (it) => { const i = it[0].dataIndex; return `${ab >= 0 && i >= ab ? 'erwartet ' : 'Stand '}${dde(tage[i])}`; }, label: (it) => (it.raw == null ? ' nicht vollständig berechenbar' : ` ${ks ? 'gewählte Konten' : 'alle Konten'}: ${EUR0.format(it.raw)}`) };
   o.scales = {
     x: { ...achsenStil(), grid: { display: false }, ticks: { ...achsenStil().ticks, maxRotation: 0, autoSkip: true, autoSkipPadding: 10, font: { size: 11 } } },
     y: { ...achsenStil(), ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 5 } },
@@ -1199,9 +1295,10 @@ function kontenGrafikZeichnen() {
 }
 
 // ======================================================================= Tabellen
+const KOLL = new Intl.Collator('de');
 function sortiert() {
   const f = S.sort === 'betrag' ? (a, b) => Math.abs(a.c) - Math.abs(b.c) || a.c - b.c :   // nach Höhe des Betrags, egal ob rein oder raus
-    S.sort === 'wer' ? (a, b) => (a.g || a.z).localeCompare(b.g || b.z, 'de') : (a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : a.i - b.i);
+    S.sort === 'wer' ? (a, b) => KOLL.compare(a.g || a.z, b.g || b.z) : (a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : a.i - b.i);
   const out = F.slice().sort(f);
   if (S.dir < 0) out.reverse();
   return out;
@@ -1213,7 +1310,7 @@ function keineTreffer(conds) {
   if (!conds.length && !S.jahr && !S.monat && !S.zr) return leer;
   const kurz = (r) => `<li><span>${dde(r.d)}</span><span>${esc(r.g || r.z || '–')}</span><span class="muted">${esc(D.konten[r.k].name)}</span><b class="${cls(r.c)}">${EUR.format(r.c / 100)}</b></li>`;
   const kasten = (text, l, ziel, knopf) => `<div class="leer kt"><p>${text}</p><ul class="kt-l">${l.slice(-5).reverse().map(kurz).join('')}</ul>${l.length > 5 ? `<p class="muted">… und ${l.length - 5} weitere</p>` : ''}<button class="btn" data-weiter="${esc(JSON.stringify(ziel))}">${knopf}</button></div>`;
-  const zeitraum = [S.jahr ? (S.jahr.includes(',') ? `in ${S.jahr.replace(/,/g, ', ')}` : `in ${S.jahr}`) : '', S.monat ? `(${monateWahl().map((m) => MON[m - 1]).join(', ')})` : '', S.zr ? `von ${zrText()}` : ''].filter(Boolean).join(' ');
+  const zeitraum = [S.jahr ? `in ${esc(String(S.jahr).replace(/,/g, ', '))}` : '', S.monat ? `(${monateWahl().map((m) => MON[m - 1]).join(', ')})` : '', S.zr ? `von ${zrText()}` : ''].filter(Boolean).join(' ');
   // 1. dieselben Filter, nur ohne Jahr und Monat
   if (S.jahr || S.monat || S.zr) {
     const alt = { jahr: S.jahr, monat: S.monat, zr: S.zr };
@@ -1246,25 +1343,29 @@ function tabBuchungen(conds) {
   const re = w.length ? new RegExp('(' + w.map(escRe).join('|') + ')', 'gi') : null;
   const mk = (s) => (re ? esc(s).replace(re, '<mark>$1</mark>') : esc(s));
   const kn = (r) => D.konten[r.k].name;
-  // Kennzahlen der Treffer (alle, nicht nur die angezeigten)
-  let ein = 0, aus = 0, von = rows[0].d, bis = rows[0].d;
+  // Kennzahlen der Treffer (alle, nicht nur die angezeigten) – wie in den Kennzahlen nach Art: Einnahmen und Ausgaben
+  // (Erstattungen mindern die Ausgaben), Sparen/Depot und Umbuchungen extra. Auf Konten der Kinder und gemeinsamen
+  // Konten haben die Buchungen keine solche Art – dort zählt das Vorzeichen, ebenso wenn nur Sparen/Umbuchungen gefunden sind.
+  const nachArt = (r) => (r.art === 'Einnahme' ? 'ein' : r.art === 'Ausgabe' ? 'aus' : FREMD_ART.has(r.art) ? (r.c > 0 ? 'ein' : 'aus') : 'extra');
+  const nurExtra = rows.every((r) => nachArt(r) === 'extra'), seite = (r) => (nurExtra ? (r.c > 0 ? 'ein' : 'aus') : nachArt(r));
+  let ein = 0, aus = 0, extra = 0, nEin = 0, nAus = 0, nExtra = 0, von = rows[0].d, bis = rows[0].d;
   const mon = new Map(), tag = new Map();
   for (const r of rows) {
-    if (r.c > 0) ein += r.c; else aus -= r.c;
+    const s = seite(r), k = r.d.slice(0, 7), m = mon.get(k) || { ein: 0, aus: 0 };
+    if (s === 'ein') { ein += r.c; m.ein += r.c; nEin++; } else if (s === 'aus') { aus -= r.c; m.aus -= r.c; nAus++; } else { extra += r.c; nExtra++; }
     if (r.d < von) von = r.d; if (r.d > bis) bis = r.d;
-    const k = r.d.slice(0, 7), m = mon.get(k) || { ein: 0, aus: 0 };
-    if (r.c > 0) m.ein += r.c; else m.aus -= r.c;
     mon.set(k, m);
     tag.set(r.d, (tag.get(r.d) || 0) + r.c);
   }
   const monate = [];
   for (let k = von.slice(0, 7); k <= bis.slice(0, 7); k = mVor(k, 1)) monate.push(k);
   const nM = monate.length, je = (c) => (nM > 1 ? ` · Ø ${eur0(c / nM)} im Monat` : '');
+  const extraText = nExtra ? ` · extra: Sparen/Umbuchungen <span class="${extra < 0 ? 'neg' : ''}">${plusMinus(extra)}</span>` : '';
   const zahlen = [
     zahl5('Treffer', NUM.format(rows.length), von === bis ? dde(von) : `${dde(von)} – ${dde(bis)}`),
-    zahl5('Ausgaben', eur0(aus), `${rows.filter((r) => r.c < 0).length} Buchungen${je(aus)}`, { cls: aus ? 'neg' : '' }),
-    zahl5('Einnahmen', eur0(ein), `${rows.filter((r) => r.c > 0).length} Buchungen${je(ein)}`, { cls: ein ? 'pos' : '' }),
-    zahl5('Saldo', plusMinus(ein - aus), 'Einnahmen minus Ausgaben der Treffer', { cls: ein - aus >= 0 ? 'pos' : 'neg' }),
+    zahl5('Ausgaben', eur0(aus), `${nAus} Buchungen${je(aus)}`, { cls: aus ? 'neg' : '' }),
+    zahl5('Einnahmen', eur0(ein), `${nEin} Buchungen${je(ein)}`, { cls: ein > 0 ? 'pos' : ein < 0 ? 'neg' : '' }),
+    zahl5('Saldo', plusMinus(ein - aus), `Einnahmen minus Ausgaben${extraText}`, { cls: ein - aus >= 0 ? 'pos' : 'neg' }),
   ].join('');
   if (nM > 36) {   // lange Zeiträume: je Jahr
     const jahr = new Map();
@@ -1281,33 +1382,58 @@ function tabBuchungen(conds) {
   zeig.forEach((r, i) => {
     const erster = !gruppiert || i === 0 || zeig[i - 1].d !== r.d, letzter = i === zeig.length - 1 || zeig[i + 1].d !== r.d;
     const auf = offen.has(r.i);
-    h += `<div class="bz mit-datum${auf ? ' offen' : ''}${gruppiert && erster ? ' tag-anfang' : ''}" data-i="${r.i}" title="Anklicken: Einzelheiten">
+    h += `<div class="bz mit-datum${auf ? ' offen' : ''}${gruppiert && erster ? ' tag-anfang' : ''}" data-i="${r.i}" role="button" tabindex="0" aria-expanded="${auf ? 'true' : 'false'}" title="Anklicken: Einzelheiten">
       <span class="bz-d">${erster ? datum(r.d) : ''}</span>
       <span class="bz-n"><b>${mk(r.g || r.z || '–')}</b>${r.g && r.z ? `<small>${mk(r.z)}</small>` : ''}</span>
       <span class="bz-k"><span>${esc(schoen(r.kat))}</span><small>${esc(schoen(r.ukat))}${r.ukat ? ' · ' : ''}${esc(kn(r))}</small></span>
       <b class="bz-b ${cls(r.c)}">${eur(r.c)}</b></div>`;
-    if (auf) {
-      const dd = [['Verwendungszweck', r.z], ['Kategorie', `${schoen(r.kat)}${r.ukat ? ' · ' + schoen(r.ukat) : ''}`], ['Konto', kn(r)], ['Art', r.art],
-        ['Vertrag', r.v], ['Tags', r.t], ['Notiz', r.n], ['Steuerkategorie (Buhl)', r.st], ['Früher genannt', r.ga.join(', ')]];
-      const bx = det(r, D.j);
-      dd.push(['Umsatzart', bx.uart], ['IBAN Gegenseite', ibanText(bx.iban)], ['Mandatsreferenz', bx.mref], ['Gläubiger-ID', bx.gid],
-        ['Kategorie laut Quelle', (bx.kat0 || '').replace(/ › $/, '')], ['Kategorie geändert durch', r.regel || bx.regel], ['Datei', (bx.quelle || '').replace(/ › .*/, '')]);
-      for (let x = dd.length - 1; x >= 0; x--) if (!dd[x][1]) dd.splice(x, 1);
-      h += `<div class="bz-detail"><dl>${dd.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
-        <div class="bz-knoepfe">${r.g ? `<button class="btn sm" data-alle="${esc(r.g)}">Alle Buchungen von „${esc(r.g.length > 40 ? r.g.slice(0, 40) + '…' : r.g)}“</button>` : ''}
-        <button class="btn sm" data-nurkat="${esc(r.kat)}">Nur ${esc(schoen(r.kat))}</button>
-        <button class="btn sm"${geh({ tab: 'uebersicht', kart: 'pruefen', wahl: gruppenSchluessel(r) })}>Kategorie prüfen/ändern</button>
-        <label class="st-zuordnen klein">Steuer: <select data-steuer-i="${r.i}">${postenOptionen(steuerPosten(r), true)}</select></label></div></div>`;
-    }
+    if (auf) h += buchDetail(r);
     if (gruppiert && letzter && anzahl.get(r.d) > 1) h += `<div class="bz-tagsumme">${anzahl.get(r.d)} Buchungen am ${dde(r.d).slice(0, 6)} · zusammen <b class="${cls(tag.get(r.d))}">${eur(tag.get(r.d))}</b></div>`;
   });
-  let fuss = `<div class="bt-summe"><span>Summe ${rows.length === 1 ? 'der Buchung' : `aller ${NUM.format(rows.length)} Treffer`}<small>Einnahmen ${eur(ein)} · Ausgaben ${eur(-aus)}</small></span><b class="${cls(ein - aus)}">${eur(ein - aus)}</b></div>`;
+  let fuss = `<div class="bt-summe"><span>Summe ${rows.length === 1 ? 'der Buchung' : `aller ${NUM.format(rows.length)} Treffer`}<small>Einnahmen ${eur(ein)} · Ausgaben ${eur(-aus)}${nExtra ? ` · Sparen/Umbuchungen ${eur(extra)}` : ''}</small></span><b class="${cls(ein - aus + extra)}">${eur(ein - aus + extra)}</b></div>`;
   if (rows.length > limit) fuss += `<div class="mehr">${NUM.format(limit)} von ${NUM.format(rows.length)} angezeigt <button class="btn sm" id="mehr">Weitere ${NUM.format(Math.min(500, rows.length - limit))} anzeigen</button></div>`;
   return `<div class="bt">
     <div class="s5-zahlen bt-zahlen">${zahlen}</div>
-    ${buchGrafik ? `<div class="bt-grafik"><div class="bt-g-t"><b>Je ${buchGrafik.jahre ? 'Jahr' : 'Monat'}</b><span class="muted klein">Ausgaben orange, Einnahmen grün · Säule anklicken: nur ${buchGrafik.jahre ? 'dieses Jahr' : 'dieser Monat'}</span></div><div class="s5-chart bt-chart"><canvas id="c-buch"></canvas></div></div>` : ''}
+    ${buchGrafik ? `<div class="bt-grafik"><div class="bt-g-t"><b>Je ${buchGrafik.jahre ? 'Jahr' : 'Monat'}</b><span class="muted klein">Ausgaben orange, Einnahmen grün${nExtra ? ' (ohne Sparen/Umbuchungen)' : ''} · Säule anklicken: nur ${buchGrafik.jahre ? 'dieses Jahr' : 'dieser Monat'}</span></div><div class="s5-chart bt-chart"><canvas id="c-buch"></canvas></div></div>` : ''}
     <div class="bt-leiste"><span class="muted klein">${gruppiert ? 'Nach Datum, bei mehreren Buchungen am Tag mit Tagessumme' : S.sort === 'betrag' ? 'Nach Betrag sortiert' : 'Nach Empfänger sortiert'} · Zeile anklicken: Einzelheiten</span>${sortKnoepfe}</div>
     <div class="bt-liste">${h}</div>${fuss}</div>`;
+}
+
+// Einzelheiten einer Buchung (aufgeklappte Zeile)
+function buchDetail(r) {
+  const kn = (r) => D.konten[r.k].name;
+  const dd = [['Verwendungszweck', r.z], ['Kategorie', `${schoen(r.kat)}${r.ukat ? ' · ' + schoen(r.ukat) : ''}`], ['Konto', kn(r)], ['Art', r.art],
+    ['Vertrag', r.v], ['Tags', r.t], ['Notiz', r.n], ['Steuerkategorie (Buhl)', r.st], ['Früher genannt', r.ga.join(', ')]];
+  const bx = det(r, D.j);
+  dd.push(['Umsatzart', bx.uart], ['IBAN Gegenseite', ibanText(bx.iban)], ['Mandatsreferenz', bx.mref], ['Gläubiger-ID', bx.gid],
+    ['Kategorie laut Quelle', (bx.kat0 || '').replace(/ › $/, '')], ['Kategorie geändert durch', r.regel || bx.regel], ['Datei', (bx.quelle || '').replace(/ › .*/, '')]);
+  for (let x = dd.length - 1; x >= 0; x--) if (!dd[x][1]) dd.splice(x, 1);
+  return `<div class="bz-detail"><dl>${dd.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+    <div class="bz-knoepfe">${r.g ? `<button class="btn sm" data-alle="${esc(r.g)}">Alle Buchungen von „${esc(r.g.length > 40 ? r.g.slice(0, 40) + '…' : r.g)}“</button>` : ''}
+    <button class="btn sm" data-nurkat="${esc(r.kat)}">Nur ${esc(schoen(r.kat))}</button>
+    <button class="btn sm"${geh({ tab: 'uebersicht', kart: 'pruefen', wahl: gruppenSchluessel(r) })}>Kategorie prüfen/ändern</button>
+    <label class="st-zuordnen klein">Steuer: <select data-steuer-i="${r.i}">${postenOptionen(steuerPosten(r), true)}</select></label></div></div>`;
+}
+function detailKnoepfe(el) {
+  el.querySelectorAll('[data-alle]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); setze({ q: `"${b.dataset.alle}"` }); });
+  el.querySelectorAll('[data-nurkat]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); setze({ kat: b.dataset.nurkat, ukat: '' }); });
+  el.querySelectorAll('[data-steuer-i]').forEach((s) => {
+    s.onclick = (e) => e.stopPropagation();
+    s.onchange = () => { steuerZuordnen(D.rows[+s.dataset.steuerI], s.value); toast('Für die Steuer gespeichert – zu sehen im Reiter „Steuer“.'); };
+  });
+}
+// auf-/zuklappen, ohne die ganze Liste und die Grafik neu zu zeichnen
+function aufklappen(zeile) {
+  const i = +zeile.dataset.i, auf = !offen.has(i);
+  if (auf) offen.add(i); else offen.delete(i);
+  zeile.classList.toggle('offen', auf);
+  zeile.setAttribute('aria-expanded', String(auf));
+  const alt = zeile.nextElementSibling?.classList.contains('bz-detail') ? zeile.nextElementSibling : null;
+  if (!auf) { alt?.remove(); return; }
+  if (alt) return;
+  zeile.insertAdjacentHTML('afterend', buchDetail(D.rows[i]));
+  gehBinden(zeile.nextElementSibling);
+  detailKnoepfe(zeile.nextElementSibling);
 }
 
 // Ausgaben und Einnahmen der Treffer je Monat; Klick auf eine Säule: nur dieser Monat (übrige Filter bleiben)
@@ -1357,9 +1483,9 @@ function eingangHtml() {
   const status = (x) => (x.stati.size > 2 ? [...x.stati].filter((t) => !/schon in der Liste/.test(t)).join(' · ') || 'alles schon in der Liste' : [...x.stati].join(' · '));
   return `<details class="eingang"${offen ? ' open' : ''}><summary><b>Dateien im Eingang</b> <span class="muted">· ${liste.length} Dateien · zuletzt verarbeitet ${dde(e.erstellt.slice(0, 10))}, ${e.erstellt.slice(11, 16)} Uhr</span>${offen ? ` · <span class="neg">${offen} nicht übernommen</span>` : ''}</summary>
     <p class="muted klein">${hilfe}</p>
-    <div class="tab-scroll"><table class="t fix eingang-t"><thead><tr><th class="erste">Datei</th><th class="sp-m" style="width:150px">erkannt als</th><th class="sp-m" style="width:170px">Konto</th>
-      <th class="sp-m" style="width:170px">Zeitraum</th><th class="r" style="width:72px" title="Buchungen in der Datei">gelesen</th><th class="r" style="width:60px" title="neu in die Liste übernommen">neu</th>
-      <th class="r sp-m" style="width:72px" title="schon in der Liste – nicht doppelt gezählt">doppelt</th></tr></thead><tbody>
+    <div class="tab-scroll"><table class="t fix eingang-t"><thead><tr><th class="erste">Datei</th><th class="sp-m" style="width:14%">erkannt als</th><th class="sp-m" style="width:16%">Konto</th>
+      <th class="sp-m" style="width:16%">Zeitraum</th><th class="r" style="width:9%" title="Buchungen in der Datei">gelesen</th><th class="r" style="width:7%" title="neu in die Liste übernommen">neu</th>
+      <th class="r sp-m" style="width:9%" title="schon in der Liste – nicht doppelt gezählt">doppelt</th></tr></thead><tbody>
     ${liste.map((x) => `<tr class="${x.ok ? '' : 'eingang-fehler'}"><td class="erste" title="${esc(x.datei)}"><div class="ell">${esc(name(x.datei))}</div><div class="klein ${x.ok ? 'muted' : 'neg'} ell" title="${esc(status(x))}">${esc(status(x))}</div></td>
       <td class="sp-m klein">${esc(x.art)}</td><td class="sp-m klein ell" title="${esc([...x.konten].join(', '))}">${esc([...x.konten].join(', ') || '–')}</td>
       <td class="sp-m klein">${x.von ? `${esc(x.von)} – ${esc(x.bis)}` : '–'}</td><td class="r">${NUM.format(x.gelesen)}</td>
@@ -1383,12 +1509,12 @@ function tabelle(conds) {
   $('#tabelle-card').classList.toggle('frei', frei);
   $('#tabelle-card .card-h').hidden = frei;
   if (S.tab === 'steuer') {
-    steuerZeigen(el, { einJahr, toast, setze: (p) => setze(p), neuZeichnen: () => tabelle(conds) });
+    steuerZeigen(el, { einJahr, toast, setze: (p) => setze(p), neuZeichnen: () => tabelle(conds), S });
     $('.dl').hidden = true;
     return;
   }
   if (S.tab === 'gehalt') {
-    gehaltZeigen(el, { D, kopf5, karte5, zahl5, zl, zs, geh, gehBinden, freiFuellen, springe, zeichne, basis, achsenStil, css, alpha, achse, kurzWert, schraffur,
+    gehaltZeigen(el, { D, S, setze: (p) => setze(p), kopf5, karte5, zahl5, zl, zs, geh, gehBinden, freiFuellen, springe, zeichne, basis, achsenStil, css, alpha, achse, kurzWert, schraffur,
       zuBuchungen, monatZiel, mVor, monKurz, monLang, MON, MONAT, NUM, dde, eur, eur0, esc });
     $('.dl').hidden = true;
     return;
@@ -1403,7 +1529,7 @@ function tabelle(conds) {
   el.querySelectorAll('.kl-z[data-k2kat]').forEach((b) => b.onclick = () => { setze({ wahl: b.dataset.k2kat }); if (matchMedia('(max-width: 1180px)').matches) $('.kl-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   el.querySelectorAll('[data-k2zelle]').forEach((td) => td.onclick = () => {
     const [k, m] = td.dataset.k2zelle.split('|');
-    setze({ tab: 'buchungen', q: '', jahr: m.slice(0, 4), monat: String(+m.slice(5)), zr: '', art: S.kart, ...(S.kart === 'aus' ? { kat: k, ukat: '' } : { kat: 'Einnahmen', ukat: k }) });
+    setze({ tab: 'buchungen', q: '', jahr: m.slice(0, 4), monat: String(+m.slice(5)), zr: '', art: S.kart, ...(S.kart === 'aus' ? { kat: k, ukat: '' } : einFilter(k)) });
   });
   el.querySelectorAll('[data-fixtab]').forEach((b) => b.onclick = () => setze({ fixtab: b.dataset.fixtab }));
   el.querySelectorAll('[data-sort]').forEach((th) => th.onclick = () => {
@@ -1412,15 +1538,10 @@ function tabelle(conds) {
   });
   el.querySelectorAll('[data-i]').forEach((tr) => tr.onclick = (e) => {
     if (e.target.closest('.bz-detail')) return;
-    const i = +tr.dataset.i; offen.has(i) ? offen.delete(i) : offen.add(i); tabelle(conds);
+    aufklappen(tr);
   });
-  el.querySelectorAll('[data-alle]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); setze({ q: `"${b.dataset.alle}"` }); });
   el.querySelectorAll('[data-weiter]').forEach((b) => b.onclick = () => setze(JSON.parse(b.dataset.weiter)));
-  el.querySelectorAll('[data-nurkat]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); setze({ kat: b.dataset.nurkat, ukat: '' }); });
-  el.querySelectorAll('[data-steuer-i]').forEach((s) => {
-    s.onclick = (e) => e.stopPropagation();
-    s.onchange = () => { steuerZuordnen(D.rows[+s.dataset.steuerI], s.value); toast('Für die Steuer gespeichert – zu sehen im Reiter „Steuer“.'); };
-  });
+  detailKnoepfe(el);
   $('#mehr')?.addEventListener('click', () => { limit += 500; tabelle(conds); });
   el.querySelectorAll('[data-fixansicht]').forEach((b) => b.onclick = () => { fixAnsicht = b.dataset.fixansicht; tabelle(conds); $('#btn-reset').hidden = !abweichend(); });
   el.querySelector('.fix-grundlage')?.addEventListener('toggle', (e) => { fixGrundlageAuf = e.target.open; });
@@ -1465,10 +1586,13 @@ const RHYTHMEN = [
 const VARIABEL_KAT = new Set(['Essen & Trinken', 'Lifestyle', 'Drogerie']);
 const VARIABEL_UKAT = new Set(['Bargeld', 'Tanken', 'Parken', 'Taschengeld', 'Futter & Tierbedarf']);
 const MONATSWORTE = /\b(januar|februar|maerz|april|mai|juni|juli|august|september|oktober|november|dezember|jan|feb|mar|apr|jun|jul|aug|sep|sept|okt|nov|dez)\b/g;
-const tageZwischen = (a, b) => (Date.parse(b) - Date.parse(a)) / 864e5;
+// Ergebnis je Eingabe merken: die Vertragserkennung fragt dieselben Daten, Namen und Zwecke sehr oft ab
+const merken = (fn) => { const m = new Map(); return (s) => { let v = m.get(s); if (v === undefined) { v = fn(s); m.set(s, v); } return v; }; };
+const msAm = merken((d) => Date.parse(d));
+const tageZwischen = (a, b) => (msAm(b) - msAm(a)) / 864e5;
 const median = (a) => { const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
-const zweckSignatur = (z) => norm(z).replace(/[^a-z ]+/g, ' ').replace(MONATSWORTE, ' ').replace(/\b[a-z]{1,2}\b/g, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(0, 4).join(' ');
-const empfaengerKey = (g) => norm(g).replace(/\d{5,}/g, '').replace(/\s+/g, ' ').trim();
+const zweckSignatur = merken((z) => norm(z).replace(/[^a-z ]+/g, ' ').replace(MONATSWORTE, ' ').replace(/\b[a-z]{1,2}\b/g, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(0, 4).join(' '));
+const empfaengerKey = merken((g) => norm(g).replace(/\d{5,}/g, '').replace(/\s+/g, ' ').trim());
 
 // Gemeinschaftskonto (mit Unterkonten/Pockets): Deine regelmäßigen Überweisungen dorthin (Haushaltsgeld, Sparen Urlaub, …)
 // sind Fixkosten. Verträge, die vom Gemeinschaftskonto abgehen, werden nur informativ gezeigt – sonst zählte dasselbe
@@ -1712,10 +1836,10 @@ let lebenWahl = (() => { try { return localStorage.getItem('fd.leben') || 'schni
 const lebenGewaehlt = () => (lebenWahl === 'eigen' && lebenEigen ? lebenEigen : lebenWahl === 'typisch' ? lebenshaltung().typisch : lebenshaltung().schnitt);
 let lebenEigen = (() => { try { return +localStorage.getItem('fd.lebeneigen') || 0; } catch { return 0; } })();   // Cent
 
-// Geld auf deinen eigenen Konten (ohne Gemeinschaftskonto und Pockets, Mietkaution und die Konten der Kinder)
+// Geld auf deinen eigenen Konten (ohne Gemeinschaftskonto und Pockets, Mietkaution und die Konten der Kinder);
+// null, wenn sich der heutige Stand eines dieser Konten nicht berechnen lässt
 function ruecklagen() {
-  return kontostaende(D, D.bis).filter((x) => !x.k.kind && x.c != null && !istGemeinsam(x.i) && !/kaution/i.test(x.k.name)
-    && !['geschlossen', 'nicht_eroeffnet'].includes(x.status)).reduce((s, x) => s + x.c, 0);
+  return vollSumme(summeKonten(kontostaende(D, D.bis).filter((x) => !fremd(x.k) && !istGemeinsam(x.i) && !/kaution/i.test(x.k.name))));
 }
 
 // Tag im Monat, an dem ein Vertrag abgebucht wird (Median der letzten Zahlungen), und der Tag, an dem das Gehalt kommt
@@ -1724,12 +1848,11 @@ function gehaltstag() {
   const t = D.rows.filter((r) => r.art === 'Einnahme' && r.ukat === 'Lohn / Gehalt' && r.c >= 100000).slice(-6).map((r) => +r.d.slice(8, 10));
   return t.length ? Math.round(median(t)) : 0;
 }
-// nächste Fälligkeit eines nicht monatlichen Vertrags
+// nächste Fälligkeit eines nicht monatlichen Vertrags nach dem Datenstand (eine ausstehende kennt ausstehend())
 function naechsteZahlung(f) {
-  let t = Date.parse(f.zuletzt);
-  const ab = Date.parse(D.bis) - 5 * 864e5;
-  do t += f.rh.tage * 864e5; while (t < ab);
-  return new Date(t).toISOString().slice(0, 10);
+  let t = Date.parse(f.zuletzt), am;
+  do { t += f.rh.tage * 864e5; am = new Date(t).toISOString().slice(0, 10); } while (am <= D.bis);
+  return am;
 }
 // Name eines Vertrags für Listen: „Miete Kathrin Kluge“, „Kindesunterhalt Leo“, „Lebensversicherung“ …
 function vertragName(f) {
@@ -1745,14 +1868,14 @@ const vertragsKey = (f) => `${f.name}|${f.sig}|${f.seit}`;
 const pzVon = (v, g) => (!g ? '–' : Math.abs(v / g) < 0.0005 ? '< 0,1 %' : `${NUM.format(Math.round((v / g) * 1000) / 10)} %`);
 
 // Ein oder mehrere Balken „Einkommen = 100 %“: Fixkosten | Lebenshaltung | was bleibt (rot schraffiert: was fehlt)
-function budgetBalken(zeilen, B) {
+function budgetBalken(zeilen, B, G = B) {   // Balkenlänge: B = Einkommen (100 %); Prozente im Tooltip vom Gehalt G
   const max = Math.max(B, ...zeilen.map((z) => z.fk + z.l));
   const w = (c) => `${(Math.max(0, c) / max) * 100}%`;
   const teil = (cls_, c, tip) => (c > 0 ? `<i class="${cls_}" style="width:${w(c)}" title="${esc(tip)}">${c / max >= 0.09 ? `<span>${eur0(c)}</span>` : ''}</i>` : '');
   return `<div class="bb">${zeilen.map((z) => {
     const rest = B - z.fk - z.l;
     return `<div class="bb-zeile">${z.titel ? `<div class="bb-t">${esc(z.titel)}</div>` : ''}
-      <div class="bb-balken">${teil('bb-fix', z.fk, `Fixkosten ${eur0(z.fk)} · ${pzVon(z.fk, B)}`)}${teil('bb-leben', z.l, `Lebenshaltung ${eur0(z.l)} · ${pzVon(z.l, B)}`)}${teil('bb-rest', rest, `bleibt ${eur0(rest)} · ${pzVon(rest, B)}`)}
+      <div class="bb-balken">${teil('bb-fix', z.fk, `Fixkosten ${eur0(z.fk)} · ${pzVon(z.fk, G)} vom Gehalt`)}${teil('bb-leben', z.l, `Lebenshaltung ${eur0(z.l)} · ${pzVon(z.l, G)} vom Gehalt`)}${teil('bb-rest', rest, `bleibt ${eur0(rest)} · ${pzVon(rest, G)} vom Gehalt`)}
         ${rest < 0 ? `<b class="bb-minus" style="left:${w(B)};width:${w(-rest)}" title="fehlt ${eur0(-rest)}"></b>` : ''}
         ${max > B ? `<b class="bb-linie" style="left:${w(B)}" title="100 % = Einkommen"></b>` : ''}</div></div>`;
   }).join('')}</div>`;
@@ -1766,7 +1889,9 @@ function tabFixkosten() {
   const vomGemeinsamen = fixSichtbar(gefiltert.filter((f) => f.gemeinsam));
   const nFrueher = alle.filter((f) => !f.aktiv && f.zuletzt >= FRUEHER_AB).length, nAelter = alle.filter((f) => !f.aktiv && f.zuletzt < FRUEHER_AB).length;
   const liste = fixSichtbar(alle);
-  const pm = aktiv.reduce((s, f) => s + f.proMonat, 0), G = R.gehalt, L = R.leben, E = G + R.sonst, rest = E - pm - L;
+  // Gehalt, sonstige Einnahmen und Lebenshaltung gibt es nur für alle Konten. Die Rechnung „was bleibt“ (Satz, Balken,
+  // „Was wäre wenn“) nimmt deshalb immer die Verträge aller Konten (R.fix); die Kontenauswahl wirkt auf die Vertragsliste.
+  const pm = aktiv.reduce((s, f) => s + f.proMonat, 0), G = R.gehalt, L = R.leben, E = G + R.sonst, rest = E - R.fix - L;
   const pct = (v) => pzVon(v, G);
   // Gruppen je Art, sortiert nach laufender Summe
   const nachArt = (vs) => {
@@ -1780,22 +1905,25 @@ function tabFixkosten() {
     }
     return [...g.values()].sort((a, b) => b.summe - a.summe || a.art.localeCompare(b.art, 'de'));
   };
-  const ueber = nachArt(aktiv), arten = nachArt(liste);
-  fixKontext = { B: E, bz: { vom: 'vom Einkommen', name: 'Einkommen' }, pm, L, lauf: aktiv, ruecklage: ruecklagen() };
+  const ueber = nachArt(aktiv), arten = nachArt(liste), ueberAlle = ks ? nachArt(R.vertraege) : ueber;
+  // B = Einkommen (Gehalt + typische sonstige Einnahmen) für das, was übrig bleibt; Quote und Puffer wie überall vom aktuellen Gehalt G
+  fixKontext = { B: E, G, bz: { vom: 'vom Gehalt', name: 'Einkommen' }, pm: R.fix, L, lauf: R.vertraege, ruecklage: ruecklagen() };
   const termine = naechsteTermine(aktiv), tSumme = termine.reduce((t, x) => t + x.f.betrag, 0);
   const jaehrl = aktiv.filter((f) => f.rh.proJahr < 12);
   const vertrZiel = S.fixtab === 'vertraege' ? (sel) => ({ springe: sel }) : () => ({ ziel: { fixtab: 'vertraege' } });
   const vz = (inhalt, sel = '.fix5 .vgs') => (S.fixtab === 'vertraege' ? zs(inhalt, sel) : zl(inhalt, { fixtab: 'vertraege' }));
-  const satz = `Von deinem Gehalt (${zl(`<b>${eur0(G)}</b>`, zuGehalt())}) sind ${vz(`<b>${eur0(pm)}</b>`)} im Monat fest verplant – <b class="${pm <= G * 0.5 ? 'pos' : 'neg'}">${pct(pm)}</b>${pm > G * 0.5 ? ' (Faustregel: höchstens 50 %)' : ''}.
+  const satz = ks ? `Auf ${ks.size === 1 ? `dem Konto ${esc(kontoText())}` : 'den gewählten Konten'} laufen ${aktiv.length} ${aktiv.length === 1 ? 'Vertrag' : 'Verträge'} über ${vz(`<b>${eur0(pm)}</b>`)} im Monat – ${pct(pm)} deines Gehalts (${zl(`<b>${eur0(G)}</b>`, zuGehalt())}).
+    Was im Monat bleibt, lässt sich nur für alle Konten rechnen (Gehalt und Lebenshaltung gehören zu allen): ${zl(`<b class="${rest >= 0 ? 'pos' : 'neg'}">${rest >= 0 ? 'bleiben' : 'fehlen'} ${eur0(Math.abs(rest))}</b>`, { tab: 'start' })}.`
+    : `Von deinem Gehalt (${zl(`<b>${eur0(G)}</b>`, zuGehalt())}) sind ${vz(`<b>${eur0(pm)}</b>`)} im Monat fest verplant – <b class="${pm <= G * 0.5 ? 'pos' : 'neg'}">${pct(pm)}</b>${pm > G * 0.5 ? ' (Faustregel: höchstens 50 %)' : ''}.
     ${rest >= 0 ? 'Nach' : 'Mit'} Lebenshaltung (${S.fixtab === 'vertraege' ? zs(eur0(L), '#fix-leben') : zl(eur0(L), { fixtab: 'vertraege', _springe: '#fix-leben' })}) und sonstigen Einnahmen (${zl(`+${eur0(R.sonst)}`, { tab: 'uebersicht', kart: 'ein', wahl: '', jahr: '' })}) ${rest >= 0 ? 'bleiben' : 'fehlen'} ${zl(`<b class="${rest >= 0 ? 'pos' : 'neg'}">${eur0(Math.abs(rest))}</b>`, { tab: 'start' })} im Monat.`;
   const zahlen = [
     zahl5('Fixkosten im Monat', eur0(pm), `${aktiv.length} laufende Verträge · jährliche anteilig · Liste ↓`, vertrZiel('.fix5 .vgs')),
-    zahl5('Anteil am Gehalt', pct(pm), `von ${eur0(G)} netto (${monKurz(R.gehaltMonat)}) · Faustregel höchstens 50 % · Gehälter →`, { cls: pm <= G * 0.5 ? 'pos' : 'neg', ziel: zuGehalt() }),
+    zahl5('Anteil am Gehalt', pct(pm), `${ks ? 'nur Verträge der gewählten Konten · ' : ''}von ${eur0(G)} netto (${monKurz(R.gehaltMonat)}) · Faustregel höchstens 50 % · Gehälter →`, { cls: pm <= G * 0.5 ? 'pos' : 'neg', ziel: zuGehalt() }),
     zahl5('Fixkosten im Jahr', eur0(pm * 12), jaehrl.length ? `davon ${eur0(jaehrl.reduce((t, f) => t + f.proJahr, 0))} nicht monatlich (${jaehrl.length} Verträge) · Kalender →` : 'alles monatlich', { ziel: { fixtab: 'kalender' } }),
     zahl5('Nächste 30 Tage', eur0(tSumme), `${termine.length} feste Abbuchungen · Kalender ansehen`, { ziel: { fixtab: 'kalender' } }),
   ].join('');
-  // Balken: große Arten einzeln, kleine (unter 4 %) zusammen
-  const gross = ueber.filter((g) => g.summe >= (pm + L) * 0.04), klein = ueber.filter((g) => g.summe > 0 && g.summe < (pm + L) * 0.04), kleinS = klein.reduce((t, g) => t + g.summe, 0);
+  // Balken (immer alle Konten): große Arten einzeln, kleine (unter 4 %) zusammen
+  const gross = ueberAlle.filter((g) => g.summe >= (R.fix + L) * 0.04), klein = ueberAlle.filter((g) => g.summe > 0 && g.summe < (R.fix + L) * 0.04), kleinS = klein.reduce((t, g) => t + g.summe, 0);
   const teile = [...gross.map((g) => ({ n: FIX_KURZ[g.art] || esc(g.art), c: g.summe, tip: `${g.art}: ${eur0(g.summe)} im Monat · ${pct(g.summe)} vom Gehalt – anklicken: Verträge`, ...vertrZiel(`#${fvId(g.art)}`) })),
     ...(kleinS ? [{ n: 'Übrige', c: kleinS, tip: `${klein.map((g) => `${g.art} ${eur0(g.summe)}`).join(', ')} – zusammen ${eur0(kleinS)} im Monat`, ...vertrZiel(`#${fvId(klein[0].art)}`) }] : [])];
   const lh = lebenshaltung();
@@ -1803,8 +1931,8 @@ function tabFixkosten() {
   const knopf = (k, t, wert) => `<button data-leben="${k}" class="${lebenWahl === k ? 'an' : ''}">${t}${wert != null ? ` <small>${eur0(wert)}</small>` : ''}</button>`;
   let h = kopf5('Fixkosten', satz, kontoWahlHtml()) + `<div class="s5-zahlen">${zahlen}</div>
     <section class="card s5-karte fix5-balken"><div class="s5-kt"><div class="s5-kt-t"><h2>Dein Monat in einem Balken</h2>
-      <p class="s5-erkl">Dunkel = Fixkosten je Art, hell = Lebenshaltung, rot schraffiert = was fehlt. Der senkrechte Strich ist dein Einkommen (Gehalt + übliche sonstige Einnahmen). Fläche anklicken: Einzelheiten.</p></div></div>
-      ${geldBalken({ ...R, fix: pm, ein: E, aus: pm + L, erg: rest }, teile)}
+      <p class="s5-erkl">Dunkel = Fixkosten je Art, hell = Lebenshaltung, rot schraffiert = was fehlt. Der senkrechte Strich ist dein Einkommen (Gehalt + übliche sonstige Einnahmen). Fläche anklicken: Einzelheiten.${ks ? ' <b>Gilt für alle Konten</b> – die Kontenauswahl wirkt nur auf die Verträge.' : ''}</p></div></div>
+      ${geldBalken({ ...R, ein: E, aus: R.fix + L, erg: rest }, teile)}
       <details class="fix-grundlage"${fixGrundlageAuf ? ' open' : ''}><summary>Gerechnet mit Gehalt ${eur0(G)} (${monLang(R.gehaltMonat)}), sonstigen Einnahmen ${eur0(R.sonst)} (typischer Monat) und Lebenshaltung ${eur0(L)} (${lebenName()}) · <span class="link">Lebenshaltung ändern</span></summary>
         <div class="fix-einst"><div class="fix-bezug-zeile"><span>Lebenshaltung</span><div class="seg fix-bezug">${knopf('schnitt', 'Ø 12 Monate', lh.schnitt)}${knopf('typisch', 'typischer Monat', lh.typisch)}${knopf('eigen', 'eigener Wert')}</div>
           ${lebenWahl === 'eigen' ? `<label class="fix-eigen"><input type="number" id="leben-eigen" min="0" step="50" inputmode="numeric" value="${Math.round(L / 100)}"> € / Monat</label>` : ''}</div></div>
@@ -1829,7 +1957,7 @@ function fixJahrHtml(aktiv) {
   const extra = Z.monate.reduce((t, m) => t + m.extra.reduce((s, f) => s + f.betrag, 0), 0);
   const maxX = Math.max(1, ...Z.monate.map((m) => m.summe - normal));
   const saeulen = `<div class="s5-teil fuell-aus" data-fuell="1"><h3>Außer der Reihe – die nächsten 12 Monate</h3>
-    <div class="mj">${Z.monate.map((m) => { const ex = Math.max(0, m.summe - normal); return `<button class="mj-s" data-fixtab="kalender" title="${monLang(m.k)}: ${eur0(m.summe)} feste Abbuchungen${m.extra.length ? ` – außer der Reihe: ${m.extra.map((f) => `${vertragName(f)} ${eur0(f.betrag)}`).join(', ')}` : ' – nichts außer der Reihe'}">
+    <div class="mj">${Z.monate.map((m) => { const ex = Math.max(0, m.summe - normal); return `<button class="mj-s" data-fixtab="kalender" title="${esc(`${monLang(m.k)}: ${eur0(m.summe)} feste Abbuchungen${m.extra.length ? ` – außer der Reihe: ${m.extra.map((f) => `${vertragName(f)} ${eur0(f.betrag)}`).join(', ')}` : ' – nichts außer der Reihe'}`)}">
       <span class="mj-w">${ex ? eur0(ex) : ''}</span><span class="mj-b"><i class="mj-x" style="height:${(ex / maxX) * 100}%"></i></span><span class="mj-m">${MON[+m.k.slice(5) - 1].slice(0, 1)}</span></button>`; }).join('')}</div>
     <p class="s5-erkl">zusätzlich zu ${eur0(normal)}, die jeden Monat gleich abgehen · Säule anklicken: Kalender</p></div>`;
   const fakten = `<dl class="s5-dl fuell-aus" data-fuell="2">
@@ -1859,7 +1987,7 @@ function fixVertraegeAnsicht(o) {
     const fs = [...g.fs].sort((a, b) => (b.aktiv - a.aktiv) || b.proMonat - a.proMonat);
     const kind = (f) => {
       const titel = fixTitel(f, g.art), vt = verlaufText(f), n = naechsteAbbuchung(f);
-      const rhythmus = `${f.rh.name} ${e2(f.betrag)}`, wann = f.aktiv ? (n ? `nächste ${dde(n).slice(0, 6)}` : '') : `beendet ${dde(f.zuletzt).slice(3)}`;
+      const rhythmus = `${f.rh.name} ${e2(f.betrag)}`, wann = f.aktiv ? (n ? (n <= D.bis ? `fällig seit ${dde(n).slice(0, 6)}, noch nicht gebucht` : `nächste ${dde(n).slice(0, 6)}`) : '') : `beendet ${dde(f.zuletzt).slice(3)}`;
       const unter = [titel !== f.name ? f.name : '', vt].filter(Boolean).map(esc).join(' · ');
       return `<button class="vg-z${f.aktiv ? '' : ' beendet'}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="${esc(vertragName(f))} – alle Zahlungen anzeigen">
         <span class="vg-zn">${esc(titel)}${unter ? `<small>${unter}</small>` : ''}<small class="vg-mobil">${esc([rhythmus, wann].filter(Boolean).join(' · '))}</small></span>
@@ -1951,15 +2079,15 @@ function zahlungskalenderHtml(lauf) {
   const maxSum = Math.max(...monate.map((m) => m.summe), 1), normal = ges;
   const pos = (d) => `${((d - 0.5) / 31) * 100}%`;
   const heute = +D.bis.slice(8);
-  const kreis = (cls_, d, c, tip, extra = '') => { const r = R(c, cls_ === 'extra' ? 6 : 4); return `<span class="zk-k ${cls_}" style="left:${pos(d)};width:${r * 2}px;height:${r * 2}px" title="${esc(tip)}">${extra}</span>`; };
+  const kreis = (cls_, d, c, tip, extra = '') => { const r = R(c, cls_ === 'extra' ? 6 : 4); return `<span class="zk-k ${cls_}" role="button" tabindex="0" style="left:${pos(d)};width:${r * 2}px;height:${r * 2}px" title="${esc(tip)}" data-tipp="${esc(tip)}">${extra}</span>`; };
   const zeilen = monate.map((m, i) => {
     let inhalt = '';
     for (const [d, x] of [...m.tage].sort((a, b) => a[0] - b[0])) {
-      const vorbei = m.k === jetzt && d <= heute;
-      if (x.mon) inhalt += kreis(`mon${vorbei ? ' vorbei' : ''}`, d, x.mon, `${d}. ${MONAT[+m.k.slice(5) - 1]}: ${eur0(x.mon)}${vorbei ? ' (schon abgebucht)' : ''}\n${x.fs.map((f) => `${vertragName(f)}: ${EUR.format(f.betrag / 100)}`).join('\n')}`);
+      const vorbei = m.k === jetzt && d <= heute, offen = vorbei && x.fs.some((f) => ausstehend(f));   // Zahltag vorbei, aber noch nicht gebucht
+      if (x.mon) inhalt += kreis(`mon${vorbei ? ' vorbei' : ''}`, d, x.mon, `${d}. ${MONAT[+m.k.slice(5) - 1]}: ${eur0(x.mon)}${vorbei ? (!offen ? ' (schon abgebucht)' : x.fs.every((f) => ausstehend(f)) ? ' (noch nicht gebucht)' : ' (teils noch nicht gebucht)') : ''}\n${x.fs.map((f) => `${vertragName(f)}: ${EUR.format(f.betrag / 100)}${vorbei && ausstehend(f) ? ' – noch nicht gebucht' : ''}`).join('\n')}`);
       for (const f of x.extra) {
         inhalt += kreis('extra', d, f.betrag, `${d}. ${MONAT[+m.k.slice(5) - 1]}: ${vertragName(f)} ${EUR.format(f.betrag / 100)} (${f.rh.name})`);
-        inhalt += `<span class="zk-l${d > 18 ? ' links' : ''}" style="left:${pos(d)}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}">${esc(vertragName(f))} <b>${eur0(f.betrag)}</b></span>`;
+        inhalt += `<span class="zk-l${d > 18 ? ' links' : ''}" role="button" tabindex="0" style="left:${pos(d)}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}">${esc(vertragName(f))} <b>${eur0(f.betrag)}</b></span>`;
       }
     }
     if (gt && lohn) inhalt += kreis('lohn', gt, lohn, `Gehalt um den ${gt}.: ≈ ${eur0(lohn)} (zuletzt ${lohnText})`);
@@ -2030,7 +2158,7 @@ function lebenKatsHtml() {
 }
 
 function planErgebnisHtml() {
-  const { B, bz, pm, L, lauf, ruecklage } = fixKontext;
+  const { B, G, bz, pm, L, lauf, ruecklage } = fixKontext;
   const vk = new Map(lauf.map((f) => [vertragsKey(f), f]));
   let neu = 0, weg = 0, wohnNeu = 0, wohnAlt = 0, hatWohnung = false;
   const ersetzt = new Set();
@@ -2045,17 +2173,17 @@ function planErgebnisHtml() {
   const sp = +plan.sparen || 0, L2 = L * (1 - sp / 100);
   const rest1 = B - pm - L, restL = B - pm - L2;   // restL: heutige Fixkosten mit der geplanten Lebenshaltung
   if (!plan.posten.length && !einmal && !sp) {
-    return `<div class="plan-start"><div class="fix-grafik-t">Heute</div>${budgetBalken([{ fk: pm, l: L }], B)}
-      <p class="klein">${rest1 >= 0 ? `Für neue feste Kosten hast du derzeit bis zu <b>${eur0(rest1)}</b> im Monat frei, mit 10 % Sparpuffer <b>${eur0(Math.max(0, rest1 - B * 0.1))}</b>.` : `Schon heute fehlen dir im Schnitt <b>${eur0(-rest1)}</b> im Monat – neue feste Kosten gehen nur, wenn anderes wegfällt oder die Lebenshaltung sinkt.`}</p></div>`;
+    return `<div class="plan-start"><div class="fix-grafik-t">Heute</div>${budgetBalken([{ fk: pm, l: L }], B, G)}
+      <p class="klein">${rest1 >= 0 ? `Für neue feste Kosten hast du derzeit bis zu <b>${eur0(rest1)}</b> im Monat frei, mit Sparpuffer (10 % vom Gehalt) <b>${eur0(Math.max(0, rest1 - G * 0.1))}</b>.` : `Schon heute fehlen dir im Schnitt <b>${eur0(-rest1)}</b> im Monat – neue feste Kosten gehen nur, wenn anderes wegfällt oder die Lebenshaltung sinkt.`}</p></div>`;
   }
-  const pm2 = pm + neu - weg, rest2 = B - pm2 - L2, puffer = B * 0.1;
+  const pm2 = pm + neu - weg, rest2 = B - pm2 - L2, puffer = G * 0.1;
   const urteil = rest2 >= puffer ? 'gut' : rest2 >= 0 ? 'knapp' : 'nein';
   const titel = { gut: 'Ja, das kannst du dir leisten', knapp: 'Knapp – das geht nur mit wenig Puffer', nein: 'So ist das nicht leistbar' }[urteil];
   const text = urteil === 'nein'
     ? `Dir würden jeden Monat <b>${eur0(-rest2)}</b> fehlen. Dafür müsstest du die Lebenshaltung ${sp ? 'um weitere' : 'um'} ${pzVon(-rest2, L2)} senken oder andere Verträge kündigen.`
     : urteil === 'knapp'
-      ? `Es blieben <b>${eur0(rest2)}</b> im Monat (${pzVon(rest2, B)} ${esc(bz.vom)}). Empfohlen sind mindestens 10 % (${eur0(puffer)}) als Puffer zum Sparen und für Unvorhergesehenes.`
-      : `Danach bleiben dir <b>${eur0(rest2)}</b> im Monat (${pzVon(rest2, B)} ${esc(bz.vom)}) zum Sparen und für Unvorhergesehenes.`;
+      ? `Es blieben <b>${eur0(rest2)}</b> im Monat (${pzVon(rest2, G)} ${esc(bz.vom)}). Empfohlen sind mindestens 10 % vom Gehalt (${eur0(puffer)}) als Puffer zum Sparen und für Unvorhergesehenes.`
+      : `Danach bleiben dir <b>${eur0(rest2)}</b> im Monat (${pzVon(rest2, G)} ${esc(bz.vom)}) zum Sparen und für Unvorhergesehenes.`;
   const d = neu - weg;
   const zeile = (l, a, b, gutWennKleiner = true, fmt = eur0) => {
     const diff = b - a;
@@ -2072,17 +2200,18 @@ function planErgebnisHtml() {
       <li class="muted">Faustregel von Vermietern und Banken: Warmmiete höchstens ein Drittel vom Netto – bei ${eur0(netto)} also ${eur0(netto / 3)}. Unterhalt und deine übrigen Fixkosten berücksichtigt sie nicht, deshalb zählt die Rechnung oben.</li>`;
   }
   let einmalHtml = '';
-  if (einmal) {
+  if (einmal && ruecklage == null) einmalHtml = `<div class="plan-einmal"><div><b>Einmalig ${eur0(einmal)}</b> · dein heutiger Kontostand lässt sich nicht vollständig berechnen – ob das Geld reicht, kann die App deshalb nicht sagen.</div></div>`;
+  else if (einmal) {
     const danach = ruecklage - einmal, bedarf = pm2 + L2;
     einmalHtml = `<div class="plan-einmal ${danach >= 3 * bedarf ? 'gut' : danach >= 0 ? 'knapp' : 'nein'}"><div><b>Einmalig ${eur0(einmal)}</b> · auf deinen Konten liegen ${eur0(ruecklage)}
       → danach ${danach >= 0 ? `<b>${eur0(danach)}</b>, das reicht für ${NUM.format(Math.round((danach / bedarf) * 10) / 10)} Monate Ausgaben (empfohlen als Notgroschen: 3 Monate = ${eur0(3 * bedarf)}).` : `<b>fehlen ${eur0(-danach)}</b>${rest2 > 0 ? ` – mit deinem Spielraum in etwa ${Math.ceil(-danach / rest2)} Monaten angespart.` : '.'}`}</div>
       <div class="klein muted">Konten ohne Gemeinschaftskonto und Pockets, Mietkaution und die Konten der Kinder; Depot ist nicht enthalten.</div></div>`;
   }
   return `<div class="plan-urteil ${urteil}"><b>${titel}</b><div>${text}</div></div>
-    ${budgetBalken([{ titel: 'Heute', fk: pm, l: L }, { titel: 'Mit Plan', fk: pm2, l: L2 }], B)}
+    ${budgetBalken([{ titel: 'Heute', fk: pm, l: L }, { titel: 'Mit Plan', fk: pm2, l: L2 }], B, G)}
     <table class="plan-tab"><thead><tr><th></th><th class="r">heute</th><th class="r">mit Plan</th><th class="r">Änderung</th></tr></thead><tbody>
       ${zeile('Fixkosten / Monat', pm, pm2)}
-      ${zeile('Fixkostenquote', B ? (pm / B) * 10000 : 0, B ? (pm2 / B) * 10000 : 0, true, (v) => `${NUM.format(Math.round(v / 10) / 10)} %`).replace(/([+−][\d,]+) %<\/td><\/tr>$/, '$1 Pkt.</td></tr>')}
+      ${zeile('Fixkostenquote (vom Gehalt)', G ? (pm / G) * 10000 : 0, G ? (pm2 / G) * 10000 : 0, true, (v) => `${NUM.format(Math.round(v / 10) / 10)} %`).replace(/([+−][\d,]+) %<\/td><\/tr>$/, '$1 Pkt.</td></tr>')}
       ${sp ? zeile('Lebenshaltung / Monat', L, L2) : ''}
       ${zeile('Spielraum / Monat', rest1, rest2, false, (v) => (v < 0 ? `−${eur0(-v)}` : eur0(v)))}
       ${zeile('Fixkosten / Jahr', pm * 12, pm2 * 12)}
@@ -2135,7 +2264,7 @@ function planBinden() {
 // ======================================================================= Herunterladen
 function dateiname(teil) {
   const f = [S.jahr, monateWahl().map((m) => MON[m - 1]).join(' '), S.konto, S.kat, S.ukat, S.q && S.q.replace(/["|<>]/g, ' ')].filter(Boolean).join(' ');
-  const heute = new Date().toISOString().slice(0, 10);
+  const heute = heuteLokal();
   return `Finanzen ${teil}${f ? ' – ' + f : ''} (${heute})`.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
@@ -2210,7 +2339,7 @@ function vorschlagNehmen(i) {
 // Knopf „Zurück“ führen zur vorherigen Ansicht. Beim Tippen zählt ein ganzes Suchwort als ein Schritt.
 let tippt = false;
 let stufe = 0;   // eigene Schritte im Browser-Verlauf
-const ZUSTAND = ['q', 'jahr', 'monat', 'konto', 'kat', 'ukat', 'art', 'umb', 'tab', 'stichtag', 'wahl', 'kart', 'fixtab', 'zr', 'nf'];
+const ZUSTAND = ['q', 'jahr', 'monat', 'konto', 'kat', 'ukat', 'art', 'umb', 'tab', 'stichtag', 'wahl', 'kart', 'fixtab', 'zr', 'nf', 'sjahr', 'sfilter', 'sabf', 'gmonat', 'gbasis', 'gtjahr'];
 const zustand = (x) => JSON.stringify(ZUSTAND.map((k) => x[k]));
 
 function setze(p, { tippen = false } = {}) {
@@ -2262,7 +2391,7 @@ function schnellSuche() {
 
 function hashSchreiben(hist = 'ersetzen') {
   const p = new URLSearchParams();
-  for (const k of ['q', 'jahr', 'monat', 'zr', 'nf', 'konto', 'kat', 'ukat', 'stichtag', 'wahl']) if (S[k]) p.set(k, S[k]);
+  for (const k of ['q', 'jahr', 'monat', 'zr', 'nf', 'konto', 'kat', 'ukat', 'stichtag', 'wahl', 'sjahr', 'sfilter', 'sabf', 'gmonat', 'gbasis', 'gtjahr']) if (S[k]) p.set(k, S[k]);
   if (S.kart !== 'aus') p.set('kart', S.kart);
   if (S.fixtab !== 'vertraege') p.set('fixtab', S.fixtab);
   if (S.art !== 'alle') p.set('art', S.art);
@@ -2293,7 +2422,9 @@ function hashLesen() {
   // Grundeinstellung beim Öffnen ohne Auswahl in der Adresse: das aktuelle Jahr (ohne Daten dafür: das letzte Jahr mit Daten)
   if (ersterStart && D && ![...p.keys()].length) S.jahr = startJahr();
   if (D) ersterStart = false;
-  for (const k of ['q', 'jahr', 'monat', 'konto', 'kat', 'ukat', 'wahl']) if (p.get(k)) S[k] = p.get(k);
+  for (const k of ['q', 'konto', 'kat', 'ukat', 'wahl']) if (p.get(k)) S[k] = p.get(k);
+  if (/^\d{4}(,\d{4})*$/.test(p.get('jahr') || '')) S.jahr = p.get('jahr');
+  if (/^\d{1,2}(,\d{1,2})*$/.test(p.get('monat') || '')) S.monat = p.get('monat');
   if (['ein', 'pruefen'].includes(p.get('kart'))) S.kart = p.get('kart');
   if (['kalender', 'plan'].includes(p.get('fixtab'))) S.fixtab = p.get('fixtab');
   if (/^\d{4}-\d{2}-\d{2}$/.test(p.get('stichtag') || '')) S.stichtag = p.get('stichtag');
@@ -2301,7 +2432,28 @@ function hashLesen() {
   if (p.get('nf') === '1') S.nf = '1';
   if (['aus', 'ein'].includes(p.get('art'))) S.art = p.get('art');
   S.umb = p.get('umb') === '1';
+  if (/^\d{4}$/.test(p.get('sjahr') || '')) S.sjahr = p.get('sjahr');
+  if (/^\w{1,20}$/.test(p.get('sfilter') || '')) S.sfilter = p.get('sfilter');
+  if (/^\w{1,20}$/.test(p.get('sabf') || '')) S.sabf = p.get('sabf');
+  if (/^\d{4}-\d{2}$/.test(p.get('gmonat') || '')) S.gmonat = p.get('gmonat');
+  if (['vm', 'vj'].includes(p.get('gbasis'))) S.gbasis = p.get('gbasis');
+  if (/^\d{4}$/.test(p.get('gtjahr') || '')) S.gtjahr = p.get('gtjahr');
   if (['kennzahlen', 'buchungen', 'uebersicht', 'konten', 'fix', 'gehalt', 'steuer'].includes(p.get('tab'))) S.tab = p.get('tab');
+}
+
+// Ergebnis der Nachprüfung (nachpruefen.py) – nur wenn etwas nicht bestanden ist, unauffällig mit aufklappbarer Liste
+function nachpruefungText() {
+  const n = D?.j?.nachpruefung;
+  if (!n || n.ok !== false) return '';
+  const m = /(\d+)\s+von\s+(\d+)/.exec(n.ergebnis || '');
+  return m ? `Nachprüfung: ${m[1]} von ${m[2]} bestanden` : 'Nachprüfung: nicht alles bestanden';
+}
+function nachpruefungHtml() {
+  const t = nachpruefungText();
+  if (!t) return '';
+  const n = D.j.nachpruefung, f = n.fehler || [];
+  return `<details class="nachpruefung klein"><summary>${t}${n.zeit ? ` (${dde(n.zeit.slice(0, 10))}, ${n.zeit.slice(11, 16)} Uhr)` : ''}</summary>
+    ${f.length ? `<ul>${f.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}<p class="muted">Diese Prüfungen sind nicht bestanden. Die Daten wurden trotzdem übernommen.</p></details>`;
 }
 
 function standZeigen() {
@@ -2310,7 +2462,7 @@ function standZeigen() {
   const mail = Q.kontoEmail?.();
   const herkunft = { drive: `aus Google Drive${mail ? ` (${mail})` : ''}`, pc: `aus der verknüpften Datei ${quelle.name} auf diesem PC`, datei: `aus der Datei ${quelle.name}`, lokal: 'lokale Testdaten' }[quelle.quelle] || '';
   const erstellt = j.erstellt ? `${dde(j.erstellt.slice(0, 10))}, ${j.erstellt.slice(11, 16)} Uhr` : '';
-  $('#fuss').textContent = `Daten ${herkunft}, erstellt am ${erstellt}. Neue Kontodaten einfach in Google Drive › 10 Finanzen › Eingang legen – der PC übernimmt sie automatisch; danach hier ↻.`;
+  $('#fuss').textContent = `Daten ${herkunft}, erstellt am ${erstellt}. Neue Kontodaten einfach in Google Drive › 10 Finanzen › Eingang legen – der PC übernimmt sie automatisch; danach hier ↻.${nachpruefungText() ? ` ${nachpruefungText()} – Einzelheiten unter „Daten einlesen“.` : ''}`;
   $('#menu-quelle').textContent = `Aktuell: ${NUM.format(D.rows.length)} Buchungen ${herkunft}, erstellt am ${erstellt}.`;
   $('#btn-neu').hidden = false;
   $('#btn-neu').title = 'Neue Dateien aus dem Eingang (Google Drive › 10 Finanzen › Eingang) einlesen und die neuesten Daten laden';
@@ -2322,13 +2474,13 @@ function standZeigen() {
 }
 
 function anzeigen(v) {
-  const j = Q.pruefen(v.text);
+  const j = v.j || Q.pruefen(v.text);   // frisch geladene Fassungen bringen die schon geprüften Daten mit
   quelle = v;
   D = aufbereiten(j);
   if (LOKAL) window.__fd = { D, fix: () => fixkostenErkennen(), mr: () => monatsRechnung(), sammle, periode };   // nur zum Testen auf dem eigenen Rechner
   chatDaten(D);
   entscheidungenLaden(j).then((fehlen) => { if (fehlen && D?.j === j) { neuAufbauen(); aktualisieren(); } });
-  steuerDaten(D).then(() => { if (S.tab === 'steuer') tabelle(parse(S.q)); else if (S.tab === 'start') { try { startSeite(); } catch (e) { console.error(e); } } });
+  steuerDaten(D).then(() => { if (S.tab === 'steuer') tabelle(parse(S.q)); else if (S.tab === 'start' && startOhneSteuer) { try { startSeite(); } catch (e) { console.error(e); } } });
   hashLesen();
   selectsFuellen();
   $('#start').hidden = true;
@@ -2345,22 +2497,59 @@ function neuAufbauen() {
   steuerDaten(D);
 }
 
-// Minuswerte überall rot (Wunsch des Nutzers): jedes Element, dessen Text mit einem Minus vor einer Zahl beginnt
+// Minuswerte überall rot (Wunsch des Nutzers): jedes Element, dessen Text mit einem Minus vor einer Zahl beginnt.
+// Eigene Klasse „ist-minus“: „minus“ setzt der Code selbst für Balken (Jahr für Jahr, Konten, Gehalt) und darf nicht verschwinden.
 const MINUS = /^\s*[−-]\s?\d/;
 function minusRot(root) {
   if (!root || root.nodeType !== 1 || root.closest('svg, canvas, select, option, textarea, script, style')) return;
   for (const e of [root, ...root.querySelectorAll('*')]) {
     if (e.closest('svg, canvas, select, option')) continue;
+    if (e.tagName === 'BUTTON' && e.parentElement?.classList.contains('seg')) e.setAttribute('aria-pressed', String(e.classList.contains('an')));
     const n = [...e.childNodes].find((x) => x.nodeType === 1 || x.textContent.trim());
-    e.classList.toggle('minus', !!n && n.nodeType === 3 && MINUS.test(n.textContent));
+    e.classList.toggle('ist-minus', !!n && n.nodeType === 3 && MINUS.test(n.textContent));
   }
 }
+// Bei zwei Spalten (901–1180 px) bliebe neben einer einzelnen Karte ohne Partner die halbe Zeile leer: Die letzte Karte
+// jeder ungeraden Folge einzelner Karten (zwischen breiten .s5-b2) bekommt „s5-solo“ und zieht dann über die volle Breite (app.css)
+function soloMarkieren() {
+  document.querySelectorAll('.s5-raster').forEach((r) => {
+    let lauf = [];
+    const ende = () => { lauf.forEach((k, i) => k.classList.toggle('s5-solo', i === lauf.length - 1 && lauf.length % 2 === 1)); lauf = []; };
+    for (const k of r.children) {
+      if (k.hidden) continue;
+      if (k.classList.contains('s5-b2')) { k.classList.remove('s5-solo'); ende(); } else lauf.push(k);
+    }
+    ende();
+  });
+}
 new MutationObserver((ms) => {
+  let neu = false;
   for (const m of ms) {
-    if (m.type === 'characterData') minusRot(m.target.parentElement);
-    else for (const n of m.addedNodes) minusRot(n.nodeType === 1 ? n : n.parentElement);
+    // Umschalter (.seg): Zustand „an“ auch für Screenreader (aria-pressed)
+    if (m.type === 'attributes') { if (m.target.tagName === 'BUTTON' && m.target.parentElement?.classList.contains('seg')) m.target.setAttribute('aria-pressed', String(m.target.classList.contains('an'))); }
+    else if (m.type === 'characterData') minusRot(m.target.parentElement);
+    else { neu = true; for (const n of m.addedNodes) minusRot(n.nodeType === 1 ? n : n.parentElement); }
   }
-}).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  if (neu) soloMarkieren();
+}).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class'] });
+
+// Hinweise, die sonst nur als Maus-Tooltip (title) da sind: [data-tipp] zeigt den Text beim Anklicken/Antippen als Meldung;
+// auf Geräten ohne Maus genauso für jedes andere Element mit title, das selbst nichts tut
+document.addEventListener('click', (e) => {
+  const t = e.target.closest?.('[data-tipp]');
+  if (t) { e.stopPropagation(); e.preventDefault(); toast(t.dataset.tipp); return; }
+  if (!matchMedia('(hover: none)').matches) return;
+  const el = e.target.closest?.('[title]');
+  if (!el || el.onclick || el.closest('button, a, input, select, textarea, summary, label, [role="button"], [data-geh], [data-springe], [data-fix]') || el.querySelector('button, a, input, select, canvas, [role="button"]')) return;
+  toast(el.title);
+}, true);
+// Tastatur: Enter/Leertaste auf Flächen mit role="button" (Zeilen, Kreise, Balkenstücke) wirken wie ein Klick
+document.addEventListener('keydown', (e) => {
+  if ((e.key !== 'Enter' && e.key !== ' ') || e.defaultPrevented) return;
+  const t = e.target;
+  if (t.getAttribute?.('role') !== 'button' || ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY'].includes(t.tagName)) return;
+  e.preventDefault(); t.click();
+});
 
 let toastT;
 function toast(t) {
@@ -2495,7 +2684,7 @@ function einlesenMeldung({ e, ohneDienst, automatisch, wartend }) {
     const zeit = (iso) => { const d = new Date(iso); return `${d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}, ${d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr`; };
     h = wartend?.length
       ? `<h2>${wartend.length === 1 ? '1 Datei wartet' : `${wartend.length} Dateien warten`} auf deinen PC</h2>
-        <table class="hilfe-tab">${wartend.map((f) => `<tr><td>${esc(f.name)}</td><td class="r klein muted">abgelegt ${zeit(f.createdTime || f.modifiedTime)}</td></tr>`).join('')}</table>
+        <table class="hilfe-tab datei-tab">${wartend.map((f) => `<tr><td>${esc(f.name)}<div class="klein muted">abgelegt ${zeit(f.createdTime || f.modifiedTime)}</div></td></tr>`).join('')}</table>
         <p>Einlesen kann nur dein PC – das Handy hat dafür kein Programm. Er übernimmt die ${wartend.length === 1 ? 'Datei' : 'Dateien'} automatisch, sobald er an ist (bei der Anmeldung und danach alle 30 Minuten); danach hier noch einmal ↻.</p>
         <p class="klein muted">Bisheriger Datenstand: ${stand}.</p>`
       : `<h2>Neueste Daten geladen</h2><p>Datenstand: <b>${stand}</b>.</p>
@@ -2515,12 +2704,12 @@ function einlesenMeldung({ e, ohneDienst, automatisch, wartend }) {
     h = `<h2>Daten eingelesen</h2>
       <p>${e.uebernommen.length ? `<b>${NUM.format(e.uebernommen.length)} ${e.uebernommen.length === 1 ? 'Datei' : 'Dateien'}</b> übernommen, <b>${NUM.format(neuGes)} neue Buchungen</b> – Doppeltes herausgerechnet.` : 'Die Daten wurden neu aufgebaut.'}
         ${e.buchungen ? ` Jetzt ${NUM.format(e.buchungen)} Buchungen insgesamt.` : ''}</p>
-      ${e.uebernommen.length ? `<table class="hilfe-tab">${e.uebernommen.map((x) => `<tr><td>${esc(x.datei)}<div class="klein muted">${esc(x.art)}</div></td><td class="r"><b class="${x.neu ? 'pos' : 'muted'}">${NUM.format(x.neu || 0)} neu</b><div class="klein muted">${NUM.format(x.doppelt || 0)} schon vorhanden</div></td></tr>`).join('')}</table>` : ''}
-      ${e.nicht.length ? `<p class="neg"><b>Nicht übernommen:</b></p><table class="hilfe-tab">${e.nicht.map((x) => `<tr><td>${esc(x.datei)}</td><td class="klein">${esc(x.status)}</td></tr>`).join('')}</table>` : ''}
+      ${e.uebernommen.length ? `<table class="hilfe-tab datei-tab">${e.uebernommen.map((x) => `<tr><td>${esc(x.datei)}<div class="klein muted">${esc(x.art)}</div></td><td class="r"><b class="${x.neu ? 'pos' : 'muted'}">${NUM.format(x.neu || 0)} neu</b><div class="klein muted">${NUM.format(x.doppelt || 0)} schon vorhanden</div></td></tr>`).join('')}</table>` : ''}
+      ${e.nicht.length ? `<p class="neg"><b>Nicht übernommen:</b></p><table class="hilfe-tab datei-tab">${e.nicht.map((x) => `<tr><td>${esc(x.datei)}</td><td class="klein">${esc(x.status)}</td></tr>`).join('')}</table>` : ''}
       <p class="klein muted">Übernommene Dateien liegen jetzt in Eingang › verarbeitet. Datenstand: ${stand}.</p>`;
   }
-  dlg.innerHTML = `${h}<form method="dialog" class="dlg-knoepfe">${D ? '<button class="btn" value="details" id="einlesen-details">Alle Dateien im Eingang</button>' : ''}<button class="btn primary" value="ok">OK</button></form>`;
-  dlg.querySelector('#einlesen-details')?.addEventListener('click', () => setTimeout(() => setze({ tab: 'konten' }), 0));
+  dlg.innerHTML = `${h}${nachpruefungHtml()}<form method="dialog" class="dlg-knoepfe">${D ? '<button class="btn" value="details" id="einlesen-details">Alle Dateien im Eingang</button>' : ''}<button class="btn primary" value="ok">OK</button></form>`;
+  dlg.querySelector('#einlesen-details')?.addEventListener('click', () => setTimeout(() => { setze({ tab: 'konten' }); springe('.eingang'); }, 0));
   if (!dlg.open) dlg.showModal();
 }
 
@@ -2635,7 +2824,7 @@ function events() {
   $('#m-datei').onclick = async () => { try { anzeigen(await Q.dateiWaehlen()); $('#dlg-menu').close(); toast('Daten geladen.'); } catch (e) { toast(e.message); } };
   document.querySelectorAll('#m-theme button').forEach((b) => b.onclick = () => themeSetzen(b.dataset.v));
   $('#m-leeren').onclick = async () => {
-    if (!confirm('Anmeldung und gespeicherte Daten auf diesem Gerät löschen?')) return;
+    if (!confirm('Abmelden und alles auf diesem Gerät löschen?\n\nWeg sind dann: die gespeicherten Daten, der Chat-Schlüssel, alle Einstellungen – und deine Steuer-Zuordnungen sowie Kategorie-Entscheidungen, die noch nicht an den PC übertragen sind.\nSteuer-Zuordnungen vorher sichern: Reiter „Steuer“ → „Sicherung speichern“.')) return;
     await Q.geraetLeeren();
     chatVergessen();
     D = null; quelle = null;
@@ -2672,13 +2861,16 @@ async function start() {
   let v = null;
   if (LOKAL) v = await Q.lokalLaden().catch(() => null);
   if (!v) v = await Q.cacheLesen();
+  // verknüpfte Datei am PC: ist sie neuer als die gespeicherte Fassung, gleich die neue zeigen (statt erst die alte)
+  let pcOk = false, pcNeu = null;
+  if (v?.quelle === 'pc') { try { pcNeu = await Q.pcLaden(v, false); pcOk = true; } catch {} if (pcNeu) v = pcNeu; }
   Q.vorladen?.();
   // Gespeicherte Daten vor dem automatischen Aufräumen des Browsers schützen
   navigator.storage?.persist?.().catch(() => {});
   if (v) {
     try { anzeigen(v); } catch (e) { return startZeigen(e.message); }
     if (v.quelle === 'drive') driveHolen(false).catch(() => {});
-    if (v.quelle === 'pc') pcHolen(false);
+    if (v.quelle === 'pc') { if (!pcOk) pcHolen(false); else if (pcNeu) toast('Neue Daten geladen.'); }
   } else startZeigen();
   if ('serviceWorker' in navigator && !LOKAL) navigator.serviceWorker.register('sw.js').catch(() => {});
 }

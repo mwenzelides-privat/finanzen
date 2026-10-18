@@ -2,9 +2,10 @@
 // Die KI bekommt NICHT die ganze Datei. Sie ruft Werkzeuge auf, die hier im Browser rechnen,
 // und sieht nur deren Ergebnisse (Summen, Gruppen, einzelne Buchungen).
 // Zugang: eigener API-Schlüssel von Anthropic, nur auf diesem Gerät gespeichert.
-import { parse, matcher } from './suche.js';
+import { parse, matcher, norm } from './suche.js';
 import { kontostaende, STATUS_TEXT } from './salden.js';
 import { gehaltKurz } from './gehalt.js';
+import { steuerListe } from './steuer.js';
 
 const API = 'https://api.anthropic.com/v1/messages';
 const MODELLE = [
@@ -12,6 +13,8 @@ const MODELLE = [
   { id: 'claude-opus-5-5', name: 'Claude Opus 5.5 (gründlicher, teurer)' },
   { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5 (schnell, günstig)' },
 ];
+const MAX_TOKENS = 8192;   // Länge einer Antwort (lange Steuer-Aufstellungen brauchen Platz); wird sie erreicht, gibt es einen Hinweis
+const RUNDEN = 12;         // höchstens so viele Werkzeug-Runden je Frage
 const LIBS = ['https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js', 'https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js'];
 const K = { key: 'fd.apikey', modell: 'fd.modell' };
 const ls = {
@@ -31,7 +34,7 @@ let laeuft = false;
 
 export const chatDaten = (d) => { D = d; };
 // zum Testen der Werkzeuge ohne KI (nur lesend)
-export const chatWerkzeuge = { buchungen: (a) => buchungenAuswerten(a), kontostaende: (a) => kontostaendeAm(a), fixkosten: (a) => fixkostenListe(a || {}), system: () => systemText(), knopfZiel: (a) => { const d = document.createElement('div'); knopf(d, a); return d; } };
+export const chatWerkzeuge = { buchungen: (a) => buchungenAuswerten(a), steuer: (a) => steuerEinordnung(a), kontostaende: (a) => kontostaendeAm(a), fixkosten: (a) => fixkostenListe(a || {}), system: () => systemText(), knopfZiel: (a) => { const d = document.createElement('div'); knopf(d, a); return d; } };
 export function chatVergessen() { ls.del(K.key); ls.del(K.modell); verlauf = []; }
 
 // ======================================================================= Werkzeuge
@@ -48,13 +51,27 @@ const TOOLS = [
         kategorien: { type: 'array', items: { type: 'string' }, description: 'Hauptkategorien genau wie in der Liste (optional)' },
         unterkategorien: { type: 'array', items: { type: 'string' }, description: 'Unterkategorien genau wie in der Liste (optional)' },
         steuerkategorien: { type: 'array', items: { type: 'string' }, description: 'Steuerkategorien genau wie in der Liste (vom Nutzer in WISO/Buhl vergeben), optional' },
-        nur_steuerrelevant: { type: 'boolean', description: 'true = nur Buchungen, denen der Nutzer eine Steuerkategorie gegeben hat' },
+        nur_steuerrelevant: { type: 'boolean', description: 'true = nur Buchungen mit einer rohen Steuerkategorie aus WISO/Buhl (ohne die Entscheidungen des Nutzers – für die steuerliche Einordnung steuer_einordnung verwenden)' },
         suche: { type: 'string', description: 'Suchtext wie im Dashboard: Wörter (alle müssen vorkommen), a|b (eines davon), "genaue Folge", -ohne, Beträge 49,99 >500 100-250. Durchsucht Empfänger, Verwendungszweck, Kategorie, Konto, Vertrag, Tags, Notiz.' },
         art: { type: 'string', enum: ['ohne Umbuchungen', 'alle', 'Einnahme', 'Ausgabe', 'Sparen', 'Umbuchung'], description: 'Standard: ohne Umbuchungen' },
         gruppieren_nach: { type: 'string', enum: ['keine', 'jahr', 'monat', 'kategorie', 'unterkategorie', 'konto', 'empfaenger', 'steuerkategorie'], description: 'Standard: keine (dann einzelne Buchungen)' },
         sortierung: { type: 'string', enum: ['datum', 'datum_absteigend', 'betrag_groesste_zuerst'], description: 'Für einzelne Buchungen. Standard: datum' },
         max_zeilen: { type: 'integer', description: 'Höchstzahl einzelner Buchungen oder Gruppen, Standard 40, höchstens 200' },
       },
+    },
+  },
+  {
+    name: 'steuer_einordnung',
+    description: 'Die steuerliche Einordnung eines Jahres genau wie im Reiter „Steuer“ der App: jede steuerlich relevante Buchung mit Abschnitt der Einkommensteuererklärung, Posten und Status – mit den Entscheidungen des Nutzers (bestätigt, ausgeschlossen, Notizen), seinen Regeln je Empfänger und den offiziellen Unterlagen (Bescheide). Liefert eine Übersicht je Posten (entschieden / noch offen / ausgeschlossen) und die einzelnen Buchungen. Für jede steuerliche Frage zuerst verwenden.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        jahr: { type: 'integer', description: 'Steuerjahr, z. B. 2025' },
+        buchungen: { type: 'string', enum: ['relevant', 'offen', 'entschieden', 'ausgeschlossen', 'keine'], description: 'Welche einzelnen Buchungen mitliefern. Standard: relevant (alles außer ausgeschlossen)' },
+        posten: { type: 'string', description: 'Nur Buchungen dieses Postens (Name oder Teil davon wie in der Übersicht, optional)' },
+        max_zeilen: { type: 'integer', description: 'Höchstzahl einzelner Buchungen, Standard 40, höchstens 200' },
+      },
+      required: ['jahr'],
     },
   },
   {
@@ -142,6 +159,42 @@ function buchungenAuswerten(a) {
   return out;
 }
 
+// Steuer: dieselbe Einordnung wie im Reiter Steuer (eigene Entscheidungen > Regeln > Unterlagen > automatisch)
+function steuerEinordnung(a) {
+  const j = Math.trunc(Number(a.jahr));
+  if (!j) return { fehler: 'jahr angeben, z. B. 2025' };
+  const l = steuerListe(j);
+  if (!l) return { fehler: 'Die Steuer-Entscheidungen werden noch geladen – bitte gleich noch einmal versuchen.' };
+  const art = (x) => (x.status === 'ausgeschlossen' ? 'ausgeschlossen' : x.offen ? 'offen' : 'entschieden');
+  const m = new Map();
+  for (const x of l) {
+    const k = `${x.abschnitt}|${x.posten}`;
+    const g = m.get(k) || m.set(k, { abschnitt: x.abschnitt, posten: x.posten, entschieden: [0, 0], offen: [0, 0], ausgeschlossen: [0, 0] }).get(k);
+    g[art(x)][0]++; g[art(x)][1] += x.c;
+  }
+  const uebersicht = [...m.values()].map((g) => ({ abschnitt: g.abschnitt, posten: g.posten,
+    ...Object.fromEntries(['entschieden', 'offen', 'ausgeschlossen'].flatMap((t) => (g[t][0] ? [[`${t}_anzahl`, g[t][0]], [`${t}_euro`, e2(g[t][1])]] : []))) }));
+  const wahl = a.buchungen || 'relevant';
+  const rs = wahl === 'keine' ? [] : l.filter((x) => (wahl === 'relevant' ? x.status !== 'ausgeschlossen' : art(x) === wahl) && (!a.posten || norm(x.posten).includes(norm(a.posten))));
+  const max = Math.min(200, Math.max(1, a.max_zeilen || 40));
+  const O = D.j.steuer_offiziell?.jahre?.[j];
+  const out = {
+    jahr: j, uebersicht,
+    hinweis: 'Beträge wie auf dem Konto (Ausgaben negativ). „entschieden“ = vom Nutzer bestätigt, laut Bescheid angesetzt bzw. erledigt oder Einnahme zur Kontrolle. „offen“ = noch nicht geprüft (prüfen, Vorschlag, aus WISO/Buhl noch nicht bestätigt) – nicht als sicher absetzbar darstellen. „ausgeschlossen“ = nicht absetzbar (vom Nutzer, per Regel oder laut Bescheid) – nie mitzählen. Konten der Kinder und gemeinsame Konten sind nie enthalten und zählen in keiner Summe.',
+    ...(O ? { unterlagen: { art: O.art, titel: O.kurz || O.titel || `${O.art} ${j}`, ...(O.ergebnis?.est != null ? { einkommensteuer_euro: O.ergebnis.est } : {}),
+      ...(O.ergebnis?.erstattung != null ? { erstattung_euro: O.ergebnis.erstattung, erstattung_hinweis: 'positiv = Erstattung, negativ = Nachzahlung' } : {}) } } : {}),
+    ...(D.bis < `${j}-12-31` ? { hinweis_jahr: `Das Jahr ${j} ist noch nicht abgeschlossen (Daten bis ${D.bis}).` } : {}),
+  };
+  if (wahl !== 'keine') {
+    out.buchungen = rs.slice(0, max).map((x) => ({
+      datum: x.d, konto: x.k, empfaenger: x.g, zweck: (x.z || '').length > 140 ? x.z.slice(0, 140) + '…' : x.z || '', betrag_euro: e2(x.c),
+      abschnitt: x.abschnitt, posten: x.posten, status: x.statusText, grund: x.grund, ...(x.hinweis ? { hinweis: x.hinweis } : {}), ...(x.notiz ? { notiz: x.notiz } : {}),
+    }));
+    if (rs.length > max) out.hinweis_zeilen = `Nur ${max} von ${rs.length} Buchungen gezeigt. Für mehr: posten angeben oder max_zeilen erhöhen.`;
+  }
+  return out;
+}
+
 function kontostaendeAm({ datum }) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(datum || '')) return { fehler: 'datum als YYYY-MM-DD angeben' };
   const liste = kontostaende(D, datum).filter((x) => !['nicht_eroeffnet', 'geschlossen'].includes(x.status));
@@ -194,7 +247,7 @@ Regeln:
 - Rechne nie selbst aus dem Gedächtnis: hole jede Zahl mit den Werkzeugen. Ergebnisse sind in Euro.
 - Antworte auf Deutsch, kurz und klar. Beträge im deutschen Format (1.234,56 €), Datum als TT.MM.JJJJ. Nutze Markdown-Tabellen für Aufstellungen.
 - Wenn eine Grafik hilft (Verlauf, Vergleich), rufe diagramm_zeigen auf. Biete mit dashboard_knopf an, die Buchungen im Dashboard zu öffnen, wenn das nützlich ist.
-- Steuerliche Fragen: Nimm zuerst die eigenen Steuerkategorien des Nutzers (buchungen_auswerten mit Zeitraum, nur_steuerrelevant=true, gruppieren_nach=steuerkategorie; danach die einzelnen Buchungen der wichtigen Gruppen). Das ist die Einteilung aus seiner Steuersoftware und hat Vorrang – sie kann aber automatisch vergeben sein: prüfe auf Plausibilität (z. B. Restaurantbesuche als „Übernachtungskosten“ nur bei Dienstreisen) und weise auf Zweifelsfälle hin. Prüfe danach ergänzend, ob typische Posten ohne Steuerkategorie fehlen, und nenne sie getrennt als „möglicherweise auch relevant“. Suche dafür breit (z. B. Kategorien Versicherungen, Steuern, Kinder, Gesundheit, Wohnen mit Handwerker/Nebenkosten; Suchbegriffe wie spende|kirchensteuer|handwerker|reparatur|schornstein|kita|kindergarten|tagesmutter|arzt|apotheke|brille|fortbildung|fachbuch|gewerkschaft|steuerberat|riester|ruerup|unterhalt|haftpflicht|berufsunfaehig) und ordne die Treffer den üblichen Posten der Einkommensteuererklärung zu (Vorsorgeaufwendungen, Sonderausgaben, außergewöhnliche Belastungen, haushaltsnahe Dienstleistungen/Handwerker § 35a, Kinderbetreuung, Werbungskosten). Weise kurz darauf hin, dass das eine Vorsortierung ist und keine Steuerberatung.
+- Steuerliche Fragen: Nimm zuerst steuer_einordnung für das Jahr. Das ist genau die Einordnung aus dem Reiter „Steuer“ – mit den Entscheidungen des Nutzers, seinen Regeln und den Bescheiden – und hat Vorrang vor den rohen Steuerkategorien aus WISO/Buhl. Zähle ausgeschlossene Buchungen nie mit, nenne offene getrennt als „noch zu prüfen“ und widersprich keiner Entscheidung des Nutzers. Prüfe danach ergänzend mit buchungen_auswerten, ob typische Posten fehlen, die in steuer_einordnung gar nicht vorkommen, und nenne sie getrennt als „möglicherweise auch relevant“. Suche dafür breit (z. B. Kategorien Versicherungen, Steuern, Kinder, Gesundheit, Wohnen mit Handwerker/Nebenkosten; Suchbegriffe wie spende|kirchensteuer|handwerker|reparatur|schornstein|kita|kindergarten|tagesmutter|arzt|apotheke|brille|fortbildung|fachbuch|gewerkschaft|steuerberat|riester|ruerup|unterhalt|haftpflicht|berufsunfaehig) und ordne die Treffer den üblichen Posten der Einkommensteuererklärung zu (Vorsorgeaufwendungen, Sonderausgaben, außergewöhnliche Belastungen, haushaltsnahe Dienstleistungen/Handwerker § 35a, Kinderbetreuung, Werbungskosten). Weise kurz darauf hin, dass das eine Vorsortierung ist und keine Steuerberatung.
 - Kontostände: nenne die Sicherheit des Werts, wenn er nicht exakt ist.
 - Wenn etwas in den Daten fehlt, sag es offen.`;
 }
@@ -203,7 +256,7 @@ async function claude(messages) {
   const r = await fetch(API, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-api-key': ls.get(K.key), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-    body: JSON.stringify({ model: ls.get(K.modell) || MODELLE[0].id, max_tokens: 4096, system: systemText(), tools: TOOLS, messages }),
+    body: JSON.stringify({ model: ls.get(K.modell) || MODELLE[0].id, max_tokens: MAX_TOKENS, system: systemText(), tools: TOOLS, messages }),
   });
   if (!r.ok) {
     const j = await r.json().catch(() => null);
@@ -294,10 +347,10 @@ function knopf(ziel, a) {
   return 'Knopf angezeigt';
 }
 
-const STATUS = { buchungen_auswerten: 'Buchungen ausgewertet', kontostaende_am: 'Kontostände berechnet', fixkosten: 'Fixkosten geprüft' };
+const STATUS = { buchungen_auswerten: 'Buchungen ausgewertet', steuer_einordnung: 'Steuer-Einordnung gelesen', kontostaende_am: 'Kontostände berechnet', fixkosten: 'Fixkosten geprüft' };
 function statusText(t) {
   const a = t.input || {};
-  const teile = [a.von && a.bis ? `${dde(a.von)}–${dde(a.bis)}` : a.von ? `ab ${dde(a.von)}` : a.bis ? `bis ${dde(a.bis)}` : '', a.datum && dde(a.datum),
+  const teile = [a.von && a.bis ? `${dde(a.von)}–${dde(a.bis)}` : a.von ? `ab ${dde(a.von)}` : a.bis ? `bis ${dde(a.bis)}` : '', a.datum && dde(a.datum), a.jahr && String(a.jahr), a.posten,
     ...(a.konten || []), ...(a.kategorien || []), ...(a.unterkategorien || []), a.suche && `„${a.suche}“`].filter(Boolean);
   return `${STATUS[t.name]}${teile.length ? ': ' + teile.join(', ') : ''}`;
 }
@@ -314,17 +367,24 @@ async function fragen(text) {
   await libsLaden();
   const start = verlauf.length;
   verlauf.push({ role: 'user', content: text });
+  const hinweis = (t) => { const f = document.createElement('div'); f.className = 'fehler'; f.textContent = t; inhalt.append(f); };
   try {
-    for (let runde = 0; runde < 12; runde++) {
+    let fertig = false;
+    for (let runde = 0; runde < RUNDEN && !fertig; runde++) {
       const r = await claude(verlauf);
-      verlauf.push({ role: 'assistant', content: r.content });
+      // Längengrenze erreicht: ein angefangener Werkzeugaufruf ist unvollständig – nicht ausführen und nicht in den Verlauf
+      // übernehmen (ein Werkzeugaufruf ohne Ergebnis im Verlauf ließe jede weitere Frage scheitern)
+      const gekuerzt = r.stop_reason === 'max_tokens';
+      const bloecke = (r.content || []).filter((b) => !(gekuerzt && b.type === 'tool_use') && !(b.type === 'text' && !b.text.trim()));
+      verlauf.push({ role: 'assistant', content: bloecke.length ? bloecke : [{ type: 'text', text: '(Antwort abgebrochen)' }] });
       const ergebnisse = [];
-      for (const b of r.content) {
+      for (const b of bloecke) {
         if (b.type === 'text' && b.text.trim()) { const d = document.createElement('div'); d.className = 'md'; d.innerHTML = md(b.text); inhalt.append(d); }
         if (b.type !== 'tool_use') continue;
         let res;
         try {
           if (b.name === 'buchungen_auswerten') res = buchungenAuswerten(b.input);
+          else if (b.name === 'steuer_einordnung') res = steuerEinordnung(b.input);
           else if (b.name === 'kontostaende_am') res = kontostaendeAm(b.input);
           else if (b.name === 'fixkosten') res = fixkostenListe(b.input);
           else if (b.name === 'diagramm_zeigen') res = diagramm(inhalt, b.input);
@@ -334,11 +394,19 @@ async function fragen(text) {
         if (STATUS[b.name]) { const s = document.createElement('div'); s.className = 'werkzeug'; s.textContent = '✓ ' + statusText(b); inhalt.append(s); }
         ergebnisse.push({ type: 'tool_result', tool_use_id: b.id, content: typeof res === 'string' ? res : JSON.stringify(res) });
       }
+      // fertig, sobald kein Werkzeug mehr aufgerufen wurde – jeder Werkzeugaufruf im Verlauf bekommt so sein Ergebnis
+      fertig = !ergebnisse.length;
+      if (gekuerzt) hinweis('Die Antwort war zu lang und wurde hier abgeschnitten. Frag enger nach (z. B. ein Jahr, ein Posten) oder lass dir zuerst eine Übersicht geben.');
+      if (!fertig) verlauf.push({ role: 'user', content: ergebnisse });
       antwort.replaceChildren(inhalt);
-      if (r.stop_reason === 'tool_use') { const d = document.createElement('div'); d.className = 'denkt'; d.innerHTML = '<span></span><span></span><span></span>'; antwort.append(d); }
+      if (!fertig) { const d = document.createElement('div'); d.className = 'denkt'; d.innerHTML = '<span></span><span></span><span></span>'; antwort.append(d); }
       nachUnten();
-      if (r.stop_reason !== 'tool_use') break;
-      verlauf.push({ role: 'user', content: ergebnisse });
+    }
+    if (!fertig) {
+      // zu viele Runden: Verlauf mit einer Antwort abschließen, damit die nächste Frage sauber anschließt
+      verlauf.push({ role: 'assistant', content: [{ type: 'text', text: `(nach ${RUNDEN} Auswertungsschritten abgebrochen)` }] });
+      hinweis(`Nach ${RUNDEN} Auswertungsschritten abgebrochen – die Antwort ist eventuell unvollständig. Frag enger nach oder teile die Frage auf.`);
+      antwort.replaceChildren(inhalt);
     }
   } catch (e) {
     antwort.querySelector('.denkt')?.remove();

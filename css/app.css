@@ -198,6 +198,8 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1
 .eingang p { margin: 0 0 10px; max-width: 980px; }
 .eingang-t .ell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .eingang-t tr.eingang-fehler td { background: rgba(224, 96, 46, .06); }
+/* bis 900 px nur Datei, gelesen, neu – sonst schrumpft die Spalte „Datei“ auf null (feste Tabellenbreiten) */
+@media (max-width: 900px) { .eingang-t .sp-m { display: none; } .eingang-t th.r { width: 72px !important; } }
 .fix-grafik-t { font-size: 13px; font-weight: 600; color: var(--text-2); }
 .monate { margin-top: 6px; }
 .fix-fuss { padding: 0 18px 14px; margin: 0; }
@@ -338,7 +340,8 @@ body.chat-offen .chat-knopf { display: none; }
 .msg .md th, .msg .md td { border-bottom: 1px solid var(--border); padding: 4px 6px; text-align: left; word-break: break-word; }
 .msg .md th { color: var(--muted); font-weight: 600; }
 .msg .md code { font-size: 12.5px; }
-.werkzeug { font-size: 12px; color: var(--muted); margin: 2px 0 6px; }
+/* Statuszeilen der Werkzeuge im Chat (.werkzeug, künftig .chat-status); die Filterkarte heißt nur #werkzeug */
+.werkzeug, .chat-status { font-size: 12px; color: var(--muted); margin: 2px 0 6px; }
 .chat-aktion { margin: 4px 6px 4px 0; }
 .chat-chart { border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin: 6px 0 10px; }
 .chat-chart-t { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
@@ -400,13 +403,13 @@ main { max-width: 1600px; padding: 18px 20px 48px; }
 .nav button[aria-selected="true"] .n { background: var(--accent-soft); color: var(--accent); }
 
 /* Filterkarte */
-.werkzeug { display: grid; gap: 10px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
-.werkzeug .suche input { height: 46px; font-size: 16px; box-shadow: none; background: var(--surface-2); border-color: transparent; }
-.werkzeug .suche input:hover { border-color: var(--border-strong); }
-.werkzeug .suche input:focus { background: var(--surface); border-color: var(--accent); }
-.werkzeug .lupe { top: 12px; }
-.werkzeug .hilfe { top: 8px; }
-.werkzeug .vorschlaege { top: 50px; }
+#werkzeug { display: grid; gap: 10px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+#werkzeug .suche input { height: 46px; font-size: 16px; box-shadow: none; background: var(--surface-2); border-color: transparent; }
+#werkzeug .suche input:hover { border-color: var(--border-strong); }
+#werkzeug .suche input:focus { background: var(--surface); border-color: var(--accent); }
+#werkzeug .lupe { top: 12px; }
+#werkzeug .hilfe { top: 8px; }
+#werkzeug .vorschlaege { top: 50px; }
 .filter { margin-top: 0; gap: 8px; }
 .filter select { height: 36px; }
 .luecke { flex: 1; }
@@ -496,7 +499,7 @@ main { max-width: 1600px; padding: 18px 20px 48px; }
 }
 @media (max-width: 640px) {
   main { padding: 12px 12px 96px; }
-  .werkzeug { padding: 10px; }
+  #werkzeug { padding: 10px; }
   .filter select, .auswahl { flex: 1 1 calc(50% - 8px); max-width: none; }
   .auswahl-knopf { width: 100%; }
   .auswahl-knopf span { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -540,6 +543,11 @@ main { max-width: 1600px; padding: 18px 20px 48px; }
 .einlesen-knopf.hinweis { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .dlg-knoepfe { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .hilfe-tab .r { text-align: right; white-space: nowrap; }
+/* Dateilisten im Einlesen-Dialog: lange Dateinamen brechen um (kein seitliches Scrollen am Handy) */
+.datei-tab td:first-child { white-space: normal; overflow-wrap: anywhere; }
+.nachpruefung { margin: 4px 0 12px; color: var(--muted); }
+.nachpruefung summary { cursor: pointer; }
+.nachpruefung ul { margin: 6px 0; padding-left: 18px; color: var(--text-2); }
 @media (max-width: 640px) { .einlesen-knopf span { display: none; } .einlesen-knopf { padding: 0 9px; } }
 
 /* Durchschnitt und Quoten */
@@ -568,14 +576,14 @@ main { max-width: 1600px; padding: 18px 20px 48px; }
 .pk { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(50px, 1.2fr) 70px; gap: 10px; align-items: center; font-size: 13px; }
 .pk-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pk-b { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
-.pk-b i { display: block; height: 100%; border-radius: 4px; background: #eda100; }
+.pk-b i { display: block; height: 100%; border-radius: 4px; background: var(--variabel); }
 .pk b { text-align: right; font-weight: 600; white-space: nowrap; }
 @media (max-width: 640px) { .pp-sparen-z { grid-template-columns: 1fr; } .pp-sparen-z span { white-space: normal; } }
 .fix-einst { display: flex; flex-wrap: wrap; gap: 8px 28px; align-items: center; }
 .fix-eigen { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); }
 .fix-eigen input { width: 96px; height: 32px; padding: 0 8px; border-radius: 9px; border: 1px solid var(--accent); background: var(--surface); font: inherit; font-weight: 600; text-align: right; }
-.bb-fix { background: #2a78d6; }
-.bb-leben { background: #eda100; }
+.bb-fix { background: var(--fest); }
+.bb-leben { background: var(--variabel); color: var(--variabel-text); }
 .bb-rest { background: var(--ein); }
 .bb-minus { background: repeating-linear-gradient(135deg, var(--aus) 0 5px, rgba(224, 96, 46, .35) 5px 10px); }
 .bb { display: grid; gap: 10px; }
@@ -587,6 +595,7 @@ main { max-width: 1600px; padding: 18px 20px 48px; }
 .bb-balken > i:last-of-type { border-radius: 0 9px 9px 0; }
 .bb-balken > i + i { border-left: 2px solid var(--surface); }
 .bb-balken > i span { color: #fff; font-size: 13px; font-weight: 650; white-space: nowrap; text-shadow: 0 1px 2px rgba(0, 0, 0, .25); padding: 0 6px; }
+.bb-balken > .bb-leben span { color: var(--variabel-text); text-shadow: none; }
 .bb-balken > b.bb-minus { position: absolute; top: 0; bottom: 0; border-radius: 0 9px 9px 0; }
 .bb-balken > b.bb-linie { position: absolute; top: -5px; bottom: -5px; width: 2px; margin-left: -1px; background: var(--text); border-radius: 1px; }
 .ks { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 10px; border: 1px solid var(--border); border-radius: 10px; font-size: 13.5px; cursor: pointer; }
@@ -768,7 +777,8 @@ main { max-width: 1600px; padding: 18px 20px 48px; }
   .st-zeile { grid-template-columns: minmax(0, 1fr) auto; }
   .st-datum { grid-column: 1 / -1; padding: 0; }
   .st-knoepfe { grid-column: 1 / -1; justify-content: flex-start; max-width: none; }
-  .st-mehr-box { left: 0; right: auto; width: min(300px, calc(100vw - 48px)); }
+  /* am Handy als festes Blatt (wie .kw-liste), sonst ragt es rechts aus dem Bild und die Seite scrollt seitlich */
+  .st-mehr-box { position: fixed; left: 12px; right: 12px; top: 70px; width: auto; max-height: calc(100vh - 160px); overflow: auto; z-index: 35; }
 }
 .st-dlg:not([open]) { display: none; }
 @media (max-width: 640px) { .card-h .hint { max-height: 0; overflow: hidden; } }
@@ -821,7 +831,7 @@ main { max-width: 1600px; padding: 18px 20px 48px; }
 .zk-kopf .zk-spur { height: 22px; background: none; }
 .zk-kopf .zk-spur span { position: absolute; top: 4px; transform: translateX(-50%); font-size: 11px; color: var(--muted); }
 .zk-kopf .zk-s { font-size: 11.5px; color: var(--muted); text-align: right; display: block; }
-.zk-k { position: absolute; top: 50%; transform: translate(-50%, -50%); border-radius: 50%; cursor: default; }
+.zk-k { position: absolute; top: 50%; transform: translate(-50%, -50%); border-radius: 50%; cursor: pointer; }
 .zk-k.mon { background: rgba(184, 70, 27, .82); }
 .zk-k.mon.vorbei { background: rgba(184, 70, 27, .35); }
 .zk-k.extra { background: #6d5bd0; box-shadow: 0 0 0 2px var(--surface); z-index: 2; }
@@ -1100,6 +1110,10 @@ button.bl-z:hover { background: var(--surface-2); }
   .s5-raster { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .fix5 > .s5-spalte { position: static; }
   .s5-b2 { grid-column: 1 / -1; }
+  /* einzelne Karte ohne Partner (s5-solo, setzt app.js) über die volle Breite – keine halbe Leerfläche; eine Spalte mit Karten legt diese dann nebeneinander */
+  .s5-raster > .s5-solo { grid-column: 1 / -1; }
+  .s5-raster > .s5-spalte.s5-solo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; }
+  .s5-raster > .s5-spalte.s5-solo > :last-child:nth-child(odd) { grid-column: 1 / -1; }
   .kl { grid-template-columns: minmax(0, 1fr); }
   .kl-detail { position: static; }
 }
@@ -1108,6 +1122,7 @@ button.bl-z:hover { background: var(--surface-2); }
   .s5-zahlen { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .s5-raster { grid-template-columns: minmax(0, 1fr); }
   .s5-spalte { gap: 10px; }
+  .s5-raster > .s5-spalte.s5-solo { display: flex; }
   .s5-start .s5-mr { order: -1; }
   .s5-kopf h1 { font-size: 21px; }
   .s5-satz { font-size: 14.5px; }
@@ -1607,6 +1622,15 @@ button.ge-hz:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ge-meld li b { text-align: right; font-variant-numeric: tabular-nums; }
 .ge-meld .pos { color: var(--ein-text); font-weight: 600; }
 @media (max-width: 700px) { .ge-meld li { grid-template-columns: minmax(0, 1fr) auto; } .ge-meld li > span.muted { grid-column: 1 / -1; } .ge-bel { font-size: 12px; } }
+/* Abgleich am Handy: je Jahr ein Block, Spaltenname vor jedem Wert – kein seitliches Scrollen */
+@media (max-width: 700px) {
+  .ge-bel, .ge-bel tbody, .ge-bel tr, .ge-bel td { display: block; width: 100%; }
+  .ge-bel thead { display: none; }
+  .ge-bel tr { padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .ge-bel td { border: 0; padding: 3px 0; }
+  .ge-bel td[data-l] { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; text-align: right; }
+  .ge-bel td[data-l]::before { content: attr(data-l); text-align: left; color: var(--muted); font-weight: 400; }
+}
 /* Alle Daten der Abrechnungen */
 .ge-tab td:first-child { color: var(--text-2); white-space: nowrap; }
 .ge-tab td.ge-txt { white-space: normal; font-size: 12px; line-height: 1.3; }
@@ -1683,9 +1707,9 @@ button.ge-hz:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
   .pc-speicher { margin-left: 0; }
 }
 
-/* Minuswerte überall rot */
-.minus, .minus * { color: var(--aus-text) !important; }
-.btn.primary .minus { color: inherit !important; }
+/* Minuswerte überall rot (Klasse setzt minusRot() in app.js; eigener Name, damit Balkenklassen wie i.minus erhalten bleiben) */
+.ist-minus, .ist-minus * { color: var(--aus-text) !important; }
+.btn.primary .ist-minus { color: inherit !important; }
 .pc-bereich button small { font-size: 11px; color: var(--muted); margin-left: 3px; }
 .pc-links { font-size: 13px; }
 
@@ -1700,3 +1724,38 @@ button.ge-hz:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
 .einlesen-balken .eb-fort i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 1s linear; }
 .einlesen-balken .eb-zeit { grid-column: 2; grid-row: 1; font-variant-numeric: tabular-nums; font-weight: 700; }
 @media (max-width: 900px) { .einlesen-balken { bottom: 76px; } }
+
+/* pruefen */
+/* Entscheidungen ohne Buchung (Bereich Erledigt) */
+.pc-leer { margin: 0 0 10px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); font-size: 13.5px; }
+.pc-leer summary { cursor: pointer; font-weight: 600; }
+.pc-leer p { margin: 6px 0; }
+.pc-leer ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.pc-leer li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; justify-content: space-between; min-width: 0; }
+.pc-leer li > span { min-width: 0; overflow-wrap: anywhere; }
+.pc-leer .neg { color: var(--aus-text); } .pc-leer .pos { color: var(--ein-text); }
+.pc-leer-link { font-size: 12.5px; }
+
+/* gehalt */
+:root { --g-vor: #a0785a; --g-korr: #6b7a99; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --g-vor: #c49d7c; --g-korr: #93a1bf; } }
+:root[data-theme="dark"] { --g-vor: #c49d7c; --g-korr: #93a1bf; }
+.ge-hinweis { display: block; margin-top: 4px; font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
+.ge-fehlt { overflow-wrap: anywhere; }
+.ge-lg > i.ge-lg-minus { box-sizing: border-box; background: none; border: 2px dashed; }
+.ge-lg b.neg { color: var(--aus-text); }
+.ge-bav-luecke { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-size: 13px; line-height: 1.45; color: var(--text-2); overflow-wrap: anywhere; }
+.ge-bav-luecke b { color: var(--text); }
+.ge-tab td.ge-hw { color: var(--accent); cursor: help; font-size: 14px; }
+.ge-tab td.ge-abw { color: #b7791f; font-weight: 600; cursor: help; }
+
+/* steuer */
+/* Prüfmodus: letzte Entscheidung mit „Rückgängig“ (die Leiste unten liegt hinter dem Fenster) */
+.st-dlg-rueck { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 8px 18px; background: var(--surface-2); border-bottom: 1px solid var(--border); color: var(--text-2); }
+.st-dlg-rueck span { min-width: 0; overflow-wrap: anywhere; }
+.st-dlg-haupt .st-dlg-rueck { margin: 0 0 12px; padding: 8px 10px; border: 0; border-radius: 8px; }
+.st-dlg-haupt > .st-dlg-knoepfe { margin-top: 12px; }
+/* Prüfmodus am Handy: Auswahl „Steuerposten“ und Knöpfe bleiben in der Fensterbreite (kein seitliches Scrollen) */
+.st-dlg-fuss > * { min-width: 0; }
+.st-dlg-fuss label { display: flex; align-items: center; gap: 8px; }
+.st-dlg-fuss label select { flex: 1; min-width: 0; margin-left: 0; }

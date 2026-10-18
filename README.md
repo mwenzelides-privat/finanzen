@@ -19,10 +19,10 @@ Jede Ansicht hat ihre eigene Adresse, z. B. `#jahr=2025&kat=Wohnen`, und lässt 
 
 ## Datenschutz
 
-- Der Code liegt öffentlich auf GitHub Pages und enthält **keine Daten**.
+- Der Code liegt öffentlich auf GitHub Pages und enthält **keine Daten**. Eine Content-Security-Policy in `index.html` lässt Skripte nur von der App selbst, jsDelivr und der Google-Anmeldung zu und Verbindungen nur zu Google Drive, Anthropic und dem Einlese-Dienst auf dem PC.
 - **Am PC (empfohlen):** Menü ⋮ → „Datei auf diesem PC verknüpfen“ → `G:\Meine Ablage\10 Finanzen\Auswertung\Finanzen-Daten.json`. Die App liest die Datei dann bei jedem Öffnen selbst, ohne Google-Anmeldung (Browser-Abfrage einmal mit „Bei jedem Besuch zulassen“ bestätigen).
-- Sonst liest die App die Daten aus deinem Google Drive (Berechtigung `drive.readonly`, sie sucht nur nach `Finanzen-Daten.json`) oder aus einer Datei, die du auswählst. Die Kopie liegt nur im Browser des Geräts. Löschen: ⋮ → „Abmelden und Daten löschen“.
-- **Chat:** Er nutzt deinen eigenen Anthropic-API-Schlüssel ([console.anthropic.com](https://console.anthropic.com/settings/keys)). Der Schlüssel wird nur auf dem Gerät gespeichert. An Anthropic gehen die Frage und die Zwischenergebnisse, die die KI über Werkzeuge abruft (Summen, Gruppen, einzelne Buchungen), nicht die ganze Datei. Die Antworten werden als reiner Text angezeigt, ohne Bilder und Links.
+- Sonst liest die App die Daten aus deinem Google Drive (Berechtigung `drive.readonly`, sie sucht nur nach `Finanzen-Daten.json` in deinen eigenen Dateien, nicht in geteilten) oder aus einer Datei, die du auswählst. Die Kopie liegt nur im Browser des Geräts. Löschen: ⋮ → „Abmelden und Daten löschen“ – das löscht alles auf dem Gerät, auch Chat-Schlüssel, Einstellungen und Steuer-Zuordnungen (vorher im Reiter „Steuer“ sichern).
+- **Chat:** Er nutzt deinen eigenen Anthropic-API-Schlüssel ([console.anthropic.com](https://console.anthropic.com/settings/keys)). Der Schlüssel wird nur auf dem Gerät gespeichert. An Anthropic geht mit jeder Frage ein fester Überblick mit: Zeitraum und Anzahl der Buchungen, alle Kontonamen mit Kontostand, das aktuelle Nettogehalt und die Eckdaten der letzten Gehaltsabrechnung, ein „normaler Monat“, wie die App ihn zeigt, sowie die Kategorien und Steuerkategorien. Dazu kommen die Zwischenergebnisse, die die KI über Werkzeuge abruft (Summen, Gruppen, einzelne Buchungen). Die ganze Datei geht nicht mit. Die Antworten werden als reiner Text angezeigt, ohne Bilder und Links.
 
 ## Aufbau
 

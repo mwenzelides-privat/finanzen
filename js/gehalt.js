@@ -25,6 +25,14 @@ const sum = (l, f) => l.reduce((t, x) => t + (f(x) || 0), 0);
 const detail = (z) => z && z.lohnsteuer != null;
 const steuer = (z) => (z.lohnsteuer || 0) + (z.soli || 0) + (z.kirchensteuer || 0);
 const auto = (z) => (z.privatfahrten || 0) + (z.whg_arbeit || 0);
+// Dienstwagen aufgeteilt: laufender Monat und Rückrechnung für Vormonate (negative Zeile einer Lohnart, die im selben Monat
+// auch positiv vorkommt – z. B. 03/2025: Fahrten Wohnung/Arbeit viermal zurückgerechnet)
+function autoTeile(z) {
+  const p = (z.posten || []).filter((x) => /^\d/.test(x.nr) && !x.nr.startsWith('9') && /privatfahrt|whg|wohnung|listenpreis|gwv/i.test(x.text));
+  const plus = new Set(p.filter((x) => x.betrag > 0).map((x) => x.nr));
+  const rueck = sum(p.filter((x) => x.betrag < 0 && plus.has(x.nr)), (x) => x.betrag);
+  return { lfd: auto(z) - rueck, rueck };
+}
 const kvpv = (z) => (z.kv || 0) + (z.pv || 0) - (z.kv_zuschuss || 0) - (z.pv_zuschuss || 0);
 const sonder = (z) => (z.praemie || 0) + (z.sonder || 0);
 const extra = (z) => sonder(z) + (z.sachbezug || 0);   // alles außer Grundgehalt und Dienstwagen
@@ -42,6 +50,8 @@ const GRUPPEN = {
   auto: { n: 'Dienstwagen', f: 'var(--g-auto)', u: 'Sachbezug: kein Geld, wird nur versteuert' },
   sach: { n: 'Gutscheine', f: 'var(--g-sach)', u: 'Sachbezug' },
   sonst: { n: 'Private Abzüge', f: 'var(--g-sonst)', u: 'z. B. private Belege' },
+  vorschuss: { n: 'Vorschuss verrechnet', f: 'var(--g-vor)', u: 'schon vorher ausgezahlt' },
+  korr: { n: 'Korrektur', f: 'var(--g-korr)', u: 'aus einer anderen Abrechnung verrechnet' },
   abz: { n: 'Steuern, Abgaben, Vorsorge', f: 'var(--g-steuer)', u: 'nur als Summe bekannt (Lohn-02.xlsx)' },
 };
 function aufteilung(z) {
@@ -51,7 +61,7 @@ function aufteilung(z) {
     return { basis: z.brutto, t };
   }
   const t = { konto: z.auszahlung, steuer: steuer(z), bav: (z.bav_an || 0) + (z.bav_ag || 0), rv: z.rv || 0, kvpv: (z.av || 0) + kvpv(z),
-    auto: auto(z), sach: z.sachbezug || 0, sonst: z.sonst_abzug || 0 };
+    auto: auto(z), sach: z.sachbezug || 0, sonst: z.sonst_abzug || 0, vorschuss: z.vorschuss || 0, korr: z.korrektur || 0 };
   const basis = z.brutto + (z.bav_ag || 0);
   const rest = basis - sum(Object.values(t), (x) => x);
   if (Math.abs(rest) > 0.01) t.sonst += rest;
@@ -62,10 +72,12 @@ function aufteilung(z) {
 function bruecke(a, b) {
   const fein = detail(a) && detail(b);
   const teile = (z) => (fein
-    ? { gehalt: z.gehalt, sonder: sonder(z), steuer: -steuer(z), sv: -((z.rv || 0) + (z.av || 0) + kvpv(z)), bav: -(z.bav_an || 0), sonst: -(z.sonst_abzug || 0) }
+    ? { gehalt: z.gehalt, sonder: sonder(z), steuer: -steuer(z), sv: -((z.rv || 0) + (z.av || 0) + kvpv(z)), bav: -(z.bav_an || 0), sonst: -(z.sonst_abzug || 0),
+      vorschuss: -(z.vorschuss || 0), korr: -(z.korrektur || 0) }
     : { gehalt: z.gehalt, sonder: sonder(z), abz: z.auszahlung - z.gehalt - sonder(z) });
   const NAMEN = { gehalt: 'Grundgehalt', sonder: 'Prämien und Sonderzahlungen', steuer: 'Lohnsteuer und Soli', sv: 'Sozialversicherung',
-    bav: 'Betriebsrente (dein Anteil)', sonst: 'Private Abzüge', abz: 'Steuern, Abgaben, Vorsorge', rest: 'Sonstiges' };
+    bav: 'Betriebsrente (dein Anteil)', sonst: 'Private Abzüge', vorschuss: 'Vorschuss verrechnet', korr: 'Korrektur aus anderer Abrechnung',
+    abz: 'Steuern, Abgaben, Vorsorge', rest: 'Sonstiges' };
   const ta = teile(a), tb = teile(b), out = [];
   for (const k of Object.keys(tb)) { const d = tb[k] - ta[k]; if (Math.abs(d) >= 0.005) out.push({ k, n: NAMEN[k], d }); }
   const rest = (b.auszahlung - a.auszahlung) - sum(out, (x) => x.d);
@@ -115,7 +127,9 @@ function daten() {
   const pdf = ist.filter(detail);
   const plan = alle.filter((z) => z.quelle === 'plan');
   const fehlt = alle.filter((z) => z.quelle === 'fehlt');
-  return { alle, ist, pdf, plan, fehlt, nach: new Map(alle.map((z) => [z.m, z])), gs: grenzsatz(pdf), erh: erhoehungen(alle.filter((z) => z.gehalt)) };
+  // Probleme beim Einlesen (gehalt_daten.py): nicht lesbare oder rechnerisch nicht aufgehende Abrechnungen, unlesbare Bescheinigungen
+  const probleme = [...(G.fehler || []), ...(G.belege?.nicht_lesbar || []).map((f) => `${f}: Bescheinigung ohne Text (Scan?), nicht gelesen`)];
+  return { alle, ist, pdf, plan, fehlt, probleme, nach: new Map(alle.map((z) => [z.m, z])), gs: grenzsatz(pdf), erh: erhoehungen(alle.filter((z) => z.gehalt)) };
 }
 
 // ---------------------------------------------------------------- Seite
@@ -142,17 +156,19 @@ export function gehaltZeigen(el, helfer) {
     `<option value="${x.m}"${x.m === wahl ? ' selected' : ''}>${H.monLang(x.m)}${detail(x) ? '' : ' (nur Summen)'}</option>`).join('')}</select></label>`;
   let satz = `Im ${H.monLang(z.m)} kamen ${H.zl(`<b>${e(z.auszahlung)}</b>`, gehaltZiel(z))} aufs Konto – ${pz(z.auszahlung / basis)} von ${H.zs(`<b>${e0(basis)}</b>`, '#ge-fluss')}, die ${detail(z) && z.bav_ag ? 'dein Arbeitgeber für dich aufwendet (Brutto und Betriebsrente)' : 'du brutto verdienst'}.`;
   if (seit > 0) satz += ` Seit ${H.monLang(erste.m)} ist dein Grundgehalt von ${e0(erste.gehalt)} auf ${H.zs(`<b>${e0(stufe)}</b>`, '#ge-verlauf')} gestiegen (<b class="pos">+${pz(seit)}</b>${proJahr ? `, im Schnitt ${pz(proJahr, 1)} pro Jahr` : ''}).`;
-  const offen = G.fehlt.at(-1);
-  if (offen) satz += ` <span class="ge-fehlt">Die Abrechnung für ${H.MONAT[+offen.m.slice(5) - 1]} fehlt noch – als PDF in den Ordner <i>Gehalt</i> legen.</span>`;
+  if (G.fehlt.length) satz += ` <span class="ge-fehlt">${G.fehlt.length === 1 ? 'Die Abrechnung für' : 'Die Abrechnungen für'} ${G.fehlt.map((x) => H.monLang(x.m)).join(', ')} ${G.fehlt.length === 1 ? 'fehlt' : 'fehlen'} noch – als PDF in den Ordner <i>Gehalt</i> legen.</span>`;
+  if (G.probleme.length) satz += ` <span class="ge-fehlt" title="${H.esc(G.probleme.join('\n'))}">⚠ Beim Einlesen ${G.probleme.length === 1 ? 'gab es ein Problem' : `gab es ${G.probleme.length} Probleme`}: ${G.probleme.slice(0, 3).map(H.esc).join('; ')}${G.probleme.length > 3 ? ` … und ${G.probleme.length - 3} weitere (Maus darauf: alle)` : ''}</span>`;
+  if (z.hinweis) satz += ` <span class="ge-hinweis">ⓘ ${H.esc(z.hinweis)}</span>`;
 
   // Kacheln
-  const ein = eingang(z);
+  const ein = eingang(z), dw = autoTeile(z);
+  const dwText = Math.abs(dw.rueck) >= 0.005 ? ` + Dienstwagen ${e0(dw.lfd)}, Rückrechnung Vormonate <span class="neg">−${e0(-dw.rueck)}</span>` : auto(z) ? ` + Dienstwagen ${e0(auto(z))}` : '';
   const j = z.m.slice(0, 4), jahrAlle = G.alle.filter((x) => x.m.slice(0, 4) === j && x.quelle !== 'fehlt');
   const jahrIst = jahrAlle.filter((x) => x.quelle !== 'plan');
   const jahrPlan = jahrAlle.length > jahrIst.length;
   const kacheln = [
     H.zahl5(`Aufs Konto im ${H.MONAT[+z.m.slice(5) - 1]}`, e(z.auszahlung), `${vm ? `${pm(z.auszahlung - vm.auszahlung)} ggü. ${H.MON[+vm.m.slice(5) - 1]}` : 'erste Abrechnung'}${ein ? ` · angekommen am ${H.dde(ein.d).slice(0, 6)} ✓` : ''}`, { ziel: gehaltZiel(z) }),
-    H.zahl5(`Brutto im ${H.MONAT[+z.m.slice(5) - 1]}`, e0(z.brutto), `Grundgehalt ${e0(z.gehalt)}${auto(z) ? ` + Dienstwagen ${e0(auto(z))}` : ''}${sonder(z) > 1 ? ` + Sonderzahlung ${e0(sonder(z))}` : ''}`, { springe: '#ge-daten' }),
+    H.zahl5(`Brutto im ${H.MONAT[+z.m.slice(5) - 1]}`, e0(z.brutto), `Grundgehalt ${e0(z.gehalt)}${dwText}${sonder(z) > 1 ? ` + Sonderzahlung ${e0(sonder(z))}` : ''}`, { springe: '#ge-daten' }),
     H.zahl5('Grundgehalt', e0(stufe), `${seit > 0 ? `+${pz(seit)} seit ${H.monKurz(erste.m)} (${e0(erste.gehalt)})` : 'monatlich, ohne Zulagen'}${Math.abs(z.gehalt - stufe) > 0.5 ? ` · in diesem Monat ${e0(z.gehalt)} mit Nachzahlung` : ''}`, { cls: seit > 0 ? 'pos' : '', springe: '#ge-verlauf' }),
     H.zahl5(`Jahr ${j}${jahrPlan ? ' (mit Plan)' : ''}`, `${jahrPlan ? '≈ ' : ''}${e0(sum(jahrAlle, (x) => x.auszahlung))}`, `aufs Konto · brutto ${jahrPlan ? '≈ ' : ''}${e0(sum(jahrAlle, (x) => x.brutto))}${jahrPlan ? ` · ${jahrIst.length} von 12 Monaten abgerechnet` : ''}`, { springe: '#ge-jahrtab' }),
   ].join('');
@@ -199,8 +215,12 @@ const gehaltZiel = (z) => {
 };
 
 // ---------------------------------------------------------------- Karten
-function flussKarte(z, basis, t) {
+function flussKarte(z, basis0, t) {
   const keys = Object.keys(GRUPPEN).filter((k) => t[k] > 0.005);
+  // Teile unter null (Gutschrift, Rückrechnung, Korrektur zu deinen Gunsten) passen nicht in Kästchen: sie werden extra
+  // aufgeführt, die 100 % sind dann die Summe der positiven Teile (= Brutto plus Betriebsrente vor Verrechnung dieser Posten)
+  const minus = Object.keys(GRUPPEN).filter((k) => t[k] < -0.005);
+  const basis = basis0 - sum(minus, (k) => t[k]);
   // 100 Kästchen, je 1 % (größte Reste zuerst aufrunden)
   const roh = keys.map((k) => ({ k, x: (t[k] / basis) * 100 }));
   roh.forEach((r) => { r.n = Math.floor(r.x); });
@@ -208,12 +228,13 @@ function flussKarte(z, basis, t) {
   roh.slice().sort((a, b) => (b.x - b.n) - (a.x - a.n)).forEach((r) => { if (frei > 0 && r.x > 0) { r.n++; frei--; } });
   const zellen = roh.flatMap((r) => Array.from({ length: r.n }, () => `<i style="background:${GRUPPEN[r.k].f}" title="${GRUPPEN[r.k].n}: ${pz(t[r.k] / basis, 1)}"></i>`)).join('');
   const spaeter = keys.filter((k) => GRUPPEN[k].spaeter);
-  const legende = keys.map((k) => `<div class="ge-lg"><i style="background:${GRUPPEN[k].f}"></i><span>${GRUPPEN[k].n}<small>${GRUPPEN[k].u}</small></span><b>${e0(t[k])}</b><span class="muted">${pz(t[k] / basis)}</span></div>`).join('');
+  const legende = keys.map((k) => `<div class="ge-lg"><i style="background:${GRUPPEN[k].f}"></i><span>${GRUPPEN[k].n}<small>${GRUPPEN[k].u}</small></span><b>${e0(t[k])}</b><span class="muted">${pz(t[k] / basis)}</span></div>`).join('')
+    + minus.map((k) => `<div class="ge-lg"><i class="ge-lg-minus" style="border-color:${GRUPPEN[k].f}"></i><span>${k === 'auto' ? 'Dienstwagen-Rückrechnung' : GRUPPEN[k].n}<small>zu deinen Gunsten, nicht in den Kästchen</small></span><b class="neg">−${e0(-t[k])}</b><span class="muted"></span></div>`).join('');
   const hundert = (k) => Math.round((t[k] / basis) * 100);
   const text = detail(z)
     ? `Von 100 € gehen <b>${hundert('konto')} €</b> aufs Konto, <b>${hundert('steuer')} €</b> ans Finanzamt${spaeter.length ? ` und <b>${Math.round(sum(spaeter, (k) => t[k]) / basis * 100)} €</b> in deine Rente` : ''}.`
     : 'Für diesen Monat gibt es nur die Summen aus Lohn-02.xlsx.';
-  return H.karte5('Wohin dein Geld fließt', `${H.monLang(z.m)}: ${detail(z) && z.bav_ag ? 'Brutto plus Betriebsrente vom Arbeitgeber' : 'Brutto'} = ${e(basis)}, ein Kästchen = 1 %`,
+  return H.karte5('Wohin dein Geld fließt', `${H.monLang(z.m)}: ${detail(z) && z.bav_ag ? 'Brutto plus Betriebsrente vom Arbeitgeber' : 'Brutto'} = ${e(basis0)}, ein Kästchen = 1 %${minus.length ? ` von ${e(basis)} (Posten zu deinen Gunsten stehen extra)` : ''}`,
     `<p class="ge-text">${text}</p><div class="ge-waffel" role="img" aria-label="Aufteilung in Prozent">${zellen}</div><div class="ge-legende">${legende}</div>${jahrFluss(z)}`, '', '', 'ge-fluss');
 }
 
@@ -223,10 +244,10 @@ function jahrFluss(z) {
   if (ms.length < 2) return '';
   const t = {}; let basis = 0;
   for (const x of ms) { const a = aufteilung(x); basis += a.basis; for (const [k, w] of Object.entries(a.t)) t[k] = (t[k] || 0) + w; }
-  const keys = Object.keys(GRUPPEN).filter((k) => t[k] > 0.005);
+  const keys = Object.keys(GRUPPEN).filter((k) => t[k] > 0.005), pos = sum(keys, (k) => t[k]);   // Anteile wie oben: von den positiven Teilen
   return `<div class="ge-jfluss fuell-aus" data-fuell="1"><h3>${z.m.slice(0, 4)} bis ${H.MONAT[+z.m.slice(5) - 1]} zusammen: ${e0(basis)}</h3>
     <div class="ge-yb">${keys.map((k) => `<i style="flex:${t[k]};background:${GRUPPEN[k].f}" title="${GRUPPEN[k].n}: ${e0(t[k])}"></i>`).join('')}</div>
-    <dl class="s5-dl">${keys.slice().sort((x, y) => t[y] - t[x]).slice(0, 4).map((k) => `<div><dt>${GRUPPEN[k].n}</dt><dd>${e0(t[k])}<small>${pz(t[k] / basis)}</small></dd></div>`).join('')}</dl></div>`;
+    <dl class="s5-dl">${keys.slice().sort((x, y) => t[y] - t[x]).slice(0, 4).map((k) => `<div><dt>${GRUPPEN[k].n}</dt><dd>${e0(t[k])}<small>${pz(t[k] / pos)}</small></dd></div>`).join('')}</dl></div>`;
 }
 
 function brueckeKarte(G, z) {
@@ -272,10 +293,36 @@ function brueckeKarte(G, z) {
 }
 const erhoehungText = (b, n) => `≈ <b class="pos">+${e0(n)}</b> netto im Monat, <b>+${e0(n * 12)}</b> im Jahr.`;
 
+// Lücken in der Betriebsrente: Beiträge sinken beim selben Arbeitgeber für einige Monate und kommen danach wieder auf den alten
+// Stand, ohne Nachzahlung (z. B. fehlt ein Vertrag auf der Abrechnung). Verglichen wird Monat für Monat mit der Abrechnung davor.
+const BAV_ZEILE = (p) => p.betrag < 0 && (p.nr === 'ZVA' || /zusatzversorgung|abzug bav|gehaltsverzicht bav/i.test(p.text));
+function bavLuecken(pdf) {
+  const out = [];
+  for (let i = 1; i < pdf.length; i++) {
+    const vor = pdf[i - 1], an0 = vor.bav_an || 0, ag0 = vor.bav_ag || 0;
+    if (!an0 || (pdf[i].bav_an || 0) >= an0 - 0.5 || pdf[i].arbeitgeber !== vor.arbeitgeber) continue;
+    let j = i;
+    while (j < pdf.length && (pdf[j].bav_an || 0) < an0 - 0.5 && pdf[j].arbeitgeber === vor.arbeitgeber) j++;
+    if (j >= pdf.length || pdf[j].arbeitgeber !== vor.arbeitgeber) continue;   // dauerhaft weniger oder Arbeitgeber gewechselt
+    const ms = pdf.slice(i, j), an = sum(ms, (x) => an0 - (x.bav_an || 0)), ag = sum(ms, (x) => Math.max(0, ag0 - (x.bav_ag || 0)));
+    const nach = (pdf[j].bav_an || 0) - an0;
+    if (nach < an - 1) {
+      // fehlende Zeilen: Beträge, die in der Abrechnung davor stehen und im ersten Monat der Lücke nicht
+      const rest = (ms[0].posten || []).filter(BAV_ZEILE).map((p) => p.betrag);
+      const weg = (vor.posten || []).filter(BAV_ZEILE).map((p) => p.betrag).filter((b) => { const k = rest.findIndex((r) => Math.abs(r - b) < 0.005); if (k < 0) return true; rest.splice(k, 1); return false; });
+      out.push({ von: ms[0].m, bis: ms.at(-1).m, n: ms.length, an0, an: ms[0].bav_an || 0, ag0, ag: ms[0].bav_ag || 0, fehltAn: an, fehltAg: ag,
+        weg: Math.abs(sum(weg, (b) => -b) - (an0 - (ms[0].bav_an || 0))) < 0.02 ? weg.map((b) => -b) : [] });
+    }
+    i = j;
+  }
+  return out;
+}
+
 function bavKarte(G, z) {
   const mit = G.pdf.filter((x) => x.bav_an || x.bav_ag);
+  const luecken = bavLuecken(G.pdf).map((l) => `<p class="ge-bav-luecke">⚠ <b>${H.monKurz(l.von)}${l.n > 1 ? ` – ${H.monKurz(l.bis)}` : ''}:</b> Entgeltumwandlung ${e(l.an)} statt ${e(l.an0)}${l.weg.length ? ` (es fehlen die Zeilen ${l.weg.map((b) => e(b)).join(' und ')})` : ''}${l.ag < l.ag0 - 0.005 ? `, Arbeitgeber ${e(l.ag)} statt ${e(l.ag0)}` : ''} – danach wieder wie vorher, ohne Nachzahlung. Zusammen fehlen <b>${e0(l.fehltAn)}</b> von dir${l.fehltAg ? ` und <b>${e0(l.fehltAg)}</b> vom Arbeitgeber` : ''}. Beim Arbeitgeber bzw. Versicherer nachfragen, ob für diese Monate Beiträge fehlen.</p>`).join('');
   if (!detail(z) || !(z.bav_an || z.bav_ag)) {
-    return H.karte5('Betriebsrente', '', `<p class="muted">${mit.length ? `Im ${H.monLang(z.m)} noch keine Beiträge – seit ${H.monLang(mit[0].m)} zahlst du ein.` : 'Laut deinen Abrechnungen zahlst du nicht in eine Betriebsrente ein.'}</p>`);
+    return H.karte5('Betriebsrente', '', `<p class="muted">${mit.length ? `Im ${H.monLang(z.m)} keine Beiträge – seit ${H.monLang(mit[0].m)} zahlst du ein.` : 'Laut deinen Abrechnungen zahlst du nicht in eine Betriebsrente ein.'}</p>${luecken}`);
   }
   const an = z.bav_an || 0, ag = z.bav_ag || 0, ges = an + ag;
   const steuerSpar = an * G.gs.r, netto = an - steuerSpar;
@@ -285,7 +332,7 @@ function bavKarte(G, z) {
   return H.karte5('Betriebsrente', `${e0(ges)} im Monat fließen in deine Altersvorsorge`,
     `<div class="ge-bav">${teil(netto, 'du', 'du netto')}${teil(steuerSpar, 'fa', 'Steuer gespart')}${teil(ag, 'ag', 'Arbeitgeber')}</div>
     <p class="ge-text">Davon zahlst du netto nur <b>${e0(netto)}</b> (${pz(netto / ges)}) – den Rest tragen dein Arbeitgeber (${e0(ag)}) und die gesparte Lohnsteuer (≈ ${e0(steuerSpar)}).</p>
-    <dl class="s5-dl">${verein && Math.abs(sollAg - ag) > 1 ? `<div><dt>Arbeitgeber laut Vereinbarung <small>${verein} % von ${e0(z.gehalt)}</small></dt><dd>${e0(sollAg)}<small class="neg">abgerechnet ${e0(ag)} · ${pm0(ag - sollAg)} im Monat</small></dd></div>` : ''}<div><dt>Seit ${H.monLang(mit[0].m)} eingezahlt</dt><dd>${e0(bisher)}</dd></div><div><dt>Pro Jahr</dt><dd>${e0(ges * 12)}<small>ohne Zinsen</small></dd></div></dl>`, 'ge-bavk');
+    <dl class="s5-dl">${verein && Math.abs(sollAg - ag) > 1 ? `<div><dt>Arbeitgeber laut Vereinbarung <small>${verein} % von ${e0(z.gehalt)}</small></dt><dd>${e0(sollAg)}<small class="neg">abgerechnet ${e0(ag)} · ${pm0(ag - sollAg)} im Monat</small></dd></div>` : ''}<div><dt>Seit ${H.monLang(mit[0].m)} eingezahlt</dt><dd>${e0(bisher)}</dd></div><div><dt>Pro Jahr</dt><dd>${e0(ges * 12)}<small>ohne Zinsen</small></dd></div></dl>${luecken}`, 'ge-bavk');
 }
 
 // Dienstwagen: geldwerter Vorteil = Satz × Listenpreis (Privatfahrten) + 0,03 % × Listenpreis × km, beim E-Auto
@@ -352,6 +399,8 @@ function zukunftKarte(G) {
     return `<td class="r">${typeof v === 'string' ? v : w(v)}${i && opt.diff && Math.abs(d) >= 0.5 ? `<small class="${(opt.gut ? d > 0 : d < 0) ? 'pos' : 'neg'}">${w(d, true)}</small>` : ''}</td>`;
   }).join('')}</tr>`;
   const letzt = spalten.at(-1), plus = letzt.ausz - spalten[0].ausz;
+  // Rest bis zur Auszahlung (Gutscheine, private Belege, Vorschuss …): in allen Spalten gleich, damit jede Spalte auf den Cent aufgeht
+  const r0 = spalten[0], uebrig = Math.round((r0.brutto - r0.steuer - sozial(z) - (z.bav_an || 0) - (r0.pf + r0.wa) - r0.ausz) * 100) / 100;
   const satz = spalten.slice(1).map((c, i) => `${i ? 'Und ' + c.titel : c.titel.replace('ab ', 'Ab ')} (${H.esc(c.sub)}${c.km !== spalten[i].km ? `, ${c.km} statt ${spalten[i].km} km` : ''}${c.satz !== spalten[i].satz ? `, ${String(c.satz).replace('.', ',')} % statt ${String(spalten[i].satz).replace('.', ',')} %` : ''}): <b class="pos">${pm0(c.ausz - spalten[0].ausz)}</b> im Monat gegenüber heute.`).join(' ')
     + ` Der versteuerte Dienstwagen-Vorteil sinkt von ${e0(auto(z))} auf ${e0(letzt.pf + letzt.wa)}; das bringt ${pm0(plus * 12)} im Jahr.`;
   const tab = `<table class="t3 ge-zt"><thead><tr><th></th>${spalten.map((c) => `<th class="r">${c.titel}<small>${H.esc(c.sub)}</small></th>`).join('')}</tr></thead><tbody>
@@ -365,6 +414,8 @@ function zukunftKarte(G) {
     ${zeile('Lohnsteuer und Soli', (c) => -c.steuer, { diff: true, gut: true, sub: `geschätzt, ${pz(gs, 1)} Grenzsteuersatz` })}
     ${zeile('Sozialversicherung', () => -sozial(z), { sub: 'unverändert (über der Beitragsgrenze)' })}
     ${zeile('Betriebsrente (dein Anteil)', () => -(z.bav_an || 0))}
+    ${zeile('Dienstwagen wieder abgezogen', (c) => -(c.pf + c.wa), { diff: true, gut: true, sub: 'Sachbezug, kein Geld' })}
+    ${uebrig ? zeile('Übrige Netto-Abzüge', () => -uebrig, { sub: 'Gutscheine, private Belege u. a.' }) : ''}
     ${zeile('Auszahlung', (c) => c.ausz, { cls: 'ge-sum', diff: true, gut: true })}
   </tbody></table>`;
   return H.karte5('Deine Abrechnung heute und ab 2027', 'was sich durch Umzug und neuen Dienstwagen ändert – alles andere wie in der letzten Abrechnung',
@@ -392,10 +443,11 @@ function heatmapKarte(G) {
       if (!z) return '<span class="ge-hz leer"></span>';
       if (z.quelle === 'fehlt') return `<span class="ge-hz fehlt" title="${H.monLang(m)}: Abrechnung fehlt">?</span>`;
       const v = z.auszahlung;
-      if (v == null) return `<span class="ge-hz plan" title="${H.monLang(m)}: Plan, brutto ${e0(z.brutto)}">–</span>`;
+      const hw = z.hinweis ? H.esc(`\n${z.hinweis}`) : '';
+      if (v == null) return `<span class="ge-hz plan" title="${H.monLang(m)}: Plan, brutto ${e0(z.brutto)}${hw}">–</span>`;
       const x = Math.max(0.08, Math.min(1, (v - lo) / Math.max(1, hi - lo)));
       const plan = z.quelle === 'plan';
-      return `<button class="ge-hz${plan ? ' plan' : ''}${m === wahl ? ' an' : ''}${x > 0.62 ? ' dunkel' : ''}" style="--x:${Math.round(x * 100)}%" ${plan ? '' : `data-ge-m="${m}"`} title="${H.monLang(m)}: ${plan ? 'erwartet ' : ''}${e(v)} aufs Konto · brutto ${e0(z.brutto)}${sonder(z) > 500 ? ` · Sonderzahlung ${e0(sonder(z))}` : ''}"><span class="lang">${plan ? '≈' : ''}${H.NUM.format(Math.round(v))}</span><span class="kurz">${kurz(v)}</span></button>`;
+      return `<button class="ge-hz${plan ? ' plan' : ''}${m === wahl ? ' an' : ''}${x > 0.62 ? ' dunkel' : ''}" style="--x:${Math.round(x * 100)}%" ${plan ? '' : `data-ge-m="${m}"`} title="${H.monLang(m)}: ${plan ? 'erwartet ' : ''}${e(v)} aufs Konto · brutto ${e0(z.brutto)}${sonder(z) > 500 ? ` · Sonderzahlung ${e0(sonder(z))}` : ''}${hw}"><span class="lang">${plan ? '≈' : ''}${H.NUM.format(Math.round(v))}</span><span class="kurz">${kurz(v)}</span></button>`;
     }).join('');
     const ms = G.alle.filter((z) => z.m.startsWith(j) && z.auszahlung != null), planDa = ms.some((z) => z.quelle === 'plan');
     return `<span class="ge-hj">${j}</span>${zellen}<b class="ge-hs">${planDa ? '≈' : ''}${e0(sum(ms, (z) => z.auszahlung))}</b>`;
@@ -675,7 +727,7 @@ function belegKarte() {
 ${abw[0].erklaert}`)}">✓ erklärt<small>${abw.map((x) => `Z. ${x.zeile} ${pm0(x.diff)}`).join(' · ')}</small></td>`;
     return `<td class="r ge-abw" title="${H.esc(tip)}">⚠ ${abw.map((x) => `Z. ${x.zeile}: ${pm0(x.diff)}`).join('<br>')}</td>`;
   };
-  const zeilen = B.jahre.map((j) => `<tr><td><b>${j.jahr}</b><small>${j.monate} Abrechnungen · ${H.esc(j.quelle || '')}</small></td>${BELEG_GRUPPEN.map(([, n]) => zelle(j, n)).join('')}</tr>`).join('');
+  const zeilen = B.jahre.map((j) => `<tr><td><b>${j.jahr}</b><small>${j.monate} Abrechnungen · ${H.esc(j.quelle || '')}</small></td>${BELEG_GRUPPEN.map(([t, n]) => zelle(j, n).replace(/^<td ([^>]*)>([\s\S]*)<\/td>$/, `<td data-l="${H.esc(t)}" $1><span>$2</span></td>`)).join('')}</tr>`).join('');   // data-l: Beschriftung am Handy (Tabelle als Liste)
   const meld = (B.meldungen || []).map((m) => {
     const ok = m.diff != null && Math.abs(m.diff) < 0.5;
     return `<li><span>${H.dde(m.von)} – ${H.dde(m.bis)}</span><span class="muted">${H.esc(m.grund.replace(/^\d+\s*/, ''))}</span><b>${H.eur0(m.entgelt * 100)}</b>
@@ -705,16 +757,17 @@ const ZEILEN = [
   ['=netto_verdienst', 'Netto-Verdienst'],
   ['h', 'Netto-Abzüge und -Zuschüsse'], ['-bav_an', 'Betriebsrente (Entgeltumwandlung)'], ['-_auto', 'Dienstwagen (Sachbezug)'], ['-_sach', 'Gutscheine (Sachbezug)'],
   ['-kv', 'Krankenversicherung'], ['kv_zuschuss', 'Zuschuss Arbeitgeber KV'], ['-pv', 'Pflegeversicherung'], ['pv_zuschuss', 'Zuschuss Arbeitgeber PV'], ['-sonst_abzug', 'Private Abzüge'],
+  ['-vorschuss', 'Vorschuss (verrechnet)'], ['-korrektur', 'Korrektur (verrechnet)'],
   ['=auszahlung', 'Auszahlung'],
   ['h', 'Zusätzlich vom Arbeitgeber'], ['bav_ag', 'Betriebsrente Arbeitgeber'], ['sv_ag', 'Sozialversicherung Arbeitgeberanteil'], ['ag_zusatzkosten', 'Zusätzliche Kosten (Umlagen u. a.)'], ['ag_gesamtkosten', 'Gesamtkosten des Arbeitgebers'],
   ['h', 'Merkmale'], ['#stkl', 'Steuerklasse'], ['#kinderfreibetrag', 'Kinderfreibetrag'], ['#kv_satz', 'KV-Beitragssatz'], ['#krankenkasse', 'Krankenkasse'],
-  ['#urlaubsanspruch', 'Urlaubsanspruch'], ['#erstellt', 'Abrechnung vom'], ['#_konto', 'Auf dem Konto'], ['#_quelle', 'Quelle'],
+  ['#urlaubsanspruch', 'Urlaubsanspruch'], ['#erstellt', 'Abrechnung vom'], ['#_konto', 'Auf dem Konto'], ['#_quelle', 'Quelle'], ['#hinweis', 'Hinweis'],
 ];
 function wert(z, feld) {
   if (feld === '_auto') return detail(z) ? auto(z) : null;
   if (feld === '_sach') return detail(z) ? z.sachbezug : null;
   if (feld === '_konto') { const r = eingang(z); return r ? `✓ ${H.dde(r.d).slice(0, 6)}` : '–'; }
-  if (feld === '_quelle') return detail(z) ? (z.geprueft ? 'PDF ✓ geprüft' : 'PDF') : 'Lohn-02.xlsx';
+  if (feld === '_quelle') return detail(z) ? (z.geprueft ? 'PDF ✓ geprüft' : z.pruef_fehler ? 'PDF ⚠ geht nicht auf' : 'PDF') : 'Lohn-02.xlsx';
   if (feld === 'kinderfreibetrag') return z.kinderfreibetrag != null ? z.kinderfreibetrag.toLocaleString('de-DE', { minimumFractionDigits: 1 }) : null;
   if (feld === 'kv_satz') return z.kv_satz != null ? `${z.kv_satz.toLocaleString('de-DE')} %` : null;
   if (feld === 'urlaubsanspruch') return z.urlaubsanspruch != null ? `${z.urlaubsanspruch.toLocaleString('de-DE')} Tage` : null;
@@ -758,13 +811,18 @@ function datenKarte(G, el) {
       // nicht gedruckt, nach fester Regel aus deinem gedruckten Anteil berechnet (Wurzer 04/2025–04/2026)
       const ber = (z.berechnet || []).includes(feld);
       const tip = ber ? ' title="Steht nicht auf der Abrechnung, nach fester Regel berechnet: Renten- und Arbeitslosenversicherung zahlen beide gleich viel, Krankenversicherung je zur Hälfte, Pflege Arbeitgeber 1,8 % (du 1,55 %). Ergibt auf den Cent die gedruckten Werte der Monate davor und danach."' : '';
+      if (feld === 'hinweis') return `<td class="r ge-txt ge-hw" title="${H.esc(v)}">ⓘ</td>`;
+      if (feld === '_quelle' && z.pruef_fehler) return `<td class="r ge-txt ge-abw" title="${H.esc(z.pruef_fehler)}">${H.esc(v)}</td>`;
       if (text || typeof v === 'string') return `<td class="r ge-txt${ber ? ' ge-ber' : ''}"${tip}>${H.esc(String(v))}${ber ? '<sup>b</sup>' : ''}</td>`;
       if (!v) return '<td class="r muted">0</td>';
-      return `<td class="r${neg ? ' neg' : ''}${ber ? ' ge-ber' : ''}"${tip || (cent ? '' : ` title="${H.eur(Math.round(v * 100))}"`)}>${neg ? '−' : ''}${zahl(v)}${ber ? '<sup>b</sup>' : ''}</td>`;
+      return `<td class="r${ber ? ' ge-ber' : ''}${betrag(v).cls}"${tip || (cent ? '' : ` title="${H.eur(Math.round(v * 100))}"`)}>${betrag(v).t}${ber ? '<sup>b</sup>' : ''}</td>`;
     };
+    // Abzugszeilen zeigen den Betrag mit Minus; ist er negativ (Gutschrift, Erstattung), steht ein Plus davor und er ist nicht rot
+    const betrag = (v) => { const w = neg ? -v : v; if (Math.abs(v) < 0.005) return { t: '0', cls: '' }; return { t: `${w < 0 ? '−' : neg ? '+' : ''}${zahl(Math.abs(v))}`, cls: w < 0 ? ' neg' : '' }; };
     const s = !text ? sum(jahrMs, (z) => { const v = wert(z, feld); return typeof v === 'number' ? v : 0; }) : null;
     const nJahr = jahrMs.filter((z) => typeof wert(z, feld) === 'number').length;
-    zeilen.push(`<tr class="${summe ? 'ge-sum' : ''}"><td>${name}</td>${ms.map(zelle).join('')}${schmal ? '' : `<td class="r ge-js">${text ? '' : !nJahr ? '–' : `${neg ? '−' : ''}${zahl(s)}`}</td>`}</tr>`);
+    const sBer = jahrMs.some((z) => (z.berechnet || []).includes(feld) && typeof wert(z, feld) === 'number');
+    zeilen.push(`<tr class="${summe ? 'ge-sum' : ''}"><td>${name}</td>${ms.map(zelle).join('')}${schmal ? '' : `<td class="r ge-js${text || !nJahr ? '' : betrag(s).cls}"${sBer ? ' title="enthält nach fester Regel berechnete Monate"' : ''}>${text ? '' : !nJahr ? '–' : `${betrag(s).t}${sBer ? '<sup>b</sup>' : ''}`}</td>`}</tr>`);
   }
   if (!zeilen.length) zeilen.push(`<tr><td colspan="${ms.length + 2}" class="muted">In ${jahr} gibt es zu diesem Bereich keine Werte.</td></tr>`);
   const kopf = `<tr><th>in €${cent ? '' : '<small>ohne Cent</small>'}</th>${monate.map((m, i) => {
@@ -796,14 +854,14 @@ function verlaufZeichnen(G) {
     const jahre = [...new Set(L.map((z) => z.m.slice(0, 4)))].sort();
     labels = jahre;
     const s = (j, f, p) => sum(L.filter((z) => z.m.startsWith(j) && (z.quelle === 'plan') === p), f);
-    reihen = { g: jahre.map((j) => s(j, (z) => z.gehalt, false)), s: jahre.map((j) => s(j, extra, false)), a: jahre.map((j) => s(j, (z) => Math.max(0, auto(z)), false)),
+    reihen = { g: jahre.map((j) => s(j, (z) => z.gehalt, false)), s: jahre.map((j) => s(j, extra, false)), a: jahre.map((j) => s(j, auto, false)),
       p: jahre.map((j) => s(j, (z) => z.brutto, true) || null), k: jahre.map((j) => sum(L.filter((z) => z.m.startsWith(j)), (z) => z.auszahlung)) };
     if (reihen.p.some(Boolean)) planAb = reihen.p.findIndex(Boolean);
   } else {
     labels = L.map((z) => H.monKurz(z.m));
     const ist = (f) => L.map((z) => (z.quelle === 'plan' ? null : f(z)));
     const plan = (f) => L.map((z) => (z.quelle === 'plan' ? f(z) : null));
-    reihen = { g: ist((z) => z.gehalt), s: ist(extra), a: ist((z) => Math.max(0, auto(z))), pg: plan((z) => z.gehalt), ps: plan(extra), pa: plan(auto), k: L.map((z) => z.auszahlung ?? null) };
+    reihen = { g: ist((z) => z.gehalt), s: ist(extra), a: ist(auto), pg: plan((z) => z.gehalt), ps: plan(extra), pa: plan(auto), k: L.map((z) => z.auszahlung ?? null) };
     planAb = L.findIndex((z) => z.quelle === 'plan');
     punkte = G.erh.map((x) => ({ i: L.findIndex((z) => z.m === x.m), x }));
   }
@@ -928,12 +986,16 @@ function binden(el, G) {
 
 async function excel(G) {
   const felder = ZEILEN.filter(([f]) => f !== 'h').map(([f, n]) => [f.replace(/^[-=#]/, ''), n, f.startsWith('#') ? 'text' : 'euro']);
+  const NAME = Object.fromEntries(felder.map(([f, n]) => [f, n]));
   const monate = G.alle.slice().reverse().map((z) => [`${z.m}-01`, z.arbeitgeber, { pdf: 'Abrechnung (PDF)', excel: 'Lohn-02.xlsx', plan: 'Plan', fehlt: 'fehlt' }[z.quelle] || z.quelle,
-    ...felder.map(([f, , typ]) => { const v = wert(z, f); return typ === 'euro' ? (typeof v === 'number' ? v : null) : v; })]);
+    ...felder.map(([f, , typ]) => { const v = f === 'erstellt' ? z.erstellt ?? null : wert(z, f); return typ === 'euro' ? (typeof v === 'number' ? v : null) : v; }),
+    // nicht gedruckte Werte (in der App mit b markiert) und Grund, falls die Abrechnung rechnerisch nicht aufgeht
+    (z.berechnet || []).map((f) => NAME[f] || f).join(', ') || null, z.pruef_fehler || null]);
   const posten = G.alle.slice().reverse().flatMap((z) => (z.posten || []).map((p) => [`${z.m}-01`, p.nr, p.text, p.betrag, p.nr.startsWith('9') ? 'Netto-Bezug/-Abzug' : 'Brutto-Bezug']));
   await alsExcelMappe('Gehaltsabrechnungen', [
     { blatt: 'Monate', spalten: [{ titel: 'Monat', typ: 'datum', breite: 11 }, { titel: 'Arbeitgeber', typ: 'text', breite: 12 }, { titel: 'Quelle', typ: 'text', breite: 16 },
-      ...felder.map(([, n, typ]) => ({ titel: n, typ, breite: 15 }))], zeilen: monate },
+      ...felder.map(([, n, typ]) => ({ titel: n, typ, breite: 15 })), { titel: 'Nicht gedruckt, nach fester Regel berechnet (b)', typ: 'text', breite: 40 },
+      { titel: 'Prüfung', typ: 'text', breite: 30 }], zeilen: monate },
     { blatt: 'Lohnarten', spalten: [{ titel: 'Monat', typ: 'datum', breite: 11 }, { titel: 'Nr.', typ: 'text', breite: 7 }, { titel: 'Bezeichnung', typ: 'text', breite: 30 },
       { titel: 'Betrag', typ: 'euro', breite: 14 }, { titel: 'Art', typ: 'text', breite: 18 }], zeilen: posten },
   ]);

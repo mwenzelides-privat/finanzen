@@ -2,10 +2,11 @@
 //   rewe edeka     → beide Wörter müssen vorkommen
 //   rewe|edeka     → eines von beiden
 //   "dm drogerie"  → genau diese Wortfolge
-//   -storno        → ohne dieses Wort
-//   49,99          → Betrag genau 49,99 € (egal ob Ein- oder Ausgabe); auch 49.99, 49,99 €, −49,99 (typografisches Minus)
+//   -storno        → ohne dieses Wort (nur Wörter mit Buchstaben; -50 ist ein Betrag)
+//   49,99          → Betrag genau 49,99 € (egal ob Ein- oder Ausgabe); auch 49.99, 49,99 €, 1.305 (Tausenderpunkt)
+//   −49,99  -50 €  → nur Ausgaben genau dieses Betrags (auch typografisches Minus, wie die App Beträge anzeigt)
 //   >500  <20  100-250  → Betragsbereich
-//   2024  2019-2021  03.2024  12.03.2024  → Zeitraum
+//   2024  2019-2021  03.2024  2024-03  12.03.2024  → Zeitraum
 
 // Kleinschreibung, Umlaute und Akzente vereinheitlichen: „Mobilität“ findet „Mobilitaet“
 export function norm(s) {
@@ -60,6 +61,11 @@ export function parse(q) {
         const f = { '>': (a) => a > v, '>=': (a) => a >= v, '<': (a) => a < v, '<=': (a) => a <= v }[op];
         add(`Betrag ${op.startsWith('>') ? 'über' : 'unter'} ${fmtC(v)}`, (r) => f(Math.abs(r.c)), 'betrag'); continue;
       }
+      if ((m = t.match(/^(\d{4})-(\d{1,2})$/)) && isYear(+m[1]) && +m[2] >= 1 && +m[2] <= 12) {
+        // Monat in ISO-Schreibweise (2024-03) – nicht als Betragsbereich 3 bis 2.024 € lesen
+        const iso = `${m[1]}-${pad(m[2])}`;
+        add(`Monat ${pad(m[2])}/${m[1]}`, (r) => r.d.startsWith(iso), 'zeit', [iso, iso]); continue;
+      }
       if ((m = t.match(/^(\d[\d.]*(?:,\d{1,2})?)-(\d[\d.]*(?:,\d{1,2})?)€?$/))) {
         const a = cent(m[1]), b = cent(m[2]);
         add(`Betrag ${fmtC(Math.min(a, b))} bis ${fmtC(Math.max(a, b))}`, (r) => Math.abs(r.c) >= Math.min(a, b) && Math.abs(r.c) <= Math.max(a, b), 'betrag'); continue;
@@ -69,7 +75,8 @@ export function parse(q) {
         const v = +m[1] * 100 + +m[2], neg = t.startsWith('-');
         add(`Betrag ${neg ? '−' : ''}${fmtC(v)}`, (r) => (neg ? r.c === -v : Math.abs(r.c) === v), 'betrag'); continue;
       }
-      if ((m = t.match(/^-?(\d[\d.]*,\d{1,2})€?$/)) || (m = t.match(/^-?(\d+)€$/))) {
+      // mit Komma, mit €, mit Tausenderpunkt (1.305) oder mit Minus (−50, -50 €: das „€“ ist oben schon abgetrennt)
+      if ((m = t.match(/^-?(\d[\d.]*,\d{1,2})€?$/)) || (m = t.match(/^-?(\d+)€$/)) || (m = t.match(/^-?(\d{1,3}(?:\.\d{3})+)$/)) || (m = t.match(/^-(\d{1,6})$/))) {
         const v = cent(m[1]), neg = t.startsWith('-');
         add(`Betrag ${neg ? '−' : ''}${fmtC(v)}`, (r) => (neg ? r.c === -v : Math.abs(r.c) === v), 'betrag'); continue;
       }
@@ -79,7 +86,7 @@ export function parse(q) {
         add(`„${n}“ oder ${fmtC(v)}`, (r) => Math.abs(r.c) === v || r.s.includes(n), 'text'); continue;
       }
     }
-    const neg = t.startsWith('-') && t.length > 1;
+    const neg = t.startsWith('-') && /\p{L}/u.test(t);   // „ohne“ nur für Wörter mit Buchstaben
     const body = neg ? t.slice(1) : t;
     const alts = (tk.quoted ? [body] : body.split('|')).map(norm).filter(Boolean);
     if (!alts.length) continue;

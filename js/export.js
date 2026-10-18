@@ -50,6 +50,8 @@ export function alsCsv(dateiname, spalten, zeilen) {
     if (v === '' || v == null) return '';
     if (s.typ === 'euro') return v.toFixed(2).replace('.', ',');
     if (s.typ === 'datum') return `${v.slice(8, 10)}.${v.slice(5, 7)}.${v.slice(0, 4)}`;
+    // Text, der mit = + - @ beginnt, würde Excel als Formel ausführen – ein vorangestelltes ' macht ihn zu reinem Text
+    if (s.typ !== 'zahl' && typeof v === 'string' && /^[=+\-@\t\r]/.test(v)) return q("'" + v);
     return q(v);
   };
   const text = [spalten.map((s) => q(s.titel)).join(';'), ...zeilen.map((z) => z.map((v, i) => f(v, spalten[i])).join(';'))].join('\r\n');

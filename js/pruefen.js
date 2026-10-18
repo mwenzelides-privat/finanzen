@@ -3,7 +3,8 @@
 // Hinweisen, was dahinterstecken könnte. Du entscheidest selbst; die Entscheidung gilt sofort in der App.
 // Gespeichert wird auf dem Gerät und – am PC – über den Einlese-Dienst in Auswertung\Kategorie-Entscheidungen.json; am Handy
 // als Datei sichern und in den Eingang legen. finanzen_aufbauen.py übernimmt die Entscheidungen beim nächsten Aufbau.
-// Schlüssel: e|<Name wie norm() in Python>|<+, - oder leer> = alle Buchungen des Empfängers; b|Datum|Konto|Cent = eine Buchung.
+// Schlüssel: e|<Name wie norm() in Python>|<+, - oder leer> = alle Buchungen des Empfängers; b|Datum|Konto|Cent|<Name wie norm()>
+// = eine Buchung (ältere Schlüssel ohne Name gelten weiter; der Name steht dann nur im Feld name).
 import * as Q from './quelle.js';
 
 const KV = 'kategorie-entscheidungen';
@@ -15,13 +16,22 @@ let H = null;               // Helfer aus app.js
 let filter = 'offen', sortierung = 'betrag', suche = '', mehrBuchungen = false;
 const angehakt = new Set();
 let G = null;               // Gruppen-Cache (je Datenstand)
+let LEER = [];              // Entscheidungen, die keine Buchung (mehr) eindeutig treffen
 
 // wie norm() in finanzen_aufbauen.py – damit Empfänger-Regeln dort dieselben Buchungen treffen
 export function pyNorm(s) {
   return String(s ?? '').toLowerCase().replace(/\d{4,}/g, '').replace(/[^a-zäöüß ]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
 }
-const jetzt = () => new Date().toISOString().slice(0, 19);
+// Zeitstempel auf die Millisekunde und auf diesem Gerät immer aufsteigend – zwei Klicks in derselben Sekunde bleiben
+// unterscheidbar (ältere Einträge haben nur Sekunden; der Textvergleich ordnet sie trotzdem richtig ein)
+let letzteZeit = '';
+const jetzt = () => {
+  let z = new Date().toISOString().slice(0, 23);
+  if (z <= letzteZeit) z = new Date(Date.parse(`${letzteZeit}Z`) + 1).toISOString().slice(0, 23);
+  return (letzteZeit = z);
+};
 const neuer = (a, b) => !b || String(a?.zeit || '') > String(b.zeit || '');
+const gleich = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 function mischen(obj) {
   let n = 0;
   for (const [k, e] of Object.entries(obj || {})) if (e && typeof e === 'object' && neuer(e, ENT[k])) { ENT[k] = e; n++; }
@@ -37,19 +47,28 @@ export function det(r, j) {
   return o;
 }
 const eigeneRegel = (t) => /^(Deine Entscheidung|Von dir geprüft)/.test(t || '');
+// eingebaute Regel passt zur Art des Schlüssels (e = alle Buchungen des Empfängers, b = diese Buchung)
+const regelPasst = (k, t) => /^Von dir geprüft/.test(t || '') || (k[0] === 'e' ? /^Deine Entscheidung \(alle/ : /^Deine Entscheidung \(diese/).test(t || '');
 
 // ---------------------------------------------------------------- Entscheidungen auf die Buchungen anwenden (in aufbereiten)
 // Gibt die geänderten Buchungen zurück (deren Suchtext neu gebildet werden muss).
 export function entscheidungenAnwenden(rows, j) {
   mischen(j.kategorie_entscheidungen);
-  const konten = j.konten, geaendert = [];
+  const konten = j.konten, geaendert = [], dj = j.kategorie_entscheidungen || {};
+  LEER = [];
   for (const r of rows) {
     const rg = det(r, j).regel;
     if (eigeneRegel(rg)) r.ent = 'daten';
     if (rg) r.regel = rg;
   }
-  const keys = Object.keys(ENT).filter((k) => !ENT[k].geloescht).sort((a, b) => (a[0] === 'e' ? 0 : 1) - (b[0] === 'e' ? 0 : 1));
-  if (!keys.length) return geaendert;
+  // zurückgenommen, aber in den Daten noch eingebaut (der PC baut erst beim nächsten Aufbau neu auf) – auch wenn die Daten
+  // die Entscheidung nicht mitliefern (vom Handy über den Eingang eingebaut) und der PC die Zurücknahme noch nicht hat
+  const zurueck = Object.keys(ENT).filter((k) => ENT[k].geloescht && ((dj[k] && !dj[k].geloescht) || UNSYNC.has(k)));
+  // e-Regeln vor einzelnen Buchungen; bei mehreren Schlüsseln für dieselbe Buchung gewinnt die neueste Entscheidung
+  const zeitVon = (k) => String(ENT[k].zeit || '');
+  const keys = Object.keys(ENT).filter((k) => !ENT[k].geloescht)
+    .sort((a, b) => (a[0] === 'e' ? 0 : 1) - (b[0] === 'e' ? 0 : 1) || (zeitVon(a) < zeitVon(b) ? -1 : zeitVon(a) > zeitVon(b) ? 1 : 0));
+  if (!keys.length && !zurueck.length) return geaendert;
   const nachName = new Map(), nachB = new Map();
   for (const r of rows) {
     const n = pyNorm(r.g);
@@ -57,6 +76,18 @@ export function entscheidungenAnwenden(rows, j) {
     const b = `${r.d}|${konten[r.k].name}|${r.c}`;
     if (!nachB.has(b)) nachB.set(b, []); nachB.get(b).push(r);
   }
+  // Buchungen, die ein Schlüssel trifft; null = mehrdeutig (mehrere gleiche Buchungen, keine mit diesem Namen – auch nicht
+  // unter einem früheren Namen): dann gilt die Entscheidung für keine statt für alle
+  const treffer = (k, e) => {
+    const t = k.split('|');
+    if (t[0] === 'e' && t[1]) return (nachName.get(t[1]) || []).filter((r) => !((t[2] === '+' && r.c <= 0) || (t[2] === '-' && r.c >= 0)));
+    if (t[0] !== 'b' || t.length < 4) return [];
+    const l = nachB.get(t.slice(1, 4).join('|')) || [];
+    if (l.length < 2) return l;
+    const n = t.length > 4 ? t[4] : e?.name ? pyNorm(e.name) : null;
+    const l2 = n == null ? [] : l.filter((r) => pyNorm(r.g) === n || (r.ga || []).some((x) => pyNorm(x) === n));
+    return l2.length ? l2 : null;
+  };
   const anwenden = (r, e, k, wie) => {
     if (FREMD_ART.has(r.art)) return;
     if (e.kat) { r.kat = e.kat; r.ukat = e.ukat || ''; }
@@ -64,22 +95,36 @@ export function entscheidungenAnwenden(rows, j) {
       const umb = 'umb' in e ? !!e.umb : r.art === 'Umbuchung';
       r.art = umb ? 'Umbuchung' : r.kat === 'Sparen' ? 'Sparen' : r.c > 0 ? 'Einnahme' : 'Ausgabe';
     }
-    r.ent = k; r.regel = wie + (e.notiz ? `: ${e.notiz}` : '');
+    r.ent = k; r.regel = wie + (e.notiz ? `: ${e.notiz}` : ''); delete r.zurueck;
     geaendert.push(r);
   };
+  // Zurücknahme einer schon eingebauten Entscheidung: alten Stand wiederherstellen, wenn die Daten ihn mitliefern
+  // (details.vor = „Hauptkategorie|Unterkategorie|1 oder 0 für Umbuchung“), sonst sichtbar als „wartet auf den PC“ markieren
+  for (const k of zurueck) {
+    for (const r of treffer(k, dj[k] || {}) || []) {
+      const d = det(r, j);
+      if (!regelPasst(k, d.regel) || FREMD_ART.has(r.art)) continue;
+      const v = d.vor ? d.vor.split('|') : null;
+      if (v) {
+        r.kat = v[0]; r.ukat = v[1] || '';
+        r.art = v[2] === '1' ? 'Umbuchung' : r.kat === 'Sparen' ? 'Sparen' : r.c > 0 ? 'Einnahme' : 'Ausgabe';
+        delete r.ent;
+        r.regel = 'Zurückgenommen (vorläufig – genau gilt es nach dem nächsten Aufbau am PC)';
+      } else {
+        r.ent = k;
+        r.regel = 'Zurückgenommen – die alte Kategorie kommt erst beim nächsten Aufbau am PC zurück';
+      }
+      r.zurueck = true;
+      geaendert.push(r);
+    }
+  }
   for (const k of keys) {
     const e = ENT[k], t = k.split('|');
     const nurGeprueft = e.ok && !e.kat && !('umb' in e);
-    if (t[0] === 'e' && t[1]) {
-      for (const r of nachName.get(t[1]) || []) {
-        if ((t[2] === '+' && r.c <= 0) || (t[2] === '-' && r.c >= 0)) continue;
-        anwenden(r, e, k, nurGeprueft ? 'Von dir geprüft' : `Deine Entscheidung (alle Buchungen von ${e.name || t[1]})`);
-      }
-    } else if (t[0] === 'b' && t.length >= 4) {
-      let l = nachB.get(t.slice(1, 4).join('|')) || [];
-      if (l.length > 1 && e.name) { const l2 = l.filter((r) => r.g === e.name || pyNorm(r.g) === pyNorm(e.name)); if (l2.length) l = l2; }
-      for (const r of l) anwenden(r, e, k, nurGeprueft ? 'Von dir geprüft' : 'Deine Entscheidung (diese Buchung)');
-    }
+    const l = treffer(k, e);
+    if (!l || !l.length) { LEER.push({ k, e, mehrdeutig: !l }); continue; }
+    const wie = nurGeprueft ? 'Von dir geprüft' : t[0] === 'e' ? `Deine Entscheidung (alle Buchungen von ${e.name || t[1]})` : 'Deine Entscheidung (diese Buchung)';
+    for (const r of l) anwenden(r, e, k, wie);
   }
   return geaendert;
 }
@@ -94,7 +139,7 @@ export function entscheidungenLaden(j) {
 async function laden(j) {
   const lokal = await Q.kvLesen(KV).catch(() => null);
   if (lokal?.ent) mischen(lokal.ent);
-  UNSYNC = new Set(lokal?.unsync || []);
+  for (const k of lokal?.unsync || []) UNSYNC.add(k);   // dazunehmen, nicht ersetzen: Entscheidungen von eben bleiben vorgemerkt
   const dj = j.kategorie_entscheidungen || {};
   for (const k of [...UNSYNC]) if (dj[k] && !neuer(ENT[k], dj[k])) UNSYNC.delete(k);   // inzwischen in den Daten
   await lokalSpeichern();
@@ -113,9 +158,16 @@ async function abgleichen() {
     const r = await fetch(H.DIENST + '/kategorien', { method: 'POST', headers: { 'X-Finanzen': '1', 'Content-Type': 'application/json' },
       body: JSON.stringify({ entscheidungen: neu }), signal: ctl.signal, cache: 'no-store' });
     if (!r.ok) throw new Error(String(r.status));
-    const x = await r.json();
-    const mehr = mischen(x.entscheidungen);
-    UNSYNC.clear(); dienstOk = true;
+    const x = await r.json(), pc = x.entscheidungen || {};
+    let mehr = 0;
+    // gleiche Zeit, anderer Inhalt: es gilt die Fassung am PC (der Einlese-Dienst behält bei Gleichstand seine)
+    for (const [k, e] of Object.entries(neu)) {
+      if (pc[k] && ENT[k] === e && String(pc[k].zeit || '') === String(e.zeit || '') && !gleich(pc[k], e)) { ENT[k] = pc[k]; mehr++; }
+    }
+    mehr += mischen(pc);
+    // nur austragen, was der PC jetzt genau so hat – was während des Abgleichs dazukam, bleibt vorgemerkt
+    for (const k of [...UNSYNC]) if (pc[k] && gleich(pc[k], ENT[k])) UNSYNC.delete(k);
+    dienstOk = true;
     await lokalSpeichern();
     return mehr > 0;
   } catch { dienstOk = false; return false; } finally { clearTimeout(t); }
@@ -133,10 +185,20 @@ async function dateiSichern() {
 }
 
 // ---------------------------------------------------------------- Gruppen (je Empfänger)
-const zaehlt = (r, D) => (r.art === 'Ausgabe' || r.art === 'Einnahme') && !(D.konten[r.k].kind || D.konten[r.k].gemeinsam);
+// eigen: Buchung auf deinen eigenen Konten (nicht Kinder, nicht gemeinsam mit Kathrin); zaehlt: davon Einnahmen und Ausgaben
+const fremdKonto = (k) => !!(k?.kind || k?.gemeinsam);
+const eigen = (r, D) => !fremdKonto(D.konten[r.k]) && !FREMD_ART.has(r.art);
+const zaehlt = (r, D) => (r.art === 'Ausgabe' || r.art === 'Einnahme') && eigen(r, D);
 const istOffen = (r, D) => zaehlt(r, D) && !r.ent && (r.kat === 'Nicht zugeordnet' || !r.kat || r.ukat === 'Unkategorisiert');
 const gKey = (r) => pyNorm(r.g) || `?${pyNorm(r.z).slice(0, 25)}`;
 export const gruppenSchluessel = gKey;
+// Unterkategorie vor deiner Entscheidung: aus den Daten – oder, wenn der PC die Entscheidung schon eingebaut hat, der Stand
+// davor (details.vor) bzw. laut Quelle
+function ukatVorher(r, D) {
+  const d = det(r, D.j);
+  if (!eigeneRegel(d.regel)) return D.j.unterkategorien[D.j.buchungen[r.i][6]] || '';
+  return d.vor ? d.vor.split('|')[1] || '' : (d.kat0 || '').split(' › ')[1] || '';
+}
 // Anzahl offener Buchungen (für den Knopf „Prüfen“)
 export function offenZahl(D) {
   if (D._offen == null) D._offen = D.rows.filter((r) => istOffen(r, D)).length;
@@ -168,9 +230,12 @@ function gruppen() {
     g.oEin = g.offen.filter((r) => r.c > 0).reduce((t, r) => t + r.c, 0);
     g.entschieden = g.rows.some((r) => r.ent);
     g.letzt = g.rows.reduce((t, r) => (r.d > t ? r.d : t), '');
-    // Zur Kontrolle: viel unter „Sonstige Einnahmen“ oder Buchungen in vielen verschiedenen Kategorien
-    const sonst = z.filter((r) => r.ukat === 'Sonstige Einnahmen' && r.c > 0 && !r.ent);
-    g.kontrolleRows = sonst.reduce((t, r) => t + r.c, 0) >= 30000 ? sonst : [];
+    // Zur Kontrolle: viel unter „Sonstige Einnahmen“. Die Schwelle zählt auch, was du davon schon entschieden hast – sonst
+    // fielen die übrigen Buchungen ohne Entscheidung aus der Liste, sobald die offene Restsumme unter 300 € sinkt.
+    const SE = 'Sonstige Einnahmen';
+    const sonstAlle = g.rows.filter((r) => r.c > 0 && ((zaehlt(r, D) && r.ukat === SE) || (r.ent && eigen(r, D) && ukatVorher(r, D) === SE)));
+    const sonst = z.filter((r) => r.ukat === SE && r.c > 0 && !r.ent);
+    g.kontrolleRows = sonst.length && sonstAlle.reduce((t, r) => t + r.c, 0) >= 30000 ? sonst : [];
     if (g.kontrolleRows.length) g.kontrolle = 'als „Sonstige Einnahmen“';
     liste.push(g);
   }
@@ -196,6 +261,8 @@ const STICHWORTE = [
 ];
 const FIRMA = /\b(gmbh|ag|kg|se|ohg|ug|e\.?\s?v|mbh|gbr|bank|kasse|versicherung|stadt|gemeinde|amt|verlag|service|shop|markt|apotheke|\.de|\.com|inc|ltd|paypal)\b/i;
 const paar = (k, u) => `${k}|${u}`;
+// dein eigener Name als Gegenseite (nach pyNorm), mit oder ohne „Dr.“/„Herr“, in beiden Reihenfolgen – nicht die Namen der Kinder
+const SELBST = /^(herr )?(dr )?marcus wenzelides$|^(dr )?wenzelides (dr )?marcus$/;
 // IBAN in Vierergruppen; ältere Kontoauszüge haben nur die Kontonummer, PayPal die E-Mail-Adresse der Gegenseite
 export const ibanText = (ib) => (!ib ? '' : /^[A-Z]{2}\d{2}/.test(ib) ? ib.replace(/(.{4})/g, '$1 ').trim() : ib.includes('@') ? `PayPal: ${ib.toLowerCase()}` : `Konto-Nr. ${ib}`);
 const katText = (k, u) => `${H.schoen(k)}${u ? ` › ${H.schoen(u)}` : ''}`;
@@ -258,10 +325,11 @@ function analyse(g, richtung = null) {
   for (const r of g.offen.slice(0, 40)) {
     const t0 = new Date(r.d).getTime();
     for (let k = 0; k < proKonto.length && !gegen; k++) {
-      if (k === r.k) continue;
-      // nur wenn die Gegenbuchung selbst nach eigenem Geld aussieht (Umbuchung, Sparen oder dein Name)
+      // Geld an Konten der Kinder oder an gemeinsame Konten ist eine Ausgabe, keine Umbuchung
+      if (k === r.k || fremdKonto(D.konten[k])) continue;
+      // nur wenn die Gegenbuchung selbst nach eigenem Geld aussieht (Umbuchung, Sparen oder genau dein Name)
       const x = proKonto[k].find((y) => y.c === -r.c && Math.abs(new Date(y.d).getTime() - t0) <= 3 * 864e5
-        && (y.art === 'Umbuchung' || y.art === 'Sparen' || /wenzelides/i.test(y.g)));
+        && (y.art === 'Umbuchung' || y.art === 'Sparen' || SELBST.test(pyNorm(y.g))));
       if (x) gegen = [r, x];
     }
     if (gegen) break;
@@ -278,8 +346,10 @@ function analyse(g, richtung = null) {
     if (vz === '+' && !g.ein) continue;
     vorschlag(k, u, neu ? 2.5 : 1.5, `im Text steht „${tr[0].trim().slice(0, 30)}“`, false, !!neu);
   }
-  // eigenes Geld: dein Name als Gegenseite oder automatischer Ausgleich der Banksoftware
-  if (/marcus wenzelides|starmoney autom/.test(text)) vorschlag('Umbuchung', '', 3, /starmoney/.test(text) ? 'automatischer Ausgleich der Banksoftware' : 'Geld von dir selbst', true);
+  // eigenes Geld: automatischer Ausgleich der Banksoftware, oder genau dein Name als Gegenseite. Nur die Gegenseite zählt –
+  // im Verwendungszweck steht oft der Kontoinhaber, auch bei echten Ausgaben. Der Name allein wiegt nicht mehr als ein Stichwort.
+  if (/starmoney autom/.test(text)) vorschlag('Umbuchung', '', 3, 'automatischer Ausgleich der Banksoftware', true);
+  else if (SELBST.test(g.key)) vorschlag('Umbuchung', '', 1.5, 'Geld von dir selbst', true);
   // 9. Privatperson?
   if (!g.ohneName && !FIRMA.test(g.name) && /^[a-zäöüß.-]+,?\s+[a-zäöüß.-]+(\s+[a-zäöüß.-]+)?$/i.test(g.name.trim()) && !gid) {
     hinw.push('Der Name sieht nach einer <b>Privatperson</b> aus – typisch: Geld an Familie oder Freunde, Privatverkauf, geteilte Kosten oder Rückzahlungen.');
@@ -297,11 +367,13 @@ function analyse(g, richtung = null) {
 // Vorschlag passt → ✓; sonst Kategorie aus der Liste wählen; „zählt nicht“ für Geld zwischen eigenen Konten.
 // Haken „auch die anderen von …“: dieselbe Entscheidung gilt für alle offenen Buchungen dieses Empfängers.
 let zeigAnzahl = 30;
-const analyseCache = new Map();
+let analyseCache = { G: null, m: new Map() };   // gilt nur für einen Gruppen-Stand (nach jeder Entscheidung und neuen Daten neu)
 function vorschlagFuer(g, r) {
+  const gr = gruppen();
+  if (analyseCache.G !== gr) analyseCache = { G: gr, m: new Map() };
   const ri = Math.sign(r.c), k = `${g.key}|${ri}`;   // Vorschlag passend zur Richtung dieser Buchung
-  if (!analyseCache.has(k)) analyseCache.set(k, analyse(g, ri));
-  return analyseCache.get(k);
+  if (!analyseCache.m.has(k)) analyseCache.m.set(k, analyse(g, ri));
+  return analyseCache.m.get(k);
 }
 
 let katOpts = null;
@@ -325,9 +397,12 @@ export function pruefenSeite(h) {
   const { D, m, liste } = gruppen();
   const nur = H.S().wahl ? m.get(H.S().wahl) : null;            // aus „Buchungen“: nur dieser Empfänger
   const offen = liste.flatMap((g) => g.offen);
-  const erledigt = D.rows.filter((r) => r.ent && zaehlt(r, D));
+  // alle Entscheidungen auf eigenen Konten, auch „zählt nicht“ und Sparen – nur so lassen sie sich später ändern
+  const erledigt = D.rows.filter((r) => r.ent && eigen(r, D));
   const kontrolle = liste.flatMap((g) => g.kontrolleRows || []);
-  let rows = nur ? [...nur.rows].filter((r) => zaehlt(r, D)) : filter === 'erledigt' ? erledigt : filter === 'kontrolle' ? kontrolle : offen;
+  // aus „Buchungen“: alle Buchungen des Empfängers auf eigenen Konten, auch Umbuchungen und Sparen
+  let rows = nur ? nur.rows.filter((r) => eigen(r, D)) : filter === 'erledigt' ? erledigt : filter === 'kontrolle' ? kontrolle : offen;
+  const nurFremd = nur && !rows.length;
   if (suche) { const q = H.norm(suche); rows = rows.filter((r) => H.norm(`${r.g} ${r.z}`).includes(q)); }
   rows.sort(sortierung === 'datum' ? (a, b) => b.d.localeCompare(a.d) : (a, b) => Math.abs(b.c) - Math.abs(a.c));
   if (nur) rows.sort((a, b) => istOffen(b, D) - istOffen(a, D));
@@ -340,18 +415,38 @@ export function pruefenSeite(h) {
       : 'Alle Buchungen haben eine Kategorie. 🎉';
   const rechts = '<div class="seg" role="group" aria-label="Ausgaben, Einnahmen oder Prüfen"><button data-k2art="aus">Ausgaben</button><button data-k2art="ein">Einnahmen</button><button data-k2art="pruefen" class="an">Prüfen</button></div>';
   const ung = [...UNSYNC].filter((k) => ENT[k]).length;
-  const speicher = dienstOk ? '✓ am PC gespeichert' : ung ? `${ung} Entscheidungen nur auf diesem Gerät · <button class="link" id="pr-sichern">als Datei sichern</button> (dann in Google Drive › 10 Finanzen › Eingang legen)` : '';
+  const speicher = dienstOk ? (ung ? `${ung} ${ung === 1 ? 'Entscheidung wird' : 'Entscheidungen werden'} am PC gespeichert …` : '✓ am PC gespeichert')
+    : ung ? `${ung} Entscheidungen nur auf diesem Gerät · <button class="link" id="pr-sichern">als Datei sichern</button> (dann in Google Drive › 10 Finanzen › Eingang legen)` : '';
+  const nLeer = LEER.length;
+  const leerHinweis = nLeer && !nur ? `<button class="link klein pc-leer-link" data-pc-f="erledigt">⚠ ${nLeer} ${nLeer === 1 ? 'Entscheidung trifft' : 'Entscheidungen treffen'} keine Buchung</button>` : '';
   const leiste = `<div class="pc-leiste">
     ${nur ? `<button class="btn sm" id="pr-alle">‹ zurück zu allen offenen</button>` : `<div class="pc-fort" title="${erledigt.length} von ${gesamt} erledigt"><i style="width:${pz}%"></i></div><span class="klein"><b>${H.NUM.format(erledigt.length)}</b> erledigt · <b>${H.NUM.format(offen.length)}</b> offen</span>`}
     <input id="pr-suche" type="search" placeholder="Suchen …" value="${H.esc(suche)}" autocomplete="off">
     <select id="pr-sort" aria-label="Reihenfolge"><option value="betrag"${sortierung === 'betrag' ? ' selected' : ''}>größte zuerst</option><option value="datum"${sortierung === 'datum' ? ' selected' : ''}>neueste zuerst</option></select>
     ${nur ? '' : `<div class="seg pc-bereich" role="group" aria-label="Bereich">${[['offen', 'Offen', offen.length], ['kontrolle', 'Zur Kontrolle', kontrolle.length], ['erledigt', 'Erledigt', erledigt.length]].map(([k, t, n]) => `<button data-pc-f="${k}" class="${filter === k ? 'an' : ''}">${t} <small>${H.NUM.format(n)}</small></button>`).join('')}</div>`}
-    ${speicher ? `<span class="klein muted pc-speicher">${speicher}</span>` : ''}</div>`;
+    ${speicher || leerHinweis ? `<span class="klein muted pc-speicher">${[speicher, leerHinweis].filter(Boolean).join(' · ')}</span>` : ''}</div>`;
   const zeig = rows.slice(0, zeigAnzahl);
-  const html = zeig.map((r) => zeileHtml(r, D, filter === 'erledigt' && !nur, filter === 'kontrolle' && !nur)).join('');
+  const html = zeig.map((r) => zeileHtml(r, D, filter === 'erledigt' || !!nur, filter === 'kontrolle' && !nur)).join('');
+  const leer = nurFremd ? '<p class="leer">Die Buchungen dieses Empfängers liegen nur auf Konten der Kinder oder auf gemeinsamen Konten mit Kathrin – sie zählen nicht mit und werden hier nicht eingeordnet.</p>'
+    : '<p class="leer">Nichts zu tun.</p>';
   return H.kopf5('Kategorien prüfen', satz, rechts) + `<section class="card s5-karte pc-karte">${leiste}
-    <div class="pc-liste">${html || '<p class="leer">Nichts zu tun.</p>'}</div>
+    ${filter === 'erledigt' && !nur && nLeer ? leerListe() : ''}
+    <div class="pc-liste">${html || leer}</div>
     ${rows.length > zeig.length ? `<button class="btn" id="pr-mehr">Weitere ${Math.min(30, rows.length - zeig.length)} zeigen (noch ${rows.length - zeig.length})</button>` : ''}</section>`;
+}
+
+// Entscheidungen, die keine Buchung (mehr) eindeutig treffen – z. B. Konto umbenannt, Datum oder Betrag in der Quelle geändert
+function leerListe() {
+  const li = LEER.map(({ k, e, mehrdeutig }) => {
+    const t = k.split('|');
+    const wo = t[0] === 'b' ? `${t[1] ? H.dde(t[1]) : ''} · ${H.esc(t[2] || '')} · <b class="${+t[3] < 0 ? 'neg' : 'pos'}">${H.eur(+t[3] || 0)}</b> · ${H.esc(e.name || '(ohne Namen)')}`
+      : `alle Buchungen von ${H.esc(e.name || t[1] || '')}${t[2] === '+' ? ' (Eingänge)' : t[2] === '-' ? ' (Ausgänge)' : ''}`;
+    const was = e.ok && !e.kat && !('umb' in e) ? 'passt so' : e.umb ? 'zählt nicht' : katText(e.kat, e.ukat);
+    return `<li><span>${wo} → ${H.esc(was)}${mehrdeutig ? ' <small class="muted">(mehrere gleiche Buchungen, keine mit diesem Namen)</small>' : ''}</span>
+      <button class="link" data-pc-verwerfen="${H.esc(k)}">verwerfen</button></li>`;
+  }).join('');
+  return `<details class="pc-leer"><summary>⚠ ${LEER.length} ${LEER.length === 1 ? 'Entscheidung trifft' : 'Entscheidungen treffen'} keine Buchung und ${LEER.length === 1 ? 'wirkt' : 'wirken'} nicht</summary>
+    <p class="klein muted">Meist wurde das Konto umbenannt oder die Bank hat Datum oder Betrag geändert. Ordne die Buchung neu ein und verwirf die alte Entscheidung.</p><ul>${li}</ul></details>`;
 }
 
 // Liste, auf die sich „auch die anderen von …“ bezieht
@@ -363,9 +458,11 @@ function zeileHtml(r, D, erledigtAnsicht, kontr = false) {
   const andere = g ? andereVon(g, r, kontr) : [];
   let aktion;
   if (!of) {
+    const aktiv = r.ent && ENT[r.ent] && !ENT[r.ent].geloescht;
     aktion = `<span class="pc-ist">${r.art === 'Umbuchung' ? 'zählt nicht' : H.esc(katText(r.kat, r.ukat))}</span>
-      ${r.ent && r.ent !== 'daten' && erledigtAnsicht ? `<button class="btn sm" data-pc-zurueck="${r.i}">Rückgängig</button>` : ''}
-      <select data-pc-kat="${r.i}" aria-label="Kategorie ändern"><option value="">ändern …</option>${katOptionen()}</select>`;
+      ${r.zurueck ? `<small class="pc-grund">${H.esc(r.regel || '')}</small>` : ''}
+      ${aktiv && erledigtAnsicht ? `<button class="btn sm" data-pc-zurueck="${r.i}">Rückgängig</button>` : ''}
+      <select data-pc-kat="${r.i}" aria-label="Kategorie ändern"><option value="">ändern …</option>${r.art === 'Umbuchung' ? '' : '<option value="umb">zählt nicht (Geld zwischen deinen Konten)</option>'}${katOptionen()}</select>`;
   } else {
     const v = g ? vorschlagFuer(g, r).vor.find((x) => x.umb || x.kat !== r.kat || x.ukat !== r.ukat) : null;
     aktion = `${v ? `<button class="btn primary pc-ok" data-pc-ok="${r.i}" title="${H.esc(v.gruende.join(', '))}">✓ ${v.umb ? 'zählt nicht' : H.esc(katText(v.kat, v.ukat))}</button><small class="pc-grund">${H.esc(v.gruende[0] || '')}</small>` : ''}
@@ -398,17 +495,27 @@ export function pruefenBinden(el) {
     if (!s.value) return;
     const [kat, ukat] = s.value.split('|');
     const akt = istOffen(row(s.dataset.pcKat), D) || el.querySelector(`[data-pc="${s.dataset.pcKat}"][data-kontr]`);
-    entscheiden(akt ? mitAnderen(s.dataset.pcKat) : [row(s.dataset.pcKat)], { kat, ukat, umb: false });
+    entscheiden(akt ? mitAnderen(s.dataset.pcKat) : [row(s.dataset.pcKat)], s.value === 'umb' ? { kat: 'Umbuchung', ukat: '', umb: true } : { kat, ukat, umb: false });
   });
   el.querySelectorAll('[data-pc-umb]').forEach((b) => b.onclick = () => entscheiden(mitAnderen(b.dataset.pcUmb), { kat: 'Umbuchung', ukat: '', umb: true }));
   el.querySelectorAll('[data-pc-passt]').forEach((b) => b.onclick = () => entscheiden(mitAnderen(b.dataset.pcPasst), { ok: true }));
   el.querySelectorAll('[data-pc-f]').forEach((b) => b.onclick = () => { filter = b.dataset.pcF; zeigAnzahl = 30; H.neuZeichnen(); });
   el.querySelectorAll('[data-pc-zurueck]').forEach((b) => b.onclick = () => {
     const r = row(b.dataset.pcZurueck), k = r.ent;
-    if (!ENT[k]) { H.toast('Diese Entscheidung stammt aus der Auswertung und lässt sich hier nur ändern.'); return; }
+    if (!ENT[k] || ENT[k].geloescht) { H.toast('Diese Entscheidung stammt aus der Auswertung und lässt sich hier nur ändern.'); return; }
+    const vorher = [[k, ENT[k]]];
+    // schon in die Daten eingebaut (auch über den Eingang vom Handy)? Dann kommt die alte Kategorie erst mit dem nächsten
+    // Aufbau am PC sicher zurück
+    const eingebaut = regelPasst(k, det(r, D.j).regel);
+    ENT[k] = { geloescht: true, zeit: jetzt() }; UNSYNC.add(k);
+    fertig(`Zurückgenommen: ${r.g || 'Buchung'} vom ${H.dde(r.d)}.${!eingebaut ? '' : det(r, D.j).vor ? ' Vorläufig – genau gilt es nach dem nächsten Aufbau am PC.' : ' Die alte Kategorie kommt erst beim nächsten Aufbau am PC zurück.'}`, vorher, H.S().wahl);
+  });
+  el.querySelectorAll('[data-pc-verwerfen]').forEach((b) => b.onclick = () => {
+    const k = b.dataset.pcVerwerfen;
+    if (!ENT[k] || ENT[k].geloescht) return;
     const vorher = [[k, ENT[k]]];
     ENT[k] = { geloescht: true, zeit: jetzt() }; UNSYNC.add(k);
-    fertig(`Zurückgenommen: ${r.g || 'Buchung'} vom ${H.dde(r.d)}.`, vorher, H.S().wahl);
+    fertig(`Verworfen: Entscheidung zu ${vorher[0][1].name || 'einer Buchung'}.`, vorher, H.S().wahl);
   });
   el.querySelectorAll('[data-pc-wer]').forEach((b) => b.onclick = () => { zeigAnzahl = 30; H.setze({ wahl: b.dataset.pcWer }); window.scrollTo({ top: 0 }); });
   el.querySelector('#pr-alle')?.addEventListener('click', () => { zeigAnzahl = 30; H.setze({ wahl: '' }); });
@@ -426,7 +533,8 @@ export function pruefenBinden(el) {
 function entscheiden(rows, e) {
   const { D } = gruppen();
   const z = jetzt();
-  const keys = rows.map((r) => [`b|${r.d}|${D.konten[r.k].name}|${r.c}`, { ...e, zeit: z, name: r.g || '' }]);
+  // je Buchung ein eigener Schlüssel; der Name gehört dazu, damit gleiche Beträge am selben Tag auf demselben Konto getrennt bleiben
+  const keys = rows.map((r) => [`b|${r.d}|${D.konten[r.k].name}|${r.c}|${pyNorm(r.g)}`, { ...e, zeit: z, name: r.g || '' }]);
   const vorher = keys.map(([k]) => [k, ENT[k]]);
   for (const [k, x] of keys) { ENT[k] = x; UNSYNC.add(k); }
   const was = e.ok ? 'passt so' : e.umb ? 'zählt nicht' : katText(e.kat, e.ukat);
