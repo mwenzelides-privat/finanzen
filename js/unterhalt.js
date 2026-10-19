@@ -15,12 +15,23 @@ export async function unterhaltLaden(H) {
   let v = null;
   try { v = await H.kvLesen('unterhalt'); } catch { v = null; }
   const a = v && typeof v === 'object' ? v : {};
+  FAM = null;
   E = {
     kinder: Array.isArray(a.kinder) ? a.kinder.filter((k) => k && typeof k === 'object').map((k) => ({ name: String(k.name || ''), geb: String(k.geb || '') })) : [],
     soll: Array.isArray(a.soll) ? a.soll.filter((s) => s && typeof s === 'object').map((s) => ({ ab: String(s.ab || ''), art: String(s.art || 'tu'), c: Math.round(+s.c || 0), grundlage: String(s.grundlage || '') })) : [],
     ausgleich: { tags: Array.isArray(a.ausgleich?.tags) ? a.ausgleich.tags.map(String) : [], posten: a.ausgleich?.posten && typeof a.ausgleich.posten === 'object' ? a.ausgleich.posten : {} },
     bavProzent: Number.isFinite(+a.bavProzent) && a.bavProzent !== '' && a.bavProzent != null ? +a.bavProzent : 4,
   };
+  vorgabe(H);
+}
+// Vorgaben aus den Daten (Familie.json in Drive: Kinder, Soll laut Beleg) – gelten, solange du selbst nichts eingetragen hast
+let FAM = null;
+function vorgabe(H) {
+  const f = H.D?.()?.j?.familie;
+  if (!f || f === FAM) return;
+  FAM = f;
+  if (!E.kinder.length && Array.isArray(f.kinder)) E.kinder = f.kinder.map((k) => ({ name: String(k.name || ''), geb: String(k.geb || ''), status: String(k.status || '') }));
+  if (!E.soll.length && Array.isArray(f.soll)) E.soll = f.soll.map((x) => ({ ab: String(x.ab || ''), art: String(x.art || 'tu'), c: Math.round(+x.c || 0), grundlage: String(x.grundlage || '') }));
 }
 export const kinder = () => E.kinder.map((k) => ({ ...k }));
 export const ausgleichTags = () => [...E.ausgleich.tags];
@@ -61,7 +72,12 @@ function rasterDaten(H) {
   const D = H.D(), ok = eigen(H, D), kRe = kinderRe(H);
   const rows = D.rows.filter((r) => (r.ukat === TU || r.ukat === KU) && ok(r)).sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0));
   // Kindesunterhalt gehört nur dann zu einem Kind, wenn der Zweck genau dieses eine Kind nennt
-  const zuKind = (r) => { const t = H.norm(r.z); const hit = kRe.map((re, i) => (re && re.test(t) ? i : -1)).filter((i) => i >= 0); return hit.length === 1 ? hit[0] : -1; };
+  // Nach Beleg aufgeteilte Sammelbuchungen tragen den Anteil am Ende („… – Anteil Leo“): dieser Teil zählt zuerst
+  const treffer = (z) => kRe.map((re, i) => (re && re.test(H.norm(z)) ? i : -1)).filter((i) => i >= 0);
+  const zuKind = (r) => {
+    for (const z of [r.z.includes(' – ') ? r.z.split(' – ').pop() : '', r.z]) { const hit = z ? treffer(z) : []; if (hit.length === 1) return hit[0]; }
+    return -1;
+  };
   // Fehlerprüfung: gleicher Zweck, aber unterschiedlich eingeordnet
   const gr = new Map();
   for (const r of rows) { const k = zweckKey(H, r.z); if (k) (gr.get(k) || gr.set(k, []).get(k)).push(r); }
@@ -169,6 +185,7 @@ function einkommenDaten(H, R, A) {
 // ======================================================================= Fristen (für Übersicht/Termine)
 export function unterhaltFristen(H) {
   if (!H.D()) return [];
+  vorgabe(H);
   const R = rasterDaten(H), A = ausgleichDaten(H, R);
   return A.posten.liste.filter((p) => p.offen).map((p) => ({
     key: p.key, am: p.er.d, titel: `Anteil an der Steuererstattung ${p.J} an ${A.name} offen (Erstattung ${H.eur(p.er.c)} am ${H.dde(p.er.d)})`,
@@ -179,8 +196,10 @@ export function unterhaltFristen(H) {
 // ======================================================================= Anzeige
 export function unterhaltSeite(H) {
   if (!H.D()) return '';
+  vorgabe(H);
   const R = rasterDaten(H), A = ausgleichDaten(H, R), X = einkommenDaten(H, R, A);
-  return `<div class="uh"><div class="uh-r1">${karteMonate(H, R)}${karteAngaben(H, A)}</div><div class="uh-r2">${karteAusgleich(H, R, A)}${karteEinkommen(H, R, A, X)}</div></div>`;
+  const fh = (H.D().j.familie?.hinweise || []).map((t) => `<p class="uh-hinweis">⚠ ${H.esc(t)}</p>`).join('');
+  return `${fh}<div class="uh"><div class="uh-r1">${karteMonate(H, R)}${karteAngaben(H, A)}</div><div class="uh-r2">${karteAusgleich(H, R, A)}${karteEinkommen(H, R, A, X)}</div></div>`;
 }
 
 const nurDruck = (H) => `<p class="uh-nur-druck">Daten bis ${H.dde(H.D().bis)} · erstellt am ${H.dde(heute())} · aus den Buchungen deiner Konten (ohne Kinder- und Gemeinschaftskonten)</p>`;

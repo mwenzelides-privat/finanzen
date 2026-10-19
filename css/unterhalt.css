@@ -112,3 +112,6 @@
   body.uh-druck .uh-druckziel .neg { color: #b3401a !important; }
   body.uh-druck { background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* Hinweis aus den Familienangaben (z. B. Kind volljährig) */
+.uh-hinweis { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; border: 1px solid #e0b252; background: rgba(224, 178, 82, .12); color: var(--text); font-size: 14px; line-height: 1.45; }
