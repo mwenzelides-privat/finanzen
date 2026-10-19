@@ -79,7 +79,9 @@ function monate(D, j) {
 }
 const summe = (zs, f) => zs.reduce((t, z) => t + ct(z[f]), 0);
 
-// Entfernung je Monat: gehalt.zukunft mit km ab ihrem Monat, davor „km bisher“ (Eingabe); zusammengefasst zu Zeiträumen
+// Entfernung bisher laut Gehaltsplan (Routenplaner-Beleg in gehalt.zukunft) – gilt, solange du keine eigene Zahl einträgst
+const kmBeleg = (D) => +((D.j?.gehalt?.zukunft || []).find((x) => x.km_bisher)?.km_bisher) || 0;
+// Entfernung je Monat: gehalt.zukunft mit km ab ihrem Monat, davor „km bisher“ (Eingabe oder Beleg); zusammengefasst zu Zeiträumen
 function zeitraeume(D, j, kmBisher) {
   const zk = (D.j?.gehalt?.zukunft || []).filter((x) => x.km != null && x.ab).sort((a, b) => (a.ab < b.ab ? -1 : 1));
   const out = [];
@@ -95,7 +97,7 @@ const kmCent = (km, R) => Math.min(km, 20) * R.km1 + Math.max(0, km - 20) * R.km
 
 function werbungskosten(H, D, j, R, e, uebrige) {
   const tage = +e.arbeitstage || 0, ho = +e.hoTage || 0, hinweise = [];
-  const zr = zeitraeume(D, j, +e.kmBisher || 0);
+  const zr = zeitraeume(D, j, +e.kmBisher || kmBeleg(D));
   let fahrt = 0;
   const teile = [];
   for (const z of zr) {
@@ -159,6 +161,8 @@ export function prognoseRechnen(H, jahr, eingaben) {
   for (const m of fehlen) hinweise.push(`Für ${MONAT[m - 1]} fehlt die Abrechnung – Jahreswerte unvollständig.`);
   if (kommen.length) hinweise.push(`${monSpanne(kommen[0], kommen[kommen.length - 1])}: noch keine Abrechnung und kein Plan – Jahreswerte unvollständig.`);
   if (ungeprueft.length) hinweise.push(`Noch nicht geprüft: Abrechnung ${ungeprueft.map((z) => MON[+z.m.slice(5) - 1]).join(', ')}.`);
+  const probe = plan.filter((z) => z.probe);
+  if (probe.length) hinweise.push(`${probe.map((z) => MON[+z.m.slice(5) - 1]).join(", ")}: gedruckte Werte der Probeabrechnung – die endgültige Abrechnung kann noch abweichen.`);
   if (plan.length) hinweise.push(`Plan ${spanne(plan.map((z) => z.m))}: Werte laut Gehaltsplan${plan.some((z) => /gesch/i.test(z.hinweis || '')) ? ', die Lohnsteuer darin ist geschätzt' : ''} – mit der echten Abrechnung wird es genauer.`);
 
   // 2 Werbungskosten (übrige: im Reiter Steuer bestätigte Posten ohne Fahrkarten/Reisekosten; mit Homeoffice-Tagen ohne
@@ -203,7 +207,7 @@ export function prognoseRechnen(H, jahr, eingaben) {
   const zuTU = { tab: 'buchungen', q: '', jahr: String(j), monat: '', zr: '', nf: '', kat: '', ukat: 'Trennungsunterhalt', art: 'alle', konto: '' };
   const zeilen = [];
   if (ist.length) zeilen.push(zr('Arbeitslohn (Steuer-Brutto)', lohnIst, lohnIst, istQ, 'ist', plan.length ? 'unter' : '', zuGehalt));
-  if (plan.length) zeilen.push(zr(`Arbeitslohn ${spanne(plan.map((z) => z.m))}`, lohnPlan, lohnPlan, 'Gehaltsplan', 'plan', 'unter', zuGehalt));
+  if (plan.length) zeilen.push(zr(`Arbeitslohn ${spanne(plan.map((z) => z.m))}`, lohnPlan, lohnPlan, probe.length ? `Probeabrechnung ${spanne(probe.map((z) => z.m))}${plan.length > probe.length ? ' + Gehaltsplan' : ''}` : 'Gehaltsplan', 'plan', 'unter', zuGehalt));
   if (ist.length && plan.length) zeilen.push(zr('= Arbeitslohn im Jahr', lohn, lohn, '', '', 'sum'));
   zeilen.push(zr('− Werbungskosten', W.wk, W.wk, W.quelle, W.pausch ? 'regel' : 'berechnet'));
   zeilen.push(zr('− Vorsorgeaufwendungen', V.v, V.v, `Rente ${H.eur0(V.rv)} + Kranken-/Pflege-Basis ${H.eur0(V.basis)}${V.v - V.rv > V.basis ? ` + Arbeitslosenvers. bis ${H.eur0(R.vorsorgeMax)}` : ''} (§ 10 EStG)`, 'berechnet'));
@@ -220,7 +224,7 @@ export function prognoseRechnen(H, jahr, eingaben) {
   zeilen.push(zr('+ Solidaritätszuschlag', ohne.soli, mit?.soli, `5,5 %, Freigrenze ${H.eur0(R.soliFrei * 100)}${kinder ? ', mit Kinderfreibeträgen' : ''}`, 'berechnet'));
   zeilen.push(zr('= Steuer laut Prognose', ohne.steuer, mit?.steuer, '', 'berechnet', 'sum'));
   if (ist.length) zeilen.push(zr('Gezahlt: Lohnsteuer + Soli', gezIst, gezIst, istQ, 'ist', '', zuGehalt));
-  if (plan.length) zeilen.push(zr(`Gezahlt ${spanne(plan.map((z) => z.m))}`, gezPlan, gezPlan, 'Gehaltsplan', 'plan', '', zuGehalt));
+  if (plan.length) zeilen.push(zr(`Gezahlt ${spanne(plan.map((z) => z.m))}`, gezPlan, gezPlan, probe.length ? `Probeabrechnung ${spanne(probe.map((z) => z.m))}${plan.length > probe.length ? ' + Gehaltsplan' : ''}` : 'Gehaltsplan', 'plan', '', zuGehalt));
   zeilen.push(zr('Erstattung (+) / Nachzahlung (−)', ohne.erg, mit?.erg, 'gezahlt − Steuer', 'berechnet', 'erg'));
   if (mitU) zeilen.push({ t: 'Vorteil Anlage U', nurMit: true, ohne: null, mit: vorteil, q: mehr ? `Unterschied der Spalten − Mehrsteuer der Empfängerin ${H.eur0(mehr)} (Nachteilsausgleich)` : 'Unterschied der Spalten · Mehrsteuer der Empfängerin noch nicht eingetragen', art: 'berechnet', cls: 'erg' });
 
@@ -291,14 +295,14 @@ export function prognoseKarte(H, jahr) {
     <div class="stp-form">
       ${feld('arbeitstage', 'Arbeitstage mit Fahrt ins Büro', e.arbeitstage, 'zahl', 'z. B. 180')}
       ${feld('hoTage', 'Homeoffice-Tage', e.hoTage)}
-      ${feld('kmBisher', `Entfernung zur Arbeit (km)${zk.length && +zk[0].ab.slice(5) > 1 ? ` bis ${MON[+zk[0].ab.slice(5) - 2]}` : ''}`, e.kmBisher)}
+      ${feld('kmBisher', `Entfernung zur Arbeit (km)${zk.length && +zk[0].ab.slice(5) > 1 ? ` bis ${MON[+zk[0].ab.slice(5) - 2]}` : ''}`, e.kmBisher, 'zahl', kmBeleg(D) ? `${kmBeleg(D)} laut Routenplaner` : '')}
       ${feld('kinder', 'Kinder mit halbem Freibetrag', e.kinder, 'zahl', String(P.kinder))}
       ${P.mitU ? feld('kvUebernommen', `Übernommene Kranken-/Pflegevers. für ${H.esc(name)} (€ im Jahr)`, e.kvUebernommen, 'euro') : ''}
       ${P.mitU ? feld('mehrsteuer', `Mehrsteuer von ${H.esc(name)} (Nachteilsausgleich, €)`, e.mehrsteuer, 'euro') : ''}
       ${P.mitU ? feld('angefragt', `Zustimmung von ${H.esc(name)} (Anlage U) angefragt am`, u.angefragt, 'datum') : ''}
       ${P.mitU ? feld('unterschrieben', 'unterschrieben am', u.unterschrieben, 'datum') : ''}
     </div>
-    <p class="s5-erkl">Entfernung: kürzeste Straßenverbindung. ${zk.map((x) => `Ab ${MON[+x.ab.slice(5) - 1]} ${H.NUM.format(+x.km)} km laut Gehaltsplan (${H.esc(x.titel || '')}).`).join(' ')} Gespeichert nur auf diesem Gerät.</p></details>`;
+    <p class="s5-erkl">Entfernung: kürzeste Straßenverbindung${kmBeleg(D) ? ` – bisher ${H.NUM.format(kmBeleg(D))} km laut Routenplaner, solange du nichts anderes einträgst` : ''}. ${zk.map((x) => `Ab ${MON[+x.ab.slice(5) - 1]} ${H.NUM.format(+x.km)} km laut Gehaltsplan (${H.esc(x.titel || '')}).`).join(' ')} Gespeichert nur auf diesem Gerät.</p></details>`;
 
   const L = D.j?.steuer_offiziell?.kuenftig || [];
   const vorjahre = L.length ? `<details class="st5-mehr"><summary>Was die Vorjahre bedeuten</summary><ul class="st-off-l">${L.map((t) => `<li>${H.esc(t)}</li>`).join('')}</ul></details>` : '';

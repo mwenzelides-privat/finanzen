@@ -373,12 +373,14 @@ function autoKarte(G, z) {
     <p class="s5-erkl">${herkunft} Fahrten Wohnung–Arbeit: 0,03 % je km, beim E-Auto vom ermäßigten Listenpreis. Sozialversicherung fällt nicht an (du liegst über der Beitragsgrenze). Schätzung mit deinem Grenzsteuersatz ${pz(W.gs, 1)} inkl. Soli, keine Steuerberatung.</p>`, 'ge-autok');
 }
 // ---------------------------------------------------------------- Abrechnung heute und künftig
-// Ausgangspunkt ist die letzte Abrechnung. Bekannte Änderungen (gehalt.zukunft: Entfernung, Dienstwagen) verändern nur den
+// Ausgangspunkt ist die letzte Abrechnung (oder eine neuere Probeabrechnung mit gedruckten Werten). Bekannte Änderungen (gehalt.zukunft: Entfernung, Dienstwagen) verändern nur den
 // geldwerten Vorteil; Steuer ändert sich mit dem gemessenen Grenzsteuersatz, Sozialversicherung nicht (über der Grenze).
 function zukunftKarte(G) {
-  const Z = H.D.j.gehalt?.zukunft || [], z = G.pdf.at(-1);
+  const Z = H.D.j.gehalt?.zukunft || [], abr = G.pdf.at(-1);
+  const probe = abr && (H.D.j.gehalt.monate || []).filter((y) => y.probe && y.m > abr.m).at(-1), z = probe || abr;
   if (!Z.length || !z || !auto(z)) return '';
-  const dw = H.D.j.gehalt.dienstwagen || {}, satz0 = dw.satz_prozent ?? 1;
+  // Satz des Wagens in diesem Monat: letzte bekannte Änderung bis dahin, sonst der heutige Wagen
+  const dw = H.D.j.gehalt.dienstwagen || {}, satz0 = Z.filter((x) => x.ab <= z.m && x.satz_prozent != null).at(-1)?.satz_prozent ?? dw.satz_prozent ?? 1;
   const preis0 = z.privatfahrten / (satz0 / 100), km0 = Math.round(z.whg_arbeit / (0.0003 * satz0 * preis0));
   const gs = G.gs.r;
   const stufe = (a) => {
@@ -388,8 +390,9 @@ function zukunftKarte(G) {
       netto: z.netto_verdienst + d - d * gs, ausz: z.auszahlung - d * gs };
   };
   let a = { satz: satz0, preis: preis0, km: km0 };
-  const spalten = [{ titel: `Heute`, sub: `Abrechnung ${H.monKurz(z.m)}`, ...stufe(a) }];
+  const spalten = [{ titel: probe ? `Ab ${H.monKurz(z.m)}` : `Heute`, sub: `${probe ? 'Probeabrechnung' : 'Abrechnung'} ${H.monKurz(z.m)}`, ...stufe(a) }];
   for (const x of Z) {
+    if (x.ab <= z.m) continue;   // steckt schon in der Ausgangs-Abrechnung
     a = { satz: x.satz_prozent ?? a.satz, preis: x.listenpreis ?? a.preis, km: x.km ?? a.km };
     spalten.push({ titel: `ab ${H.monKurz(x.ab)}`, sub: x.titel, ...stufe(a) });
   }
@@ -401,7 +404,8 @@ function zukunftKarte(G) {
   const letzt = spalten.at(-1), plus = letzt.ausz - spalten[0].ausz;
   // Rest bis zur Auszahlung (Gutscheine, private Belege, Vorschuss …): in allen Spalten gleich, damit jede Spalte auf den Cent aufgeht
   const r0 = spalten[0], uebrig = Math.round((r0.brutto - r0.steuer - sozial(z) - (z.bav_an || 0) - (r0.pf + r0.wa) - r0.ausz) * 100) / 100;
-  const satz = spalten.slice(1).map((c, i) => `${i ? 'Und ' + c.titel : c.titel.replace('ab ', 'Ab ')} (${H.esc(c.sub)}${c.km !== spalten[i].km ? `, ${c.km} statt ${spalten[i].km} km` : ''}${c.satz !== spalten[i].satz ? `, ${String(c.satz).replace('.', ',')} % statt ${String(spalten[i].satz).replace('.', ',')} %` : ''}): <b class="pos">${pm0(c.ausz - spalten[0].ausz)}</b> im Monat gegenüber heute.`).join(' ')
+  const vorProbe = probe ? `Laut Probeabrechnung ${H.monKurz(z.m)} (gedruckte Werte): <b class="${z.auszahlung >= abr.auszahlung ? 'pos' : 'neg'}">${pm0(z.auszahlung - abr.auszahlung)}</b> Auszahlung gegenüber der Abrechnung ${H.monKurz(abr.m)}. ` : '';
+  const satz = vorProbe + spalten.slice(1).map((c, i) => `${i ? 'Und ' + c.titel : c.titel.replace('ab ', 'Ab ')} (${H.esc(c.sub)}${c.km !== spalten[i].km ? `, ${c.km} statt ${spalten[i].km} km` : ''}${c.satz !== spalten[i].satz ? `, ${String(c.satz).replace('.', ',')} % statt ${String(spalten[i].satz).replace('.', ',')} %` : ''}): <b class="pos">${pm0(c.ausz - spalten[0].ausz)}</b> im Monat gegenüber ${probe ? H.monKurz(z.m) : 'heute'}.`).join(' ')
     + ` Der versteuerte Dienstwagen-Vorteil sinkt von ${e0(auto(z))} auf ${e0(letzt.pf + letzt.wa)}; das bringt ${pm0(plus * 12)} im Jahr.`;
   const tab = `<table class="t3 ge-zt"><thead><tr><th></th>${spalten.map((c) => `<th class="r">${c.titel}<small>${H.esc(c.sub)}</small></th>`).join('')}</tr></thead><tbody>
     ${zeile('Dienstwagen', (c) => `${String(c.satz).replace('.', ',')} %<small>${e0(c.preis)} Listenpreis</small>`)}
