@@ -6,6 +6,8 @@
 
 const TU = 'Trennungsunterhalt', KU = 'Kindesunterhalt';
 const FREMD_ART = new Set(['Umbuchung', 'Kinderkonto', 'Gemeinschaftskonto']);
+import { rechnerKarte, rechnerBinden } from './unterhaltsrechner.js';
+
 const leer = () => ({ kinder: [], soll: [], ausgleich: { tags: [], posten: {} }, bavProzent: 4 });
 let E = leer();
 let ende = '';   // letzter Monat der 12-Monats-Aufstellung ('' = der letzte geprüfte)
@@ -199,7 +201,7 @@ export function unterhaltSeite(H) {
   vorgabe(H);
   const R = rasterDaten(H), A = ausgleichDaten(H, R), X = einkommenDaten(H, R, A);
   const fh = (H.D().j.familie?.hinweise || []).map((t) => `<p class="uh-hinweis">⚠ ${H.esc(t)}</p>`).join('');
-  return `${fh}<div class="uh"><div class="uh-r1">${karteMonate(H, R)}${karteAngaben(H, A)}</div><div class="uh-r2">${karteAusgleich(H, R, A)}${karteEinkommen(H, R, A, X)}</div></div>`;
+  return `${fh}<div class="uh"><div class="uh-r1">${karteMonate(H, R)}${karteAngaben(H, A)}</div><div class="uh-r3">${rechnerKarte(H, R, E.kinder)}</div><div class="uh-r2">${karteAusgleich(H, R, A)}${karteEinkommen(H, R, A, X)}</div></div>`;
 }
 
 const nurDruck = (H) => `<p class="uh-nur-druck">Daten bis ${H.dde(H.D().bis)} · erstellt am ${H.dde(heute())} · aus den Buchungen deiner Konten (ohne Kinder- und Gemeinschaftskonten)</p>`;
@@ -343,6 +345,7 @@ export function unterhaltBinden(el, H) {
   const box = el.querySelector('.uh');
   if (!box) return;
   H.gehBinden(box);
+  rechnerBinden(box, () => H.neuZeichnen());
   const sichern = async () => {
     try { await H.kvSchreiben('unterhalt', JSON.parse(JSON.stringify(E))); } catch { H.toast('Deine Angaben konnten nicht gespeichert werden.'); }
     H.neuZeichnen();

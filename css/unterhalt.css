@@ -115,3 +115,29 @@
 
 /* Hinweis aus den Familienangaben (z. B. Kind volljährig) */
 .uh-hinweis { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; border: 1px solid #e0b252; background: rgba(224, 178, 82, .12); color: var(--text); font-size: 14px; line-height: 1.45; }
+
+/* Unterhaltsrechner */
+.uh-r3 { margin: 14px 0; }
+.ur-wahl { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-bottom: 12px; }
+.ur-wahl label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); min-width: 0; flex: 1 1 180px; }
+.ur-wahl select, .ur-wahl input { width: 100%; min-width: 0; height: 34px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); padding: 0 8px; font-size: 14px; }
+.ur-r { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.ur-z { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.ur-z > span { min-width: 0; overflow-wrap: anywhere; }
+.ur-z small { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; }
+.ur-z b { white-space: nowrap; text-align: right; }
+.ur-z.ur-sum { border-bottom: 2px solid var(--border-strong); }
+.ur-z.ur-sum b { font-size: 16px; }
+.ur-z.ur-abw b { color: #b7791f; }
+.ur-m { font-size: 12px; color: var(--muted); font-weight: 400; }
+.ur-h { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 18px 0 6px; }
+.ur-tab { width: 100%; font-size: 13px; }
+.ur-tab td small { display: block; font-size: 11px; color: var(--muted); }
+@media (max-width: 760px) {
+  .ur-r { grid-template-columns: minmax(0, 1fr); }
+  /* Verlauf am Handy als Liste: Spaltenname vor dem Wert */
+  .ur-tab, .ur-tab tbody, .ur-tab tr, .ur-tab td { display: block; width: 100%; }
+  .ur-tab thead { display: none; }
+  .ur-tab tr { padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .ur-tab td { border: 0; padding: 2px 0; text-align: left !important; }
+}
