@@ -8,7 +8,7 @@ const TU = 'Trennungsunterhalt', KU = 'Kindesunterhalt';
 const FREMD_ART = new Set(['Umbuchung', 'Kinderkonto', 'Gemeinschaftskonto']);
 import { rechnerKarte, rechnerBinden } from './unterhaltsrechner.js';
 
-const leer = () => ({ kinder: [], soll: [], ausgleich: { tags: [], posten: {} }, bavProzent: 4 });
+const leer = () => ({ kinder: [], soll: [], eigeneKinder: null, eigeneSoll: null, ausgleich: { tags: [], posten: {} }, bavProzent: 4 });
 let E = leer();
 let ende = '';   // letzter Monat der 12-Monats-Aufstellung ('' = der letzte geprüfte)
 
@@ -19,8 +19,11 @@ export async function unterhaltLaden(H) {
   const a = v && typeof v === 'object' ? v : {};
   FAM = null;
   E = {
-    kinder: Array.isArray(a.kinder) ? a.kinder.filter((k) => k && typeof k === 'object').map((k) => ({ name: String(k.name || ''), geb: String(k.geb || '') })) : [],
-    soll: Array.isArray(a.soll) ? a.soll.filter((s) => s && typeof s === 'object').map((s) => ({ ab: String(s.ab || ''), art: String(s.art || 'tu'), c: Math.round(+s.c || 0), grundlage: String(s.grundlage || '') })) : [],
+    kinder: Array.isArray(a.kinder) ? a.kinder.filter((k) => k && typeof k === 'object').map(kindAus) : [],
+    soll: Array.isArray(a.soll) ? a.soll.filter((s) => s && typeof s === 'object').map(sollAus) : [],
+    // eigene Angaben (true) oder Vorgabe aus Familie.json (false); fehlt das Merkmal (ältere Speicherung), entscheidet vorgabe()
+    eigeneKinder: typeof a.eigeneKinder === 'boolean' ? a.eigeneKinder : null,
+    eigeneSoll: typeof a.eigeneSoll === 'boolean' ? a.eigeneSoll : null,
     ausgleich: { tags: Array.isArray(a.ausgleich?.tags) ? a.ausgleich.tags.map(String) : [], posten: a.ausgleich?.posten && typeof a.ausgleich.posten === 'object' ? a.ausgleich.posten : {} },
     bavProzent: Number.isFinite(+a.bavProzent) && a.bavProzent !== '' && a.bavProzent != null ? +a.bavProzent : 4,
   };
@@ -32,9 +35,23 @@ function vorgabe(H) {
   const f = H.D?.()?.j?.familie;
   if (!f || f === FAM) return;
   FAM = f;
-  if (!E.kinder.length && Array.isArray(f.kinder)) E.kinder = f.kinder.map((k) => ({ name: String(k.name || ''), geb: String(k.geb || ''), status: String(k.status || '') }));
-  if (!E.soll.length && Array.isArray(f.soll)) E.soll = f.soll.map((x) => ({ ab: String(x.ab || ''), art: String(x.art || 'tu'), c: Math.round(+x.c || 0), grundlage: String(x.grundlage || '') }));
+  const fk = Array.isArray(f.kinder) ? f.kinder.map(kindAus) : [], fs = Array.isArray(f.soll) ? f.soll.map(sollAus) : [];
+  // ältere Speicherung ohne Merkmal: nur dann eigene Angabe, wenn sie von der Vorgabe abweicht (früher wurde die Vorgabe mitgespeichert)
+  const kk = (k) => `${k.name}|${k.geb}`, sk = (x) => `${x.ab}|${x.art}|${x.c}`;
+  if (E.eigeneKinder == null) E.eigeneKinder = E.kinder.length > 0 && !E.kinder.every((k) => fk.some((x) => kk(x) === kk(k)));
+  if (E.eigeneSoll == null) E.eigeneSoll = E.soll.length > 0 && !E.soll.every((s) => fs.some((x) => sk(x) === sk(s)));
+  if (!E.eigeneKinder && fk.length) E.kinder = fk;
+  if (!E.eigeneSoll && fs.length) E.soll = fs;
 }
+const kindAus = (k) => ({ name: String(k.name || ''), geb: String(k.geb || ''), status: String(k.status || '') });
+const sollAus = (x) => ({ ab: String(x.ab || ''), art: String(x.art || 'tu'), c: Math.round(+x.c || 0), grundlage: String(x.grundlage || '') });
+// Gespeichert werden nur eigene Angaben – Vorgaben aus Familie.json bleiben dort und kommen bei Änderungen neu an
+const zumSpeichern = () => {
+  const o = JSON.parse(JSON.stringify(E));
+  if (E.eigeneKinder === false) o.kinder = [];   // null = noch unbekannt: lieber behalten
+  if (E.eigeneSoll === false) o.soll = [];
+  return o;
+};
 export const kinder = () => E.kinder.map((k) => ({ ...k }));
 export const ausgleichTags = () => [...E.ausgleich.tags];
 
@@ -345,9 +362,9 @@ export function unterhaltBinden(el, H) {
   const box = el.querySelector('.uh');
   if (!box) return;
   H.gehBinden(box);
-  rechnerBinden(box, () => H.neuZeichnen());
+  rechnerBinden(box, () => H.neuZeichnen(), (t) => H.toast(t));
   const sichern = async () => {
-    try { await H.kvSchreiben('unterhalt', JSON.parse(JSON.stringify(E))); } catch { H.toast('Deine Angaben konnten nicht gespeichert werden.'); }
+    try { await H.kvSchreiben('unterhalt', zumSpeichern()); } catch { H.toast('Deine Angaben konnten nicht gespeichert werden.'); }
     H.neuZeichnen();
   };
   const euro = (v) => { const n = parseFloat(String(v).replace(',', '.')); return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : null; };
@@ -356,9 +373,9 @@ export function unterhaltBinden(el, H) {
   box.querySelectorAll('[data-uh-csv]').forEach((b) => b.onclick = () => csvPosten(H));
   box.querySelectorAll('[data-uh-ende]').forEach((s) => s.onchange = () => { ende = s.value; H.neuZeichnen(); });
   // Kinder
-  box.querySelectorAll('[data-uh-kind]').forEach((i) => i.onchange = () => { const k = E.kinder[+i.dataset.uhKind]; if (!k) return; k[i.dataset.f] = i.value.trim(); sichern(); });
+  box.querySelectorAll('[data-uh-kind]').forEach((i) => i.onchange = () => { const k = E.kinder[+i.dataset.uhKind]; if (!k) return; k[i.dataset.f] = i.value.trim(); E.eigeneKinder = true; sichern(); });
   box.querySelectorAll('[data-uh-kind-neu]').forEach((b) => b.onclick = () => {
-    E.kinder.push({ name: '', geb: '' }); sichern();
+    E.kinder.push({ name: '', geb: '', status: '' }); E.eigeneKinder = true; sichern();
     setTimeout(() => document.querySelector(`[data-uh-kind="${E.kinder.length - 1}"][data-f="name"]`)?.focus(), 60);
   });
   box.querySelectorAll('[data-uh-kind-weg]').forEach((b) => b.onclick = () => {
@@ -366,6 +383,7 @@ export function unterhaltBinden(el, H) {
     if (!confirm(`${kindName(i)} entfernen? Soll-Stufen für dieses Kind werden mit entfernt.`)) return;
     E.kinder.splice(i, 1);
     E.soll = E.soll.filter((s) => s.art !== `kind:${i}`).map((s) => { const m = /^kind:(\d+)$/.exec(s.art); return m && +m[1] > i ? { ...s, art: `kind:${+m[1] - 1}` } : s; });
+    E.eigeneKinder = true; E.eigeneSoll = true;
     sichern();
   });
   // Soll-Stufen
@@ -374,10 +392,11 @@ export function unterhaltBinden(el, H) {
     if (i.dataset.f === 'c') s.c = euro(i.value) ?? 0;
     else if (i.dataset.f === 'ab') { const v = i.value.trim(); if (v && !/^\d{4}-\d{2}$/.test(v)) { H.toast('Bitte als JJJJ-MM eingeben, z. B. 2026-02.'); return; } s.ab = v; }
     else s[i.dataset.f] = i.value.trim();
+    E.eigeneSoll = true;
     sichern();
   });
-  box.querySelectorAll('[data-uh-soll-neu]').forEach((b) => b.onclick = () => { E.soll.push({ ab: H.D().bis.slice(0, 7), art: 'tu', c: 0, grundlage: '' }); sichern(); });
-  box.querySelectorAll('[data-uh-soll-weg]').forEach((b) => b.onclick = () => { E.soll.splice(+b.dataset.uhSollWeg, 1); sichern(); });
+  box.querySelectorAll('[data-uh-soll-neu]').forEach((b) => b.onclick = () => { E.soll.push({ ab: H.D().bis.slice(0, 7), art: 'tu', c: 0, grundlage: '' }); E.eigeneSoll = true; sichern(); });
+  box.querySelectorAll('[data-uh-soll-weg]').forEach((b) => b.onclick = () => { E.soll.splice(+b.dataset.uhSollWeg, 1); E.eigeneSoll = true; sichern(); });
   // Tags, bAV
   box.querySelectorAll('[data-uh-tag]').forEach((c) => c.onchange = () => {
     const t = c.dataset.uhTag, l = E.ausgleich.tags.filter((x) => x !== t);

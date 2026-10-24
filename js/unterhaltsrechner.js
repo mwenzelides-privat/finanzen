@@ -75,7 +75,10 @@ export function berechne({ m, eM, eS, kinder, R = regelFuer(+m.slice(0, 4)), ber
       const alleinM = tabelle(R, 3, gM) - R.kg;   // nie mehr als aus dem eigenen Einkommen allein
       k.vM = r2(vM); k.vS = r2(vS); k.quoteM = quoteM; k.sockel = sb; k.alleinM = alleinM;
       k.zahl = Math.min(auf(k.rest * quoteM), alleinM);
-      k.zahlS = r2(Math.max(0, k.rest - k.zahl));
+      // Anteil der Mutter nur nach ihrer Haftungsquote (§ 1606 Abs. 3 BGB) und höchstens ihr Einkommen über dem Sockel;
+      // was dein Deckel offen lässt, bleibt als nicht gedeckter Rest stehen und wird ihr nicht zugeschlagen
+      k.zahlS = r2(Math.max(0, Math.min(auf(k.rest * (1 - quoteM)), k.rest - k.zahl, Math.floor(vS))));
+      k.offen = r2(Math.max(0, k.rest - k.zahl - k.zahlS));
     }
     const kuM = kind.reduce((t, k) => t + k.zahl, 0), kuS = kind.reduce((t, k) => t + (k.zahlS || 0), 0);
     // Trennungsunterhalt: Halbteilung mit 10 % Erwerbstätigenbonus nach Vorwegabzug des Kindesunterhalts
@@ -117,39 +120,48 @@ export function rechnerKarte(H, R, eigeneKinder) {
   const kinder = eigeneKinder?.length && eigeneKinder.every((k) => /^\d{4}-\d{2}/.test(k.geb || '')) ? eigeneKinder : F?.kinder;
   if (!kinder?.length) return '';
   const e = H.eur, B = basisEinkommen(H, F || {});
+  const bet = (c) => `<span class="${c < 0 ? 'neg' : ''}">${c < 0 ? '−' : ''}${e(Math.abs(c))}</span>`;   // minus rot, echtes Minuszeichen
   if (!B) return '';
   const S = F?.rechner?.sandra || { netto: 0, unzumutbar: 0 };
   const sNetto = wahl.sandra ?? S.netto, eS = r2((sNetto - (wahl.sandra == null ? S.unzumutbar || 0 : 0)) * 0.95);
   const m = D.bis.slice(0, 7);
   const X = berechne({ m, eM: B.e, eS, kinder, berechtigte: F?.rechner?.berechtigte || kinder.length + 1, sockel: wahl.sockel });
-  const jetzt = R.monate.find((x) => x.k === D.bis.slice(0, 7)) || R.monate.at(-1);
+  // Vergleichsmonat: der laufende nur, wenn schon gezahlt wurde (dann „läuft noch“), sonst der letzte abgeschlossene
+  const lfd = R.monate.find((x) => x.k === R.bisM);
+  const jetzt = lfd && (lfd.sum > 0 || !R.laeuft) ? lfd : R.monate.filter((x) => x.k < R.bisM).at(-1) || null;
+  // Läuft der Monat noch, aber ist schon so viel gebucht wie im Vormonat, ist die Zahlung des Monats vollständig
+  const vormonat = R.monate.filter((x) => x.k < R.bisM).at(-1);
+  const laeuftNoch = !!jetzt && jetzt === lfd && R.laeuft && !(vormonat && lfd.sum >= vormonat.sum);
   const gez = jetzt ? jetzt.sum / 100 : null;
+  const abw = gez != null && Math.abs(gez - X.summe) > 1;
   const zeile = (t, w, cls = '', sub = '') => `<div class="ur-z ${cls}"><span>${t}${sub ? `<small>${sub}</small>` : ''}</span><b>${w}</b></div>`;
   const kinderZ = X.kind.map((k) => k.vollj
     ? zeile(`${H.esc(k.name)} <span class="ur-m">volljährig${k.privilegiert ? ', Schule' : ''}</span>`, e(k.zahl * 100), '',
       `Bedarf ${e(k.bedarf * 100)} (Stufe 4, Gruppe ${X.gBeide} nach euch beiden) − Kindergeld ${e(X.R.kg * 100)} = ${e(k.rest * 100)}; dein Anteil ${Math.round(k.quoteM * 100)} % (Einkommen über ${e(k.sockel * 100)} Sockel: du ${e(k.vM * 100)}, sie ${e(k.vS * 100)})`
-      + (k.zahlS ? ` · ihr Anteil ${e(k.zahlS * 100)}` : ''))
+      + (k.zahlS ? ` · ihr Anteil ${e(k.zahlS * 100)}` : '')
+      + (k.offen ? ` · nicht gedeckt ${e(k.offen * 100)} (dein Anteil ist auf ${e(k.alleinM * 100)} nach deinem Einkommen allein begrenzt)` : ''))
     : zeile(`${H.esc(k.name)} <span class="ur-m">Altersstufe ${k.stufe + 1}</span>`, e(k.zahl * 100), '',
       `Tabelle ${e(k.tab * 100)} (${PROZ[X.g - 1]} %) − halbes Kindergeld ${e(X.R.kg / 2 * 100)}`)).join('');
   const rechenweg = `<div class="ur-weg">
     ${zeile('Netto-Verdienst', e(B.netto * 100), '', B.text)}
-    ${zeile('− zusätzliche Altersvorsorge', e(-B.vorsorge * 100), '', 'Entgeltumwandlung, höchstens 4 % bis zur Beitragsgrenze + 22,6 % darüber')}
-    ${zeile('− feste Abzüge', e(-B.fest * 100), '', (F?.rechner?.abzuege || []).map((a) => H.esc(a.t)).join(', '))}
-    ${zeile('− pauschal 5 % berufsbedingte Aufwendungen', e(-B.pausch * 100))}
+    ${zeile('− zusätzliche Altersvorsorge', bet(-B.vorsorge * 100), '', 'Entgeltumwandlung, höchstens 4 % bis zur Beitragsgrenze + 22,6 % darüber')}
+    ${zeile('− feste Abzüge', bet(-B.fest * 100), '', (F?.rechner?.abzuege || []).map((a) => H.esc(a.t)).join(', '))}
+    ${zeile('− pauschal 5 % berufsbedingte Aufwendungen', bet(-B.pausch * 100))}
     ${zeile('= dein bereinigtes Einkommen', e(B.e * 100), 'ur-sum', `Gruppe ${X.gEigen} der Düsseldorfer Tabelle${X.ab ? `, ${X.ab} tiefer wegen ${X.ab + 2} Berechtigten` : ''}${X.g !== Math.max(1, X.gEigen - X.ab) ? ', weitere wegen Bedarfskontrollbetrag' : ''} → Gruppe ${X.g}`)}
     ${zeile('Einkommen deiner Ex-Frau', e(eS * 100), '', `${e(sNetto * 100)} netto − 5 %${wahl.sandra == null && S.unzumutbar ? ` (ohne ${e(S.unzumutbar * 100)} unzumutbar)` : ''}`)}
   </div>`;
   const ergebnis = `<div class="ur-erg">
     ${kinderZ}
     ${zeile('Trennungsunterhalt', e(X.tu * 100), '', `(${e(X.eM2 * 100)} − ${e(X.eS2 * 100)}) × 90 % ÷ 2 – Einkommen nach Kindesunterhalt, 10 % Erwerbstätigenbonus`)}
-    ${zeile('= du zahlst im Monat', e(X.summe * 100), 'ur-sum', `dir bleiben ${e(X.restM * 100)} (Selbstbehalt ${e(X.R.sb.ehe * 100)})`)}
-    ${gez != null ? zeile(`Heute überwiesen (${H.monKurz(jetzt.k)})`, e(gez * 100), Math.abs(gez - X.summe) > 1 ? 'ur-abw' : '', Math.abs(gez - X.summe) > 1 ? `Rechner liegt ${e(Math.abs(X.summe - gez) * 100)} ${X.summe > gez ? 'darüber' : 'darunter'}` : 'passt') : ''}
+    ${zeile('= du zahlst im Monat', e(X.summe * 100), 'ur-sum', `dir bleiben ${bet(X.restM * 100)} (Selbstbehalt ${e(X.R.sb.ehe * 100)})`)}
+    ${gez != null ? zeile(`Heute überwiesen (${H.monKurz(jetzt.k)}${laeuftNoch ? ', läuft noch' : ''})`, e(gez * 100), abw && !(laeuftNoch && gez < X.summe) ? 'ur-abw' : '',
+      !abw ? 'passt' : laeuftNoch && gez < X.summe ? `bisher gebucht – der Monat läuft noch, ${e((X.summe - gez) * 100)} können noch kommen` : `Rechner liegt ${e(Math.abs(X.summe - gez) * 100)} ${X.summe > gez ? 'darüber' : 'darunter'}`) : ''}
   </div>`;
 
   // Bisherige Berechnungen: nachgerechnet mit demselben Rechenweg und verglichen mit dem, was du überwiesen hast
   const verlauf = (F?.berechnungen || []).map((b, i, L) => {
     const bis = L[i + 1] ? H.mVor(L[i + 1].ab, -1) : R.bisM;
-    const ms = R.monate.filter((x) => x.k >= b.ab && x.k <= bis && x.k <= R.bisM);
+    const ms = R.monate.filter((x) => x.k >= b.ab && x.k <= bis && (R.laeuft ? x.k < R.bisM : x.k <= R.bisM));   // laufender Monat zählt nicht
     const gezahlt = ms.length ? ms.reduce((t, x) => t + x.sum, 0) / ms.length / 100 : null;
     let nach = '';
     if (b.eM && b.eS) {
@@ -159,9 +171,9 @@ export function rechnerKarte(H, R, eigeneKinder) {
       const ok = b.ku.every((x) => Math.abs(x - (tabelle(regelFuer(b.jahr), 2, Math.max(1, gruppe(b.eM) - 1)) - regelFuer(b.jahr).kg / 2)) < 0.01);
       nach = ok ? '<span class="pos">✓ Kindesunterhalt nachgerechnet</span>' : '';
     }
-    return `<tr><td>${H.dde(b.datum)}<small>${H.esc(b.titel)} · ${H.esc(b.kurz || '')}</small></td><td class="r">${b.eM ? e(b.eM * 100) : '–'}</td>
-      <td class="r">${(b.ku || []).map((x) => e(x * 100)).join(' + ')}</td><td class="r">${e(b.tu * 100)}</td><td class="r"><b>${e(b.summe * 100)}</b></td>
-      <td class="r">${gezahlt != null ? `${e(gezahlt * 100)}<small>Ø ${ms.length} Mon. ab ${H.monKurz(b.ab)}</small>` : '–'}</td><td>${nach}</td></tr>`;
+    return `<tr><td>${H.dde(b.datum)}<small>${H.esc(b.titel)} · ${H.esc(b.kurz || '')}</small></td><td class="r" data-l="dein Einkommen">${b.eM ? e(b.eM * 100) : '–'}</td>
+      <td class="r" data-l="Kinder">${(b.ku || []).map((x) => e(x * 100)).join(' + ')}</td><td class="r" data-l="Trennung">${e(b.tu * 100)}</td><td class="r" data-l="Summe"><b>${e(b.summe * 100)}</b></td>
+      <td class="r" data-l="überwiesen">${gezahlt != null ? `${e(gezahlt * 100)}<small>Ø ${ms.length} Mon. ab ${H.monKurz(b.ab)}</small>` : '–'}</td><td>${nach}</td></tr>`;
   }).join('');
   const tab = verlauf ? `<div class="ur-tab-r"><table class="t ur-tab"><thead><tr><th>Berechnung</th><th class="r">dein Einkommen</th><th class="r">Kinder</th><th class="r">Trennung</th><th class="r">Summe</th><th class="r">überwiesen</th><th></th></tr></thead><tbody>${verlauf}</tbody></table></div>` : '';
 
@@ -176,11 +188,26 @@ export function rechnerKarte(H, R, eigeneKinder) {
     <p class="s5-erkl">${X.R.quelle}, Süddeutsche Leitlinien (OLG München). Dein Einkommen aus den echten Abrechnungen (tatsächliche Steuern); RA Vitti hat 2026 mit einem fiktiven Netto aus dem Brutto der Lohnsteuerbescheinigung 2025 gerechnet – daher liegt dein Einkommen hier anders. Der Dienstwagen-Vorteil zählt wie dort als Einkommen. Für Leo ab 18: Bedarf nach eurem gemeinsamen Einkommen, beide zahlen nach Leistungsfähigkeit. Orientierung, keine Rechtsberatung – verbindlich ist nur eine Berechnung deines Anwalts.</p>`, 'ur-k', '', 'uh-rechner');
 }
 
-export function rechnerBinden(el, neu) {
+// Betrag lesen: „2.600,50“, „2600,50“, „2600.50“ und „2.600“ – ein Punkt ist nur dann Tausendertrenner, wenn ein Komma
+// folgt oder er vor genau drei Ziffern steht (1.234 / 12.345.678); sonst Dezimalpunkt. Leer = null, unlesbar = NaN.
+export function betragLesen(t) {
+  let s = String(t ?? '').replace(/[\s€ ]/g, '');
+  if (!s) return null;
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+  return /^-?\d+(\.\d+)?$/.test(s) ? parseFloat(s) : NaN;
+}
+const NETTO_MAX = 30000;   // Plausibilitätsgrenze für ein Monatsnetto
+
+export function rechnerBinden(el, neu, meldung = () => {}) {
   el.querySelectorAll('[data-ur]').forEach((i) => {
     i.onchange = () => {
       const k = i.dataset.ur;
-      if (k === 'sandra') { const v = parseFloat(String(i.value).replace(/\./g, '').replace(',', '.')); wahl.sandra = Number.isFinite(v) ? v : null; }
+      if (k === 'sandra') {
+        const v = betragLesen(i.value);
+        if (v != null && !(v >= 0 && v <= NETTO_MAX)) { meldung(`„${i.value}“ ist kein plausibles Monatsnetto – bitte z. B. 2.600,50 eingeben.`); neu(); return; }
+        wahl.sandra = v;
+      }
       else wahl[k] = i.value;
       merken(); neu();
     };

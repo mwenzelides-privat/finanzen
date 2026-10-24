@@ -182,9 +182,11 @@ export function prognoseRechnen(H, jahr, eingaben) {
   const mitU = U.summe > 0, kvU = ct(e.kvUebernommen), grenze = R.realsplitting + kvU;
   const saOhne = R.saPausch, saMit = Math.max(R.saPausch, Math.min(grenze, U.summe));
   // 5 Kinder: deine Angabe, sonst Zähler laut Abrechnung (1,0 = zwei Kinder mit halbem Freibetrag)
-  const zaehler = [...ist].reverse().find((z) => z.kinderfreibetrag != null)?.kinderfreibetrag ?? [...plan].reverse().find((z) => z.kinderfreibetrag != null)?.kinderfreibetrag;
+  // Zähler je Kind: Steuerklasse 3 und 4 = 1,0, sonst 0,5 – maßgeblich ist die Steuerklasse derselben Abrechnung
+  const zMonat = [...ist].reverse().find((z) => z.kinderfreibetrag != null) ?? [...plan].reverse().find((z) => z.kinderfreibetrag != null);
+  const zaehler = zMonat?.kinderfreibetrag, jeKind = [3, 4].includes(+zMonat?.stkl) ? 1 : 2;
   const kinderEin = e.kinder != null && e.kinder !== '';
-  const kinder = Math.max(0, Math.round(kinderEin ? +e.kinder : (+zaehler || 0) * 2));
+  const kinder = Math.max(0, Math.round(kinderEin ? +e.kinder : (+zaehler || 0) * jeKind));
   // 6–8 je Spalte
   const gezIst = summe(ist, 'lohnsteuer') + summe(ist, 'soli'), gezPlan = summe(plan, 'lohnsteuer') + summe(plan, 'soli');
   const ohne = spalte(R, lohn, W.wk, V.v, saOhne, kinder), mit = mitU ? spalte(R, lohn, W.wk, V.v, saMit, kinder) : null;
@@ -216,7 +218,7 @@ export function prognoseRechnen(H, jahr, eingaben) {
     mitU ? (U.faellig ? 'plan' : 'berechnet') : 'regel', '', mitU ? zuTU : null));
   if (kinder) {
     const q = (s) => (s.kfb ? `${kinder} × ${H.eur0(R.kfb)}` : `Kindergeld günstiger (Ersparnis ${H.eur0(s.ersparnis)} ≤ ${H.eur0(s.halbKG)})`);
-    zeilen.push(zr(`− Kinderfreibeträge (${kinder} × halb)`, ohne.kfb, mit?.kfb, `${kinderEin ? 'deine Angabe' : `Zähler ${(+zaehler || 0).toFixed(1).replace('.', ',')} laut Abrechnung`} · ${q(ohne)}${mit && mit.kfb !== ohne.kfb ? ` · mit: ${q(mit)}` : ''}`, 'berechnet'));
+    zeilen.push(zr(`− Kinderfreibeträge (${kinder} × halb)`, ohne.kfb, mit?.kfb, `${kinderEin ? 'deine Angabe' : `Zähler ${(+zaehler || 0).toFixed(1).replace('.', ',')} laut Abrechnung${jeKind === 1 ? ` (Steuerklasse ${zMonat.stkl}: 1,0 je Kind)` : ''}`} · ${q(ohne)}${mit && mit.kfb !== ohne.kfb ? ` · mit: ${q(mit)}` : ''}`, 'berechnet'));
   }
   zeilen.push(zr('= zu versteuerndes Einkommen', ohne.zve, mit?.zve, 'auf volle Euro abgerundet', '', 'sum'));
   zeilen.push(zr('Einkommensteuer (Grundtarif)', ohne.est, mit?.est, `§ 32a EStG ${R.jahr}`, 'berechnet'));
@@ -229,12 +231,20 @@ export function prognoseRechnen(H, jahr, eingaben) {
   if (mitU) zeilen.push({ t: 'Vorteil Anlage U', nurMit: true, ohne: null, mit: vorteil, q: mehr ? `Unterschied der Spalten − Mehrsteuer der Empfängerin ${H.eur0(mehr)} (Nachteilsausgleich)` : 'Unterschied der Spalten · Mehrsteuer der Empfängerin noch nicht eingetragen', art: 'berechnet', cls: 'erg' });
 
   // Freibetrag: Jahresbetrag verteilt auf die Monate nach dem Antrag (Antrag bis 30.11.)
-  const fb = freibetragJahr(R, W.wk, mitU ? saMit : saOhne), frist = `${j}-11-30`;
+  // Trennungsunterhalt zählt nur mit unterschriebener Anlage U (Realsplitting); solange sie fehlt, gilt der Freibetrag ohne
+  // ihn, der Wert mit Anlage U steht getrennt daneben
+  const uOk = mitU && !!e.anlageU?.unterschrieben;
+  const fb = freibetragJahr(R, W.wk, uOk ? saMit : saOhne), frist = `${j}-11-30`;
   const hj = +h.slice(0, 4), rest = hj === j ? 12 - +h.slice(5, 7) : hj < j ? 12 : 0;
-  const moeglich = fb.ueber && h <= frist && rest > 0;
+  const offen = h <= frist && rest > 0, ab = hj === j ? +h.slice(5, 7) + 1 : 1;
+  const moeglich = fb.ueber && offen;
   // Plan im Freibetrag: nur über die Werbungskosten (Entfernung laut Plan) und die Sonderausgaben (noch fälliger Unterhalt)
-  const kmPlan = +e.arbeitstage > 0 && W.zr.some((z) => z.plan && z.km != null), fbPlan = (mitU && U.faellig > 0) || kmPlan;
-  const freibetrag = { jahr: fb.betrag, ueber: fb.ueber, frist, ab: moeglich ? (hj === j ? +h.slice(5, 7) + 1 : 1) : null, monat: moeglich ? Math.round(fb.betrag / rest) : null, naechstesJahr: null, plan: fbPlan };
+  const kmPlan = +e.arbeitstage > 0 && W.zr.some((z) => z.plan && z.km != null), fbPlan = (uOk && U.faellig > 0) || kmPlan;
+  const freibetrag = { jahr: fb.betrag, ueber: fb.ueber, frist, ab: moeglich ? ab : null, monat: moeglich ? Math.round(fb.betrag / rest) : null, naechstesJahr: null, plan: fbPlan, mitU: null };
+  if (mitU && !uOk) {
+    const fu = freibetragJahr(R, W.wk, saMit);
+    freibetrag.mitU = { jahr: fu.betrag, ueber: fu.ueber, ab: fu.ueber && offen ? ab : null, monat: fu.ueber && offen ? Math.round(fu.betrag / rest) : null, plan: U.faellig > 0 || kmPlan };
+  }
   if (hj === j) freibetrag.naechstesJahr = naechstesJahr(H, D, j + 1, e);
 
   return { jahr: j, regel: R, zeilen, ohne, mit, vorteil, freibetrag, hinweise, name: U.name, unterhalt: U, kinder, ist: ist.length, plan: plan.length,
@@ -248,9 +258,11 @@ function naechstesJahr(H, D, j, e) {
   if (!R || !plan.length) return null;
   const W = werbungskosten(H, D, j, R, e, 0);
   const U = unterhalt(H, D, j, `${j}-01-01`);
+  // ohne Anlage U (Zustimmung fürs Folgejahr liegt noch nicht vor); mit Anlage U nur getrennt ausgewiesen
   const sa = Math.max(R.saPausch, Math.min(R.realsplitting + ct(e.kvUebernommen), U.faellig));
-  const fb = freibetragJahr(R, W.wk, sa);
-  return { jahr: j, betrag: fb.betrag, ueber: fb.ueber, monat: fb.ueber ? Math.round(fb.betrag / 12) : null, plan: true, fehltKm: W.hinweise.some((t) => t.includes('Entfernung')) };
+  const fb = freibetragJahr(R, W.wk, R.saPausch), fu = U.faellig > 0 ? freibetragJahr(R, W.wk, sa) : null;
+  return { jahr: j, betrag: fb.betrag, ueber: fb.ueber, monat: fb.ueber ? Math.round(fb.betrag / 12) : null, plan: true, fehltKm: W.hinweise.some((t) => t.includes('Entfernung')),
+    mitU: fu ? { betrag: fu.betrag, ueber: fu.ueber, monat: fu.ueber ? Math.round(fu.betrag / 12) : null } : null };
 }
 
 // ---------------------------------------------------------------- Anzeige
@@ -268,13 +280,14 @@ export function prognoseKarte(H, jahr) {
   const ergK = (s, t, mitU = false) => H.zahl5(`${s.erg >= 0 ? 'Erstattung' : 'Nachzahlung'} ${t}`, pm(s.erg),
     `berechnet${planIn(mitU) ? ` · enthält Plan (${planIn(mitU)})` : ''} · gezahlte Lohnsteuer + Soli minus Steuer laut Prognose`, { cls: s.erg >= 0 ? 'pos' : 'neg', springe: '#stp-rechenweg' });
   const fbText = (F.plan ? 'enthält Plan · ' : '') + (F.monat != null ? `Freibetrag ${MON[F.ab - 1]}–Dez · Jahresbetrag ${H.eur0(F.jahr)} · Antrag auf Lohnsteuer-Ermäßigung bis ${H.dde(F.frist)}`
-    : !F.ueber ? `Jahresbetrag ${H.eur0(F.jahr)} – unter der Antragsgrenze ${H.eur0(P.regel.antrag)}` : `Jahresbetrag ${H.eur0(F.jahr)} – Antrag für ${j} nicht mehr möglich (Frist ${H.dde(F.frist)})`);
+    : !F.ueber ? `Jahresbetrag ${H.eur0(F.jahr)} – unter der Antragsgrenze ${H.eur0(P.regel.antrag)}` : `Jahresbetrag ${H.eur0(F.jahr)} – Antrag für ${j} nicht mehr möglich (Frist ${H.dde(F.frist)})`)
+    + (F.mitU ? ` · ohne Anlage U (Zustimmung fehlt) · nur mit Anlage U: ${F.mitU.monat != null ? `${H.eur0(F.mitU.monat)} je Monat, ` : ''}Jahresbetrag ${H.eur0(F.mitU.jahr)}${F.mitU.plan ? ' (enthält Plan)' : ''}` : '');
   const zahlen = [ergK(P.ohne, 'ohne Anlage U'),
     P.mit ? ergK(P.mit, 'mit Anlage U', true) : H.zahl5('Mit Anlage U', '–', `kein Trennungsunterhalt ${j} gebucht`),
     H.zahl5('Möglicher Freibetrag je Monat', F.monat != null ? H.eur0(F.monat) : '–', fbText)].join('');
 
   const N = F.naechstesJahr;
-  const naechst = N ? `<p class="stp-naechst">Für ${N.jahr} ab Januar ${N.ueber ? `≈ <b>${H.eur0(N.monat)}</b> im Monat` : `kein Freibetrag (${H.eur0(N.betrag)} unter der Antragsgrenze)`} <em class="stp-art plan">Plan</em>
+  const naechst = N ? `<p class="stp-naechst">Für ${N.jahr} ab Januar ${N.ueber ? `≈ <b>${H.eur0(N.monat)}</b> im Monat` : `kein Freibetrag (${H.eur0(N.betrag)} unter der Antragsgrenze)`}${N.mitU ? ` ohne Anlage U · nur mit Anlage U ${N.mitU.ueber ? `≈ <b>${H.eur0(N.mitU.monat)}</b> im Monat` : `kein Freibetrag (${H.eur0(N.mitU.betrag)})`}` : ''} <em class="stp-art plan">Plan</em>
     <span class="muted">Gehaltsplan ${N.jahr}, Entfernung laut Plan${N.fehltKm ? ' (teils fehlt sie)' : ''}, deine Tage wie ${j}, Unterhalt aus dem laufenden Vertrag</span></p>` : '';
 
   const zeile = (z) => `<div class="stp-z ${z.cls}"><span class="stp-t">${H.esc(z.t)}${ART[z.art] ? ` <em class="stp-art ${z.art}">${ART[z.art]}</em>` : ''}</span>
@@ -358,8 +371,9 @@ export function prognoseFristen(H) {
   try { P = prognoseRechnen(H, j); } catch { P = null; }
   if (!P) return [];
   const out = [], F = P.freibetrag, frist = `${j}-11-30`;
-  if (F.ueber && h <= frist) out.push({ key: `stp-lstermaessigung-${j}`, am: frist, titel: `Lohnsteuer-Ermäßigung ${j} beantragen`,
-    text: `möglicher Freibetrag ${H.eur0(F.jahr)}${F.monat != null ? ` (≈ ${H.eur0(F.monat)} je Monat ab ${MONAT[F.ab - 1]})` : ''} · berechnet, Orientierung`, ziel: { tab: 'steuer' }, art: 'Regel', orientierung: true });
+  const fbT = (x) => `${H.eur0(x.jahr)}${x.monat != null ? ` (≈ ${H.eur0(x.monat)} je Monat ab ${MONAT[x.ab - 1]})` : ''}`;
+  if ((F.ueber || F.mitU?.ueber) && h <= frist) out.push({ key: `stp-lstermaessigung-${j}`, am: frist, titel: `Lohnsteuer-Ermäßigung ${j} beantragen`,
+    text: `${F.ueber ? `möglicher Freibetrag ${fbT(F)}${F.mitU ? ' ohne Anlage U' : ''}` : 'ohne Anlage U kein Freibetrag'}${F.mitU?.ueber ? ` · nur mit Anlage U (Zustimmung fehlt noch): ${fbT(F.mitU)}` : ''} · berechnet, Orientierung`, ziel: { tab: 'steuer' }, art: 'Regel', orientierung: true });
   if (P.mitU && !P.eingaben.anlageU?.unterschrieben) out.push({ key: `stp-anlage-u-${j}`, am: frist, titel: 'Zustimmung Anlage U einholen',
     text: `${P.name || 'Die Empfängerin'} muss der Anlage U ${j} zustimmen${P.vorteil != null ? ` – Vorteil laut Prognose ${(P.vorteil < 0 ? '−' : '') + H.eur0(Math.abs(P.vorteil))}` : ''}${P.eingaben.anlageU?.angefragt ? ` · angefragt am ${H.dde(P.eingaben.anlageU.angefragt)}` : ''}`,
     ziel: { tab: 'steuer' }, art: 'Regel', orientierung: true });

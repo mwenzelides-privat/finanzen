@@ -140,4 +140,7 @@
   .ur-tab thead { display: none; }
   .ur-tab tr { padding: 6px 0; border-bottom: 1px solid var(--border); }
   .ur-tab td { border: 0; padding: 2px 0; text-align: left !important; }
+  .ur-tab td[data-l] { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; text-align: right !important; }
+  .ur-tab td[data-l]::before { content: attr(data-l); text-align: left; color: var(--muted); font-weight: 400; }
+  .ur-tab td[data-l] small { grid-column: 1 / -1; text-align: right; }
 }

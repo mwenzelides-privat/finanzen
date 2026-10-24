@@ -37,7 +37,9 @@ export function depot(H) {
   const kurse = dep.kurse?.werte ? dep.kurse : null, kw = new Map((kurse?.werte || []).map((w) => [w.isin, w]));
   const papiere = dep.papiere.map((p) => {
     const k = kw.get(p.isin) || null, netto = (p.eingezahlt || 0) - (p.entnommen || 0);
-    return { ...p, name: p.name || p.isin, netto, basis: p.einstand ?? netto, kurs: k,
+    // ohne Einstand und mehr entnommen als eingezahlt: ganz verkauft, trägt 0 € bei (kein negativer Einstand)
+    const verkauft = p.einstand == null && netto <= 0;
+    return { ...p, name: p.name || p.isin, netto, verkauft, basis: p.einstand ?? (verkauft ? 0 : netto), kurs: k,
       gewinn: k && p.einstand != null ? k.kurswert - p.einstand : null };
   });
   // Papiere aus der Depot-Datei ohne eine einzige Buchung (z. B. vor Beginn der Daten gekauft)
@@ -45,7 +47,7 @@ export function depot(H) {
   // Depot fürs Vermögen: Kurswert, wo die Depot-Datei einen hat, sonst Einstand bzw. netto eingezahlt (berechnet)
   let wert = 0, ausKurs = 0, berechnet = 0;
   for (const p of papiere) {
-    if (p.kurs) { wert += p.kurs.kurswert; ausKurs++; } else if (p.basis) { wert += p.basis; berechnet++; }
+    if (p.kurs) { wert += p.kurs.kurswert; ausKurs++; } else if (p.basis > 0) { wert += p.basis; berechnet++; }
   }
   for (const w of nurKurs) { wert += w.kurswert; ausKurs++; }
 
@@ -92,7 +94,8 @@ export function depotKarte(H) {
 
   const zeile = (p, i) => {
     const st = p.stueck != null ? `Stück ${NUM.format(p.stueck)}` : 'Stück: nicht in den Buchungen';
-    const einst = p.einstand != null ? `${betrag(H, p.einstand)}<small>Einstand · berechnet</small>` : `${betrag(H, p.netto)}<small>netto eingezahlt</small>`;
+    const einst = p.einstand != null ? `${betrag(H, p.einstand)}<small>Einstand · berechnet</small>`
+      : p.verkauft ? `${eur0(0)}<small>verkauft${p.netto < 0 ? ` · ${H.eur(-p.netto)} mehr entnommen als eingezahlt` : ''}</small>` : `${betrag(H, p.netto)}<small>netto eingezahlt</small>`;
     const kurs = !k ? '' : `<td class="r">${p.kurs ? `${eur0(p.kurs.kurswert)}${p.gewinn != null ? `<small>Gewinn ${pm(H, p.gewinn)} laut Depot-Datei vom ${dde(k.stichtag)}</small>` : '<small>ohne Einstand</small>'}` : '<span class="muted">–</span>'}</td>`;
     return `<tr class="klick${i >= ZEILEN_KURZ ? ' dp-mehr' : ''}"${H.geh(H.zuBuchungen({ q: p.isin, konto: '' }))} title="Anklicken: Buchungen zu ${esc(p.isin)}">
       <td class="dp-n"><b>${esc(p.name)}</b><small>${p.name !== p.isin ? `${esc(p.isin)} · ` : 'ohne Namen · '}${st}</small><small class="dp-handy">${p.kaeufe} Käufe · ${p.verkaeufe} Verkäufe${p.entnommen ? ` · entnommen ${eur0(p.entnommen)}` : ''}</small></td>
