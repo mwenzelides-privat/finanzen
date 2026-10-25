@@ -151,3 +151,9 @@
 .ur-e-gut { background: rgba(46, 160, 67, .14); color: var(--ein-text); }
 .ur-e-mit { background: rgba(224, 178, 82, .18); color: #9a6b12; }
 .ur-e-str { background: rgba(214, 69, 65, .12); color: var(--aus-text); }
+
+/* Verbindlicher Betrag und Risiko bei Neuberechnung */
+.ur-z.ur-gilt b { color: var(--text); }
+.ur-z.ur-risiko b { color: #9a6b12; }
+.ur-regeln { margin: 4px 0 0; padding-left: 18px; font-size: 13.5px; line-height: 1.5; }
+.ur-regeln li { margin: 3px 0; }

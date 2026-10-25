@@ -134,6 +134,10 @@ export function rechnerKarte(H, R, eigeneKinder) {
   // Für dich: alle vertretbaren Ansätze zu deinen Gunsten
   const P = rechnen({ ohneWhg: true, vorsorgeVoll: true }, 'notw');
   const pro = wahl.sicht !== 'neutral', B = pro ? P.B : N.B, X = pro ? P.X : N.X;
+  // Maßgeblich ist die letzte Berechnung (Familie.json); neu gerechnet wird erst, wenn die Gegenseite Auskunft verlangt
+  const letzte = (F?.berechnungen || []).filter((b) => b.ab <= m).at(-1);
+  // Nur Leo volljährig, sonst alles wie in der letzten Berechnung – Wirkung für dich, wenn du selbst anstoßen würdest
+  const nurLeo = letzte?.eM && letzte?.eS ? berechne({ m, eM: letzte.eM, eS: letzte.eS, kinder, berechtigte, sockel: 'notw' }) : null;
   // Wirkung jedes Arguments einzeln gegenüber der neutralen Rechnung (negativ = du zahlst weniger)
   const wirk = (r) => r2(r.X.summe - N.X.summe);
   const plus100 = rechnen({}, wahl.sockel, r2(eS + 95));
@@ -179,12 +183,15 @@ export function rechnerKarte(H, R, eigeneKinder) {
     ${zeile('Einkommen deiner Ex-Frau', e(eS * 100), '', `${e(sNetto * 100)} netto − 5 %${wahl.sandra == null && S.unzumutbar ? ` (ohne ${e(S.unzumutbar * 100)} unzumutbar)` : ''}`)}
   </div>`;
   const ergebnis = `<div class="ur-erg">
+    ${letzte ? zeile(`verbindlich: Berechnung vom ${H.dde(letzte.datum)}`, e(letzte.summe * 100), 'ur-sum ur-gilt', `${(letzte.ku || []).map((x) => e(x * 100)).join(' + ')} Kinder + ${e(letzte.tu * 100)} Trennung – gilt, bis die Gegenseite Auskunft verlangt`) : ''}
+    ${gez != null && letzte ? zeile(`überwiesen (${H.monKurz(jetzt.k)}${laeuftNoch ? ', läuft noch' : ''})`, e(gez * 100), Math.abs(gez - letzte.summe) > 1 && !laeuftNoch ? 'ur-abw' : '',
+      Math.abs(gez - letzte.summe) <= 1 ? 'passt zur Berechnung' : `${e(Math.abs(letzte.summe - gez) * 100)} ${gez < letzte.summe ? 'weniger' : 'mehr'} als berechnet${gez < letzte.summe ? ' – ausgleichen, damit es keinen Anlass gibt' : ''}`) : ''}
+    ${letzte ? zeile('Risiko, falls neu gerechnet wird', bet((X.summe - letzte.summe) * 100), 'ur-risiko', `ab dem Monat, in dem Auskunft verlangt wird – ${pro ? 'für dich gerechnet' : 'neutral'}${pro ? `; neutral ${e(r2(N.X.summe - letzte.summe) * 100)}` : ''}`) : ''}
+    ${nurLeo && letzte ? zeile('nur Leo volljährig, Rest wie bisher', e(nurLeo.summe * 100), '', `${bet(r2(nurLeo.summe - letzte.summe) * 100)} gegenüber der Berechnung – würdest du das selbst anstoßen, öffnest du aber die Neuberechnung mit deinem höheren Einkommen`) : ''}
     ${kinderZ}
     ${zeile('Trennungsunterhalt', e(X.tu * 100), '', `(${e(X.eM2 * 100)} − ${e(X.eS2 * 100)}) × 90 % ÷ 2 – Einkommen nach Kindesunterhalt, 10 % Erwerbstätigenbonus`)}
-    ${zeile(pro ? '= du zahlst im Monat (für dich gerechnet)' : '= du zahlst im Monat (neutral)', e(X.summe * 100), 'ur-sum', `dir bleiben ${bet(X.restM * 100)} (Selbstbehalt ${e(X.R.sb.ehe * 100)})`)}
+    ${zeile(pro ? '= bei Neuberechnung (für dich gerechnet)' : '= bei Neuberechnung (neutral)', e(X.summe * 100), 'ur-sum', `dir bleiben ${bet(X.restM * 100)} (Selbstbehalt ${e(X.R.sb.ehe * 100)})`)}
     ${zeile(pro ? 'neutral gerechnet (wie RA Vitti)' : 'für dich gerechnet', e((pro ? N.X.summe : P.X.summe) * 100), '', pro ? `${e(r2(N.X.summe - P.X.summe) * 100)} mehr – so könnte die Gegenseite rechnen` : `${e(r2(N.X.summe - P.X.summe) * 100)} weniger mit allen Argumenten unten`)}
-    ${gez != null ? zeile(`Heute überwiesen (${H.monKurz(jetzt.k)}${laeuftNoch ? ', läuft noch' : ''})`, e(gez * 100), abw && !(laeuftNoch && gez < X.summe) ? 'ur-abw' : '',
-      !abw ? 'passt' : laeuftNoch && gez < X.summe ? `bisher gebucht – der Monat läuft noch, ${e((X.summe - gez) * 100)} können noch kommen` : `Rechner liegt ${e(Math.abs(X.summe - gez) * 100)} ${X.summe > gez ? 'darüber' : 'darunter'}`) : ''}
   </div>`;
 
   // Bisherige Berechnungen: nachgerechnet mit demselben Rechenweg und verglichen mit dem, was du überwiesen hast
@@ -219,6 +226,14 @@ export function rechnerKarte(H, R, eigeneKinder) {
   return H.karte5('Unterhaltsrechner', `Kindes- und Trennungsunterhalt für ${H.monLang(m)} – Rechenweg wie bei RA Vitti, mit deinen Abrechnungen`,
     `${regler}<div class="ur-r">${rechenweg}${ergebnis}</div>
     ${argumente}
+    <h3 class="ur-h">Wann wird neu gerechnet?</h3>
+    <ul class="ur-regeln">
+      <li><b>Verbindlich ist die letzte Berechnung.</b> Eine Gehaltserhöhung musst du als Zahlender grundsätzlich nicht von dir aus melden.</li>
+      <li><b>Die Gegenseite muss Auskunft verlangen</b> (§ 1605 BGB) – regulär alle 2 Jahre, früher nur, wenn sie ein wesentlich höheres Einkommen glaubhaft macht.</li>
+      <li><b>Mehr Unterhalt erst ab Aufforderung</b> (§ 1613 BGB) – nicht rückwirkend für die Zeit davor.</li>
+      <li><b>Gefragt wahr antworten:</b> Bei einer Auskunft oder im Gerichtsverfahren müssen die Angaben vollständig und aktuell sein; hat das Gericht Auskunft angeordnet, sind wesentliche Änderungen ungefragt mitzuteilen (§ 235 FamFG).</li>
+      <li><b>Leo ist volljährig</b> und kann selbst Auskunft verlangen.</li>
+    </ul>
     <h3 class="ur-h">Bisherige Berechnungen und was du überwiesen hast</h3>${tab}
     <p class="s5-erkl">${X.R.quelle}, Süddeutsche Leitlinien (OLG München). Dein Einkommen aus den echten Abrechnungen (tatsächliche Steuern); RA Vitti hat 2026 mit einem fiktiven Netto aus dem Brutto der Lohnsteuerbescheinigung 2025 gerechnet – daher liegt dein Einkommen hier anders. Der Dienstwagen-Vorteil zählt wie dort als Einkommen. Für Leo ab 18: Bedarf nach eurem gemeinsamen Einkommen, beide zahlen nach Leistungsfähigkeit. „Für dich“ nimmt alle vertretbaren Ansätze zu deinen Gunsten; ob sie sich durchsetzen, hängt von Verhandlung oder Gericht ab – die Einschätzung steht bei jedem Argument. Orientierung, keine Rechtsberatung – mit RA Vitti abstimmen.</p>`, 'ur-k', '', 'uh-rechner');
 }
