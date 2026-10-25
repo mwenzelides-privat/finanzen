@@ -34,11 +34,14 @@ export function altersstufe(geb, m) {
 // Bereinigtes Einkommen aus einer Abrechnung (In-Prinzip: tatsächliche Steuern und Beiträge):
 // Netto-Verdienst (enthält den Dienstwagen-Vorteil und die Entgeltumwandlung) − zusätzliche Altersvorsorge (höchstens 4 % des
 // Bruttos bis zur Beitragsgrenze + 22,6 % darüber, wie in der Berechnung vom 20.01.2026) − feste Abzüge − 5 % berufsbedingt
-export function einkommenAus(z, R, abzuege) {
+// opt (Rechnung für dich): ohneWhg = geldwerter Vorteil für Fahrten Wohnung–Arbeit nicht als Einkommen (die Steuer darauf
+// bleibt als Belastung), vorsorgeVoll = Entgeltumwandlung in voller Höhe statt nur bis zur Höchstgrenze
+export function einkommenAus(z, R, abzuege, opt = {}) {
   const vorsorgeMax = 0.04 * Math.min(z.brutto, R.bbgRv) + 0.226 * Math.max(0, z.brutto - R.bbgRv);
-  const vorsorge = Math.min(z.bav_an || 0, vorsorgeMax), fest = abzuege.reduce((t, a) => t + (+a.b || 0), 0);
-  const vor5 = z.netto_verdienst - vorsorge - fest, pausch = vor5 * 0.05;
-  return { e: r2(vor5 - pausch), netto: z.netto_verdienst, vorsorge: r2(vorsorge), vorsorgeMax: r2(vorsorgeMax), bav: z.bav_an || 0, fest: r2(fest), pausch: r2(pausch) };
+  const vorsorge = opt.vorsorgeVoll ? (z.bav_an || 0) : Math.min(z.bav_an || 0, vorsorgeMax), fest = abzuege.reduce((t, a) => t + (+a.b || 0), 0);
+  const whg = opt.ohneWhg ? (z.whg_arbeit || 0) : 0, netto = z.netto_verdienst - whg;
+  const vor5 = netto - vorsorge - fest, pausch = vor5 * 0.05;
+  return { e: r2(vor5 - pausch), netto: z.netto_verdienst, whg: r2(whg), vorsorge: r2(vorsorge), vorsorgeMax: r2(vorsorgeMax), bav: z.bav_an || 0, fest: r2(fest), pausch: r2(pausch) };
 }
 
 // Kern: Unterhalt im Monat m für Einkommen eM (Zahlender) und eS (betreuender Elternteil)
@@ -92,7 +95,7 @@ export function berechne({ m, eM, eS, kinder, R = regelFuer(+m.slice(0, 4)), ber
 }
 
 // ======================================================================= Anzeige (Fixkosten › Unterhalt)
-let wahl = { basis: 'aktuell', sandra: null, sockel: 'angem' };
+let wahl = { basis: 'aktuell', sandra: null, sockel: 'angem', sicht: 'pro' };
 const LS = 'fd.uh-rechner';
 try { wahl = { ...wahl, ...JSON.parse(localStorage.getItem(LS) || '{}') }; } catch {}
 const merken = () => { try { localStorage.setItem(LS, JSON.stringify(wahl)); } catch {} };
@@ -100,17 +103,17 @@ const merken = () => { try { localStorage.setItem(LS, JSON.stringify(wahl)); } c
 // Monate mit gedruckten Werten: geprüfte Abrechnungen und Probeabrechnungen
 const abrechnungen = (G) => (G?.monate || []).filter((z) => z.netto_verdienst != null && z.brutto && (z.geprueft || z.probe));
 
-function basisEinkommen(H, F) {
+function basisEinkommen(H, F, opt = {}) {
   const G = H.D().j.gehalt, ms = abrechnungen(G), abz = F?.rechner?.abzuege || [];
   if (!ms.length) return null;
   const letzte = ms.at(-1);
   if (wahl.basis === '12') {
     const zw = ms.filter((z) => z.m > H.mVor(letzte.m, -12));
-    const er = zw.map((z) => einkommenAus(z, regelFuer(+z.m.slice(0, 4)), abz));
+    const er = zw.map((z) => einkommenAus(z, regelFuer(+z.m.slice(0, 4)), abz, opt));
     const s = (f) => er.reduce((t, x) => t + x[f], 0) / er.length;
-    return { e: r2(s('e')), netto: r2(s('netto')), vorsorge: r2(s('vorsorge')), fest: r2(s('fest')), pausch: r2(s('pausch')), von: zw[0].m, bis: letzte.m, n: zw.length, text: `Ø ${zw.length} Monate ${H.monKurz(zw[0].m)} – ${H.monKurz(letzte.m)} (mit Sonderzahlungen)` };
+    return { e: r2(s('e')), netto: r2(s('netto')), whg: r2(s('whg')), vorsorge: r2(s('vorsorge')), vorsorgeMax: r2(s('vorsorgeMax')), bav: r2(s('bav')), fest: r2(s('fest')), pausch: r2(s('pausch')), von: zw[0].m, bis: letzte.m, n: zw.length, text: `Ø ${zw.length} Monate ${H.monKurz(zw[0].m)} – ${H.monKurz(letzte.m)} (mit Sonderzahlungen)` };
   }
-  return { ...einkommenAus(letzte, regelFuer(+letzte.m.slice(0, 4)), abz), von: letzte.m, bis: letzte.m, n: 1,
+  return { ...einkommenAus(letzte, regelFuer(+letzte.m.slice(0, 4)), abz, opt), von: letzte.m, bis: letzte.m, n: 1,
     text: `${letzte.probe ? 'Probeabrechnung' : 'Abrechnung'} ${H.monKurz(letzte.m)} (ohne Sonderzahlungen)` };
 }
 
@@ -119,13 +122,37 @@ export function rechnerKarte(H, R, eigeneKinder) {
   // Kinder: deine Angaben, wenn alle ein Geburtsdatum haben, sonst die Vorgabe aus den Daten
   const kinder = eigeneKinder?.length && eigeneKinder.every((k) => /^\d{4}-\d{2}/.test(k.geb || '')) ? eigeneKinder : F?.kinder;
   if (!kinder?.length) return '';
-  const e = H.eur, B = basisEinkommen(H, F || {});
+  const e = H.eur, B0 = basisEinkommen(H, F || {});
   const bet = (c) => `<span class="${c < 0 ? 'neg' : ''}">${c < 0 ? '−' : ''}${e(Math.abs(c))}</span>`;   // minus rot, echtes Minuszeichen
-  if (!B) return '';
+  if (!B0) return '';
   const S = F?.rechner?.sandra || { netto: 0, unzumutbar: 0 };
   const sNetto = wahl.sandra ?? S.netto, eS = r2((sNetto - (wahl.sandra == null ? S.unzumutbar || 0 : 0)) * 0.95);
-  const m = D.bis.slice(0, 7);
-  const X = berechne({ m, eM: B.e, eS, kinder, berechtigte: F?.rechner?.berechtigte || kinder.length + 1, sockel: wahl.sockel });
+  const m = D.bis.slice(0, 7), berechtigte = F?.rechner?.berechtigte || kinder.length + 1;
+  const rechnen = (opt, sockel, eSx = eS) => { const b = basisEinkommen(H, F || {}, opt); return { B: b, X: berechne({ m, eM: b.e, eS: eSx, kinder, berechtigte, sockel }) }; };
+  // Neutral: wie RA Vitti (Dienstwagen ganz als Einkommen, Altersvorsorge bis zur Höchstgrenze, Sockel nach deiner Wahl)
+  const N = rechnen({}, wahl.sockel);
+  // Für dich: alle vertretbaren Ansätze zu deinen Gunsten
+  const P = rechnen({ ohneWhg: true, vorsorgeVoll: true }, 'notw');
+  const pro = wahl.sicht !== 'neutral', B = pro ? P.B : N.B, X = pro ? P.X : N.X;
+  // Wirkung jedes Arguments einzeln gegenüber der neutralen Rechnung (negativ = du zahlst weniger)
+  const wirk = (r) => r2(r.X.summe - N.X.summe);
+  const plus100 = rechnen({}, wahl.sockel, r2(eS + 95));
+  const ARG = [
+    { t: 'Dienstwagen: Fahrten Wohnung–Arbeit sind kein Einkommen', w: wirk(rechnen({ ohneWhg: true }, wahl.sockel)), e: 'strittig',
+      b: `Der geldwerte Vorteil für den Arbeitsweg (${e(Math.round((P.B.whg || 0) * 100))} im Monat) bringt dir kein frei verfügbares Geld – er ersetzt nur Fahrten, die ohne Dienstwagen als berufsbedingte Kosten abziehbar wären; die Steuer darauf mindert dein Netto trotzdem. Die Gegenseite hat am 05.07.2025 das Gegenteil vertreten (Dienstwagen voll dem Einkommen zurechnen).` },
+    { t: 'Entgeltumwandlung in voller Höhe abziehen', w: wirk(rechnen({ vorsorgeVoll: true }, wahl.sockel)), e: 'strittig',
+      b: `Die Betriebsrente (${e(Math.round((B0.bav || 0) * 100))} im Monat) bestand schon während der Ehe und hat die Lebensverhältnisse geprägt; sie dient deiner Altersvorsorge, die nach der Scheidung allein bei dir liegt. Üblich ist eine Höchstgrenze (4 % bis zur Beitragsgrenze + 22,6 % darüber = ${e(Math.round((B0.vorsorgeMax || 0) * 100))}), die RA Vitti angesetzt hat.` },
+    { t: 'Leo: Sockel nur in Höhe des notwendigen Selbstbehalts', w: wirk(rechnen({}, 'notw')), e: 'vertretbar',
+      b: 'Für einen privilegiert volljährigen Schüler haften beide Eltern; mit dem niedrigeren Sockel (1.450 €) zählt mehr von Sandras Einkommen, ihr Anteil an Leos Unterhalt steigt.' },
+    { t: 'Sandra muss nach dem Trennungsjahr Vollzeit arbeiten', w: r2(plus100.X.summe - N.X.summe), e: 'gut vertretbar', je100: true,
+      b: 'Seit 02/2026 ist das Trennungsjahr vorbei, die Kinder sind 16 und 18: Ab dann besteht eine gesteigerte Erwerbsobliegenheit (§ 1361 Abs. 2 BGB). Arbeitet sie weniger als Vollzeit, ist ein fiktives Vollzeiteinkommen anzusetzen – trag oben ihr erzielbares Netto ein.' },
+    { t: 'Leos eigenes Einkommen mindert seinen Bedarf', w: null, e: 'nur wenn vorhanden',
+      b: 'Verdient Leo selbst (Minijob, Ferienjob, später Ausbildungsvergütung), wird das auf seinen Bedarf angerechnet – frag es konkret ab.' },
+    { t: 'Nach der Scheidung endet der Trennungsunterhalt', w: null, e: 'gut vertretbar',
+      b: 'Mit Rechtskraft der Scheidung endet der Trennungsunterhalt. Nachehelicher Unterhalt muss neu begründet werden; es gilt der Grundsatz der Eigenverantwortung (§ 1569 BGB), Herabsetzung oder Befristung nach § 1578b BGB ist zu prüfen.' },
+    { t: 'Sonderzahlungen nicht hochrechnen', w: null, e: 'vertretbar',
+      b: 'Grundlage ist die aktuelle Abrechnung ohne Tantieme oder Sonderzahlungen; der Schnitt der letzten 12 Monate wäre höher. Sonderzahlungen erst berücksichtigen, wenn sie tatsächlich fließen.' },
+  ];
   // Vergleichsmonat: der laufende nur, wenn schon gezahlt wurde (dann „läuft noch“), sonst der letzte abgeschlossene
   const lfd = R.monate.find((x) => x.k === R.bisM);
   const jetzt = lfd && (lfd.sum > 0 || !R.laeuft) ? lfd : R.monate.filter((x) => x.k < R.bisM).at(-1) || null;
@@ -144,7 +171,8 @@ export function rechnerKarte(H, R, eigeneKinder) {
       `Tabelle ${e(k.tab * 100)} (${PROZ[X.g - 1]} %) − halbes Kindergeld ${e(X.R.kg / 2 * 100)}`)).join('');
   const rechenweg = `<div class="ur-weg">
     ${zeile('Netto-Verdienst', e(B.netto * 100), '', B.text)}
-    ${zeile('− zusätzliche Altersvorsorge', bet(-B.vorsorge * 100), '', 'Entgeltumwandlung, höchstens 4 % bis zur Beitragsgrenze + 22,6 % darüber')}
+    ${B.whg ? zeile('− Dienstwagen Fahrten Wohnung–Arbeit', bet(-B.whg * 100), '', 'geldwerter Vorteil, kein verfügbares Geld (Argument für dich)') : ''}
+    ${zeile('− zusätzliche Altersvorsorge', bet(-B.vorsorge * 100), '', B.vorsorge > B.vorsorgeMax + 0.005 ? 'Entgeltumwandlung in voller Höhe (Argument für dich)' : 'Entgeltumwandlung, höchstens 4 % bis zur Beitragsgrenze + 22,6 % darüber')}
     ${zeile('− feste Abzüge', bet(-B.fest * 100), '', (F?.rechner?.abzuege || []).map((a) => H.esc(a.t)).join(', '))}
     ${zeile('− pauschal 5 % berufsbedingte Aufwendungen', bet(-B.pausch * 100))}
     ${zeile('= dein bereinigtes Einkommen', e(B.e * 100), 'ur-sum', `Gruppe ${X.gEigen} der Düsseldorfer Tabelle${X.ab ? `, ${X.ab} tiefer wegen ${X.ab + 2} Berechtigten` : ''}${X.g !== Math.max(1, X.gEigen - X.ab) ? ', weitere wegen Bedarfskontrollbetrag' : ''} → Gruppe ${X.g}`)}
@@ -153,7 +181,8 @@ export function rechnerKarte(H, R, eigeneKinder) {
   const ergebnis = `<div class="ur-erg">
     ${kinderZ}
     ${zeile('Trennungsunterhalt', e(X.tu * 100), '', `(${e(X.eM2 * 100)} − ${e(X.eS2 * 100)}) × 90 % ÷ 2 – Einkommen nach Kindesunterhalt, 10 % Erwerbstätigenbonus`)}
-    ${zeile('= du zahlst im Monat', e(X.summe * 100), 'ur-sum', `dir bleiben ${bet(X.restM * 100)} (Selbstbehalt ${e(X.R.sb.ehe * 100)})`)}
+    ${zeile(pro ? '= du zahlst im Monat (für dich gerechnet)' : '= du zahlst im Monat (neutral)', e(X.summe * 100), 'ur-sum', `dir bleiben ${bet(X.restM * 100)} (Selbstbehalt ${e(X.R.sb.ehe * 100)})`)}
+    ${zeile(pro ? 'neutral gerechnet (wie RA Vitti)' : 'für dich gerechnet', e((pro ? N.X.summe : P.X.summe) * 100), '', pro ? `${e(r2(N.X.summe - P.X.summe) * 100)} mehr – so könnte die Gegenseite rechnen` : `${e(r2(N.X.summe - P.X.summe) * 100)} weniger mit allen Argumenten unten`)}
     ${gez != null ? zeile(`Heute überwiesen (${H.monKurz(jetzt.k)}${laeuftNoch ? ', läuft noch' : ''})`, e(gez * 100), abw && !(laeuftNoch && gez < X.summe) ? 'ur-abw' : '',
       !abw ? 'passt' : laeuftNoch && gez < X.summe ? `bisher gebucht – der Monat läuft noch, ${e((X.summe - gez) * 100)} können noch kommen` : `Rechner liegt ${e(Math.abs(X.summe - gez) * 100)} ${X.summe > gez ? 'darüber' : 'darunter'}`) : ''}
   </div>`;
@@ -177,15 +206,21 @@ export function rechnerKarte(H, R, eigeneKinder) {
   }).join('');
   const tab = verlauf ? `<div class="ur-tab-r"><table class="t ur-tab"><thead><tr><th>Berechnung</th><th class="r">dein Einkommen</th><th class="r">Kinder</th><th class="r">Trennung</th><th class="r">Summe</th><th class="r">überwiesen</th><th></th></tr></thead><tbody>${verlauf}</tbody></table></div>` : '';
 
+  const argZ = ARG.map((a) => `<tr><td><b>${H.esc(a.t)}</b><small>${H.esc(a.b)}</small></td>
+    <td class="r" data-l="Wirkung im Monat">${a.w == null ? '–' : `${bet(a.w * 100)}${a.je100 ? '<small>je 100 € mehr Netto bei ihr</small>' : ''}`}</td>
+    <td data-l="Einschätzung"><span class="ur-e ur-e-${a.e.startsWith('gut') ? 'gut' : a.e === 'strittig' ? 'str' : 'mit'}">${H.esc(a.e)}</span></td></tr>`).join('');
+  const argumente = `<h3 class="ur-h">Argumente für dich</h3><div class="ur-tab-r"><table class="t ur-tab ur-arg"><thead><tr><th>Argument</th><th class="r">Wirkung im Monat</th><th>Einschätzung</th></tr></thead><tbody>${argZ}</tbody></table></div>`;
   const regler = `<div class="ur-wahl">
+    <label>Rechnung <select data-ur="sicht"><option value="pro"${pro ? ' selected' : ''}>für dich (alle Argumente)</option><option value="neutral"${!pro ? ' selected' : ''}>neutral (wie RA Vitti)</option></select></label>
     <label>Dein Einkommen <select data-ur="basis"><option value="aktuell"${wahl.basis === 'aktuell' ? ' selected' : ''}>aktuelle Abrechnung</option><option value="12"${wahl.basis === '12' ? ' selected' : ''}>Ø letzte 12 Monate</option></select></label>
     <label>Netto deiner Ex-Frau (€) <input data-ur="sandra" type="text" inputmode="decimal" value="${H.NUM ? H.NUM.format(sNetto) : sNetto}"></label>
     <label>Sockel für Leo <select data-ur="sockel"><option value="angem"${wahl.sockel === 'angem' ? ' selected' : ''}>angemessener Selbstbehalt (${e(X.R.sb.angem * 100)})</option><option value="notw"${wahl.sockel === 'notw' ? ' selected' : ''}>notwendiger Selbstbehalt (${e(X.R.sb.notw * 100)})</option></select></label>
   </div>`;
   return H.karte5('Unterhaltsrechner', `Kindes- und Trennungsunterhalt für ${H.monLang(m)} – Rechenweg wie bei RA Vitti, mit deinen Abrechnungen`,
     `${regler}<div class="ur-r">${rechenweg}${ergebnis}</div>
+    ${argumente}
     <h3 class="ur-h">Bisherige Berechnungen und was du überwiesen hast</h3>${tab}
-    <p class="s5-erkl">${X.R.quelle}, Süddeutsche Leitlinien (OLG München). Dein Einkommen aus den echten Abrechnungen (tatsächliche Steuern); RA Vitti hat 2026 mit einem fiktiven Netto aus dem Brutto der Lohnsteuerbescheinigung 2025 gerechnet – daher liegt dein Einkommen hier anders. Der Dienstwagen-Vorteil zählt wie dort als Einkommen. Für Leo ab 18: Bedarf nach eurem gemeinsamen Einkommen, beide zahlen nach Leistungsfähigkeit. Orientierung, keine Rechtsberatung – verbindlich ist nur eine Berechnung deines Anwalts.</p>`, 'ur-k', '', 'uh-rechner');
+    <p class="s5-erkl">${X.R.quelle}, Süddeutsche Leitlinien (OLG München). Dein Einkommen aus den echten Abrechnungen (tatsächliche Steuern); RA Vitti hat 2026 mit einem fiktiven Netto aus dem Brutto der Lohnsteuerbescheinigung 2025 gerechnet – daher liegt dein Einkommen hier anders. Der Dienstwagen-Vorteil zählt wie dort als Einkommen. Für Leo ab 18: Bedarf nach eurem gemeinsamen Einkommen, beide zahlen nach Leistungsfähigkeit. „Für dich“ nimmt alle vertretbaren Ansätze zu deinen Gunsten; ob sie sich durchsetzen, hängt von Verhandlung oder Gericht ab – die Einschätzung steht bei jedem Argument. Orientierung, keine Rechtsberatung – mit RA Vitti abstimmen.</p>`, 'ur-k', '', 'uh-rechner');
 }
 
 // Betrag lesen: „2.600,50“, „2600,50“, „2600.50“ und „2.600“ – ein Punkt ist nur dann Tausendertrenner, wenn ein Komma
