@@ -923,13 +923,14 @@ function cockpitSeite() {
       unter: lauf ? `ausgegeben von ≈ ${eur0(lauf.aus)}, die im ${monatJ} erwartet sind · erwartetes Ergebnis des Monats ≈ ${plusMinus(lauf.erg)}` : 'Der Monat ist abgeschlossen.', vis: laufVis }),
   ].join('');
 
-  // Wofür das Geld ausgeht: dieselbe Rechnung wie Kategorien › 12 Monate (alle eigenen Konten)
-  const km = abgeschlosseneMonate().slice(-12), a = alleKonten(() => sammle(km, 'aus'));
-  const kl = [...a.g.values()].filter((x) => x.c > 0).sort((x, y) => y.c - x.c), kges = kl.reduce((t, x) => t + x.c, 0);
-  const kRest = kl.slice(6), kRestC = kRest.reduce((t, x) => t + x.c, 0), zuKat = (k) => ({ tab: 'uebersicht', kart: 'aus', wahl: k, jahr: '', monat: '', zr: '', konto: '' });
-  const kats = kl.length ? balkenListe([...kl.slice(0, 6).map((x) => ({ n: esc(schoen(x.k)), c: x.c / a.n, p: `${Math.round((x.c / kges) * 100)} %`, farbe: 'var(--accent-2)', ziel: zuKat(x.k) })),
-    ...(kRest.length ? [{ n: `${kRest.length} übrige Kategorien`, sub: kRest.slice(0, 3).map((x) => esc(schoen(x.k))).join(', ') + (kRest.length > 3 ? ' …' : ''), c: kRestC / a.n, p: `${Math.round((kRestC / kges) * 100)} %`, farbe: 'var(--variabel)', ziel: zuKat('') }] : []),
-    { n: '<b>Summe</b>', c: 0, w: `<b>${eur0(kges / a.n)}</b>`, p: '100 %', cls: 'bl-summe' }], { max: Math.max(...kl.map((x) => x.c / a.n)) }) : '<p class="leer klein">Keine Ausgaben in den letzten 12 Monaten.</p>';
+  // Wofür das Geld ausgeht: der Vormonat als Grundlage, Strich = Ø 12 Monate
+  const K = katVormonat(), kTop = K.l.slice(0, 6), kRest = K.l.slice(6), kR = K.teil(kRest);
+  const kZeile = (x) => ({ n: esc(schoen(x.k)), c: x.c, w: x.c > 0 ? eur0(x.c) : '–', marke: x.o > 0 ? x.o : null, p: x.o > 0 ? `Ø ${eur0(x.o)}` : '–', farbe: 'var(--accent-2)', ziel: katZielVm(x.k, K.vm),
+    tip: `${schoen(x.k)}: ${K.kurz} ${eur0(x.c)} · Ø 12 Monate ${eur0(x.o)}` });
+  const kats = K.l.length ? `<div class="bl-vm">${balkenListe([...kTop.map(kZeile),
+    ...(kRest.length ? [{ n: `${kRest.length} übrige Kategorien`, sub: kRest.slice(0, 3).map((x) => esc(schoen(x.k))).join(', ') + (kRest.length > 3 ? ' …' : ''), c: kR.c, marke: kR.o, p: `Ø ${eur0(kR.o)}`, farbe: 'var(--variabel)', ziel: katZielVm('', K.vm) }] : []),
+    { n: '<b>Summe</b>', c: 0, w: `<b>${eur0(K.sum.c)}</b>`, p: `<b>Ø ${eur0(K.sum.o)}</b>`, cls: 'bl-summe' }], { max: Math.max(1, ...K.l.map((x) => Math.max(x.c, x.o)), kR.c, kR.o), kopf: ['', K.kurz, 'Ø 12 Mon.'] })}</div>`
+    : '<p class="leer klein">Keine Ausgaben in den letzten 12 Monaten.</p>';
 
   const hb = handlungsbedarf(), hbRot = hb.some((x) => x.ampel === 'rot');
   box.innerHTML = `<div class="cp">
@@ -939,8 +940,8 @@ function cockpitSeite() {
       <section class="card cp-karte"><div class="cp-kt"><h2>Was am Monatsende übrig blieb</h2><span class="klein muted">12 Monate · schraffiert: erwartet</span></div>
         <div class="cp-chart cp-chart-m"><canvas id="c-s5-erg" aria-label="Ergebnis je Monat"></canvas></div>
         <p class="cp-fuss">Einnahmen minus Ausgaben je Monat · gestrichelt: Ø ${pmHtml(Math.round(s.erg))} · Säule anklicken: Buchungen des Monats</p></section>
-      <section class="card cp-karte"><div class="cp-kt"><h2>Wofür das Geld ausgeht</h2><span class="klein muted">Ø je Monat, ${esc(monatsText(km))}</span></div>${kats}
-        <p class="cp-fuss">Letzte 12 Monate, ohne Kinder- und gemeinsame Konten · ${zl('alle Kategorien', { tab: 'uebersicht', kart: 'aus', wahl: '', jahr: '', monat: '', zr: '', konto: '' })}</p></section>
+      <section class="card cp-karte"><div class="cp-kt"><h2>Wofür das Geld ausgeht</h2><span class="klein muted">${esc(K.name)} · Strich = Ø 12 Monate</span></div>${kats}
+        <p class="cp-fuss">Balken: Ausgaben im ${esc(K.name)}, rechts der Durchschnitt ${esc(monatsText(K.ms))} · ohne Kinder- und gemeinsame Konten · ${zl('alle Kategorien (12 Monate)', katAlle)}</p></section>
     </div>
     <section class="card cp-karte cp-td-karte"><div class="cp-kt"><h2>Zu tun</h2>${hb.length ? `<span class="cp-zahl${hbRot ? ' neg' : ''}">${hb.length}</span>` : ''}</div>${handlungHtml(hb)}</section>
     <div id="cp-waechter"${cpWaechterAuf ? '' : ' hidden'}>${cpWaechterAuf ? sicher(() => waechterKarte(H)) : ''}</div>
@@ -983,6 +984,19 @@ function cpStandZeichnen(ms, id = 'c-cp-stand') {
 // (monatsRechnung, verlauf5, sammle, vermoegen, gehalt.js, steuerprognose.js, unterhalt.js) – hier wird nichts neu gerechnet.
 // Kinder- und gemeinsame Konten zählen in keiner Summe. Ausgaben stehen ohne Vorzeichen; Rot/Grün nur für Vorzeichen und Abweichungen.
 const UEBERBLICK = { geldfluss: () => geldflussSeite(), vermoegen: () => vermoegenSeite(), einkommen: () => einkommenSeite(), familie: () => familieSeite() };
+// Ausgaben je Kategorie: der letzte abgeschlossene Monat als Grundlage, daneben der Ø der letzten 12 Monate (alle eigenen Konten).
+// Wie im Reiter Kategorien zählt eine Kategorie nur mit Ausgaben über 0 (Erstattungen überwiegen sonst) – Zeilen und Summen gehen so auf.
+function katVormonat() {
+  const ms = abgeschlosseneMonate().slice(-12), vm = ms.at(-1);
+  const m = alleKonten(() => sammle([vm], 'aus')), j = alleKonten(() => sammle(ms, 'aus'));
+  const l = [...new Set([...m.g.keys(), ...j.g.keys()])].map((k) => ({ k, c: Math.max(0, m.g.get(k)?.c || 0), o: Math.max(0, (j.g.get(k)?.c || 0) / j.n), mon: j.g.get(k)?.mon || new Map() }))
+    .filter((x) => x.c > 0 || x.o > 0).sort((x, y) => y.c - x.c || y.o - x.o);
+  const teil = (xs) => ({ c: xs.reduce((t, x) => t + x.c, 0), o: xs.reduce((t, x) => t + x.o, 0) });
+  return { vm, ms, l, teil, sum: teil(l), name: monLang(vm), kurz: MONAT[+vm.slice(5) - 1] };
+}
+// Klick: die Buchungen dieser Kategorie im Vormonat (dort steht dieselbe Summe); die Kategorien-Seite kennt nur ganze Jahre
+const katZielVm = (k, vm) => zuBuchungen({ konto: '', art: 'aus', kat: k, ...monatZiel(vm) });
+const katAlle = { tab: 'uebersicht', kart: 'aus', wahl: '', jahr: '', monat: '', zr: '', konto: '' };
 const dGezeigt = (von, bis) => Math.round(bis / 100) * 100 - Math.round(von / 100) * 100;
 const RUNDUNG = '<p class="cp-fuss bx-rundung">Beträge auf volle Euro gerundet. Summen und Anteile sind aus den genauen Cent-Beträgen gerechnet – addierst du die gerundeten Teile selbst, kann die letzte Stelle um 1 € abweichen.</p>';
 const bxKopf = (ueber, kern, unter = '') => `<header class="cp-kopf"><p class="cp-ueber">${ueber} · Daten bis ${dde(D.bis)}</p><h1 class="cp-kern">${kern}</h1>${unter ? `<p class="cp-kern-u">${unter}</p>` : ''}</header>`;
@@ -1023,7 +1037,8 @@ function geldflussSeite() {
     kachel({ titel: 'Einkommen', wert: eur0(R.ein), ziel: zuGehalt(), aend: `Gehalt ${eur0(R.gehalt)} + Sonstiges ${eur0(R.sonst)}`, spark: sparkline(ist.map((m) => m.ein)), unter: 'normaler Monat · Linie: Einnahmen je Monat' }),
     kachel({ titel: 'Fixkosten', wert: eur0(R.fix), ziel: zuFix, aend: `${R.vertraege.length} laufende Verträge · ${pzG(R.fix)} vom Gehalt`, spark: sparkline(ist.map((m) => m.fest)), unter: 'jährliche anteilig · Linie: feste Abbuchungen je Monat' }),
     kachel({ titel: 'Lebenshaltung', wert: eur0(R.leben), ziel: zuLeben, aend: `${lebenName()}${L.kats[0] ? ` · am meisten ${esc(schoen(L.kats[0].kat))}` : ''}`, spark: sparkline(L.werte), unter: 'alles außer Verträgen · Linie: je Monat' }),
-    kachel({ titel: 'Ergebnis Ø 12 Monate', wert: plusMinus(Math.round(s.erg)), cls_: s.erg < 0 ? 'neg' : 'pos', ziel: zuKz, aend: `Einnahmen ${eur0(s.ein)} · Ausgaben ${eur0(s.aus)}`, spark: sparSaeulen(ist.map((m) => m.erg)), unter: 'Säulen: Ergebnis je Monat' }),
+    ...(() => { const v = ist.at(-1); return v ? [kachel({ titel: `Ergebnis ${MONAT[+v.k.slice(5) - 1]}`, wert: plusMinus(v.erg), cls_: v.erg < 0 ? 'neg' : 'pos', ziel: zuBuchungen({ konto: '', ...monatZiel(v.k) }),
+      aend: `Einnahmen ${eur0(v.ein)} · Ausgaben ${eur0(v.aus)} · Ø 12 Monate ${pmHtml(Math.round(s.erg))}`, spark: sparSaeulen(ist.map((m) => m.erg)), unter: 'Säulen: Ergebnis je Monat, rechts der letzte' })] : []; })(),
   ].join('');
 
   const wf = wasserfall([
@@ -1034,22 +1049,17 @@ function geldflussSeite() {
     { n: R.erg < 0 ? 'fehlt' : 'bleibt', summe: true, w: plusMinus(R.erg), cls_: R.erg < 0 ? 'wf-neg' : 'wf-pos', ziel: zuFix, tip: R.erg < 0 ? 'Was im Monat fehlt' : 'Was im Monat übrig bleibt' },
   ]);
 
-  // Ausgaben nach Kategorie: dieselbe Rechnung wie Kategorien › 12 Monate (alle eigenen Konten), Vorjahr = dieselben Monate davor
-  const ms = abgeschlosseneMonate().slice(-12), vor = ms.map((k) => mVor(k, -12)).filter((k) => k >= D.von.slice(0, 7));
-  const a = alleKonten(() => sammle(ms, 'aus')), v = vor.length === ms.length ? alleKonten(() => sammle(vor, 'aus')) : null;
-  const liste = [...a.g.values()].filter((x) => x.c > 0).sort((x, y) => y.c - x.c), ges = liste.reduce((t, x) => t + x.c, 0), vges = v ? [...v.g.values()].reduce((t, x) => t + Math.max(0, x.c), 0) / v.n : null;
-  const katZiel = (k) => ({ tab: 'uebersicht', kart: 'aus', wahl: k, jahr: '', monat: '', zr: '', konto: '' });
-  const katZeile = (x) => {
-    const d = v ? x.c / a.n - (v.g.get(x.k)?.c || 0) / v.n : null;
-    return `<button class="bx-kz"${geh(katZiel(x.k))} title="${esc(schoen(x.k))} – anklicken: Einzelheiten">
-      <span class="bx-kz-n">${esc(schoen(x.k))}<small>${Math.round((x.c / ges) * 100)} %</small></span><span class="bx-kz-sp">${sparkline(ms.map((k) => x.mon.get(k) || 0))}</span>
-      <b class="bx-kz-w">${eur0(x.c / a.n)}</b>${d == null ? '<span></span>' : bxDelta(d)}</button>`;
-  };
-  const rest = liste.slice(8);
-  const kats = !liste.length ? '<p class="leer klein">Keine Ausgaben in den letzten 12 Monaten.</p>'
-    : `<div class="bx-kl"><div class="bx-kz bx-kopfz"><span>Kategorie</span><span>Verlauf</span><span>Ø Monat</span><span>Vorjahr</span></div>${liste.slice(0, 8).map(katZeile).join('')}
-      ${rest.length ? `<button class="bx-kz bx-rest"${geh({ ...katZiel(''), wahl: '' })}><span class="bx-kz-n">${rest.length} weitere<small>${Math.round((rest.reduce((t, x) => t + x.c, 0) / ges) * 100)} %</small></span><span></span><b class="bx-kz-w">${eur0(rest.reduce((t, x) => t + x.c, 0) / a.n)}</b><span></span></button>` : ''}
-      <div class="bx-kz bx-summe"><span class="bx-kz-n">Summe</span><span></span><b class="bx-kz-w">${eur0(ges / a.n)}</b>${vges != null ? bxDelta(ges / a.n - vges) : '<span></span>'}</div></div>`;
+  // Ausgaben nach Kategorie: der Vormonat als Grundlage, daneben der Ø der letzten 12 Monate (wie Kategorien › Monat bzw. › 12 Monate)
+  const K = katVormonat(), ms = K.ms, katZiel = (k) => katZielVm(k, K.vm);
+  const wert = (c) => (c > 0 ? eur0(c) : '–');
+  const katZeile = (x) => `<button class="bx-kz"${geh(katZiel(x.k))} title="${esc(schoen(x.k))}: ${K.kurz} ${eur0(x.c)} · Ø 12 Monate ${eur0(x.o)} – anklicken: Einzelheiten">
+      <span class="bx-kz-n">${esc(schoen(x.k))}</span><span class="bx-kz-sp">${sparkline(ms.map((k) => x.mon.get(k) || 0))}</span>
+      <b class="bx-kz-w">${wert(x.c)}</b><span class="bx-kz-o">${wert(x.o)}</span></button>`;
+  const rest = K.l.slice(8), kR = K.teil(rest);
+  const kats = !K.l.length ? '<p class="leer klein">Keine Ausgaben in den letzten 12 Monaten.</p>'
+    : `<div class="bx-kl"><div class="bx-kz bx-kopfz"><span>Kategorie</span><span>Verlauf</span><span>${K.kurz}</span><span>Ø 12 Mon.</span></div>${K.l.slice(0, 8).map(katZeile).join('')}
+      ${rest.length ? `<button class="bx-kz bx-rest"${geh(katZiel(''))}><span class="bx-kz-n">${rest.length} weitere</span><span></span><b class="bx-kz-w">${wert(kR.c)}</b><span class="bx-kz-o">${wert(kR.o)}</span></button>` : ''}
+      <div class="bx-kz bx-summe"><span class="bx-kz-n">Summe</span><span></span><b class="bx-kz-w">${eur0(K.sum.c)}</b><span class="bx-kz-o"><b>${eur0(K.sum.o)}</b></span></div></div>`;
 
   // Verträge kompakt: je Art die laufende Summe im Monat
   const arten = new Map();
@@ -1081,7 +1091,7 @@ function geldflussSeite() {
     <div class="cp-kz">${kacheln}</div>
     <div class="bx-raster">
       ${bxKarte('Vom Gehalt zum Ergebnis', wf, { rechts: '<span class="klein muted">ein normaler Monat</span>', cls_: 'bx-wf', fuss: 'Säule anklicken: Einzelheiten · mehr unter Kennzahlen' })}
-      ${bxKarte('Wofür das Geld ausgeht', kats, { rechts: `<span class="klein muted">Ø ${esc(monatsText(ms))}</span>`, fuss: `Größte Kategorien, ohne Kinder- und gemeinsame Konten · Linie: je Monat · ${zl('alle Kategorien', katZiel(''))}` })}
+      ${bxKarte('Wofür das Geld ausgeht', kats, { rechts: `<span class="klein muted">${esc(K.name)} · daneben Ø 12 Monate</span>`, fuss: `Sortiert nach ${esc(K.name)} · Ø ${esc(monatsText(ms))} · ohne Kinder- und gemeinsame Konten · Linie: je Monat · ${zl('alle Kategorien (12 Monate)', katAlle)}` })}
     </div>
     <div class="bx-raster bx-drei">
       ${bxKarte('Verträge', vertraege, { rechts: zl(`<b class="bx-wert">${eur0(R.fix)}</b>`, zuFix), fuss: `Nächste 30 Tage: ${termine.length} feste Abbuchungen · ${zl(eur0(tSumme), { tab: 'fix', fixtab: 'kalender', konto: '' })}` })}

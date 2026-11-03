@@ -295,6 +295,10 @@ button.bx-kz:hover { background: var(--accent-soft); }
 .bx-kz-n small { margin-left: 6px; font-weight: 400; color: var(--muted); font-size: var(--fs-xs); }
 .bx-kz-sp .sp { height: 22px; }
 .bx-kz-w { text-align: right; font-weight: 650; font-size: var(--fs-m); white-space: nowrap; }
+.bx-kz-o { text-align: right; font-size: var(--fs-s); color: var(--muted); white-space: nowrap; }
+.bx-kz-o b { font-weight: 650; color: var(--text-2); }
+.bl-vm .bl-z { grid-template-columns: minmax(96px, 1.25fr) minmax(50px, 1fr) auto 78px; }
+.bl-vm .bl-p b { font-weight: 650; color: var(--text-2); }
 .bx-rest .bx-kz-n { color: var(--text-2); font-weight: 400; }
 .bx-summe { cursor: default; border-top: 1px solid var(--border-strong); }
 .bx-summe .bx-kz-n { font-weight: 700; }
