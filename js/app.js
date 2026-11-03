@@ -618,9 +618,10 @@ function monatsRechnung() {
   const vertraege = fixkostenErkennen().filter((f) => f.aktiv && !f.gemeinsam);
   const fix = vertraege.reduce((t, f) => t + f.proMonat, 0);
   const leben = lebenGewaehlt();
-  return (D.mr = { gehalt, gehaltMonat: ek.letzter, sonst, fix, leben, ein: gehalt + sonst, aus: fix + leben, erg: gehalt + sonst - fix - leben, vertraege, ref, gt: gehaltstag(), lh: lebenshaltung() });
+  const lebenProg = lebenWahl === 'vormonat' ? lebenshaltung().schnitt : leben;   // Prognose: ein einzelner Monat wäre zu zufällig
+  return (D.mr = { gehalt, gehaltMonat: ek.letzter, sonst, fix, leben, lebenProg, ein: gehalt + sonst, aus: fix + leben, erg: gehalt + sonst - fix - leben, vertraege, ref, gt: gehaltstag(), lh: lebenshaltung() });
 }
-const lebenName = () => (lebenWahl === 'eigen' && lebenEigen ? 'dein eigener Wert' : lebenWahl === 'typisch' ? 'typischer Monat' : 'Ø 12 Monate');
+const lebenName = () => (lebenWahl === 'eigen' && lebenEigen ? 'dein eigener Wert' : lebenWahl === 'typisch' ? 'typischer Monat' : lebenWahl === 'vormonat' && lebenshaltung().monate.length ? `Vormonat ${MONAT[+lebenshaltung().monate.at(-1).slice(5) - 1]}` : 'Ø 12 Monate');
 
 // Prognose ehrlicher (planung.js): Plan-Gehalt eines Monats aus den Abrechnungen (null = aktuelles Gehalt) und
 // Saisonfaktor der Lebenshaltung je Kalendermonat (Σ = 12; ohne Profil überall 1)
@@ -652,7 +653,7 @@ function verlauf5() {
   if (laeuft) {
     const x = w(jetzt), ende = monatsletzter(`${jetzt}-01`);
     const offenFest = R.vertraege.reduce((t, f) => t + faellig(f, plusTage(heute, 1), ende), 0);
-    const gehaltKommt = x.lohn > 0 ? 0 : (planG(jetzt) ?? R.gehalt), sonstKommt = Math.max(0, R.sonst - (x.ein - x.lohn)), varKommt = Math.max(0, Math.round(R.leben * saisonF(jetzt)) - x.var);
+    const gehaltKommt = x.lohn > 0 ? 0 : (planG(jetzt) ?? R.gehalt), sonstKommt = Math.max(0, R.sonst - (x.ein - x.lohn)), varKommt = Math.max(0, Math.round(R.lebenProg * saisonF(jetzt)) - x.var);
     const ein = x.ein + gehaltKommt + sonstKommt, aus = x.aus + offenFest + varKommt;
     weiter(gehaltKommt + sonstKommt - offenFest - varKommt + Math.min(0, spar - x.spar));
     lauf = { k: jetzt, art: 'laeuft', ein, aus, erg: ein - aus, x, offenFest, gehaltKommt, varKommt, tag: +heute.slice(8), tage: +ende.slice(8), stand };
@@ -662,7 +663,7 @@ function verlauf5() {
     const k = mVor(jetzt, i), ende = monatsletzter(`${k}-01`);
     const fest = R.vertraege.reduce((t, f) => t + faellig(f, `${k}-01`, ende), 0);
     const pg = planG(k), sf = saisonF(k);
-    const ein = (pg ?? R.gehalt) + R.sonst, aus = Math.round(R.leben * sf) + fest;
+    const ein = (pg ?? R.gehalt) + R.sonst, aus = Math.round(R.lebenProg * sf) + fest;
     weiter(ein - aus + spar);
     monate.push({ k, art: 'prognose', ein, aus, erg: ein - aus, fest, stand, plan: pg != null, sf });
   }
@@ -916,7 +917,7 @@ function cockpitSeite() {
   const monatTeil = lauf ? Math.min(1, lauf.x.aus / Math.max(1, lauf.aus)) : 1;
   const laufVis = lauf ? `<span class="cv-ring">${ring(monatTeil, lauf.tag / lauf.tage, `${Math.round(monatTeil * 100)} %`)}<span class="cv-rleg"><span><i class="cv-ein"></i>ausgegeben<b>${eur0(lauf.x.aus)}</b></span><span><i class="cv-strich"></i>heute<b>Tag ${lauf.tag}/${lauf.tage}</b></span></span></span>` : '';
   const kacheln = [
-    cvKarte({ titel: 'Normaler Monat', wert: plusMinus(R.erg), cls_: R.erg < 0 ? 'neg' : 'pos', ziel: { tab: 'geldfluss' }, unter: `Ø der letzten 12 Monate ${pmHtml(Math.round(s.erg))}`, vis: monatVis }),
+    cvKarte({ titel: 'Normaler Monat', wert: plusMinus(R.erg), cls_: R.erg < 0 ? 'neg' : 'pos', ziel: { tab: 'geldfluss' }, unter: `Lebenshaltung: ${lebenName()} (Ø 12 Monate ${eur0(R.lh.schnitt)}) · Ergebnis Ø 12 Monate ${pmHtml(Math.round(s.erg))}`, vis: monatVis }),
     cvKarte({ titel: 'Vermögen', wert: vm ? `${vm.ungefaehr ? '≈ ' : ''}${vm.c < 0 ? '−' : ''}${eur0(Math.abs(vm.c))}${vm.ks && !vm.voll ? ' + ?' : ''}` : '–', cls_: vm?.c < 0 ? 'neg' : '', ziel: { tab: 'vermoegen' },
       unter: 'jeder Teil mit eigenem Stichtag · ohne gesetzliche Rente', vis: vmVis }),
     cvKarte({ titel: lauf ? `${monatJ} bisher` : 'Dieser Monat', wert: lauf ? eur0(lauf.x.aus) : '–', ziel: zuBuchungen({ konto: '', ...monatZiel(V.jetzt), art: 'aus' }),
@@ -1036,7 +1037,7 @@ function geldflussSeite() {
   const kacheln = [
     kachel({ titel: 'Einkommen', wert: eur0(R.ein), ziel: zuGehalt(), aend: `Gehalt ${eur0(R.gehalt)} + Sonstiges ${eur0(R.sonst)}`, spark: sparkline(ist.map((m) => m.ein)), unter: 'normaler Monat · Linie: Einnahmen je Monat' }),
     kachel({ titel: 'Fixkosten', wert: eur0(R.fix), ziel: zuFix, aend: `${R.vertraege.length} laufende Verträge · ${pzG(R.fix)} vom Gehalt`, spark: sparkline(ist.map((m) => m.fest)), unter: 'jährliche anteilig · Linie: feste Abbuchungen je Monat' }),
-    kachel({ titel: 'Lebenshaltung', wert: eur0(R.leben), ziel: zuLeben, aend: `${lebenName()}${L.kats[0] ? ` · am meisten ${esc(schoen(L.kats[0].kat))}` : ''}`, spark: sparkline(L.werte), unter: 'alles außer Verträgen · Linie: je Monat' }),
+    kachel({ titel: 'Lebenshaltung', wert: eur0(R.leben), ziel: zuLeben, aend: `${lebenName()} · Ø 12 Monate ${eur0(L.schnitt)}`, spark: sparkline(L.werte), unter: 'alles außer Verträgen · Linie: je Monat' }),
     ...(() => { const v = ist.at(-1); return v ? [kachel({ titel: `Ergebnis ${MONAT[+v.k.slice(5) - 1]}`, wert: plusMinus(v.erg), cls_: v.erg < 0 ? 'neg' : 'pos', ziel: zuBuchungen({ konto: '', ...monatZiel(v.k) }),
       aend: `Einnahmen ${eur0(v.ein)} · Ausgaben ${eur0(v.aus)} · Ø 12 Monate ${pmHtml(Math.round(s.erg))}`, spark: sparSaeulen(ist.map((m) => m.erg)), unter: 'Säulen: Ergebnis je Monat, rechts der letzte' })] : []; })(),
   ].join('');
@@ -2164,7 +2165,7 @@ function tabelle(conds) {
   el.querySelectorAll('[data-leben]').forEach((b) => b.onclick = () => {
     lebenWahl = b.dataset.leben;
     if (lebenWahl === 'eigen' && !lebenEigen) lebenEigen = Math.round(lebenshaltung().schnitt / 100) * 100;
-    try { localStorage.setItem('fd.leben', lebenWahl); localStorage.setItem('fd.lebeneigen', String(lebenEigen)); } catch {}
+    try { localStorage.setItem('fd.leben2', lebenWahl); localStorage.setItem('fd.lebeneigen', String(lebenEigen)); } catch {}
     D.mr = D.v5 = null;   // Übersicht und Prognose rechnen mit derselben Lebenshaltung
     tabelle(conds);
     if (lebenWahl === 'eigen') $('#leben-eigen')?.select();
@@ -2452,9 +2453,9 @@ function lebenshaltung() {
   const kats = [...kat].map(([k, c]) => ({ kat: k, c: c / n })).filter((x) => x.c > 0).sort((a, b) => b.c - a.c);
   return (D.leben = { monate, werte, kats, schnitt: werte.reduce((s, x) => s + x, 0) / n, typisch: werte.length ? median(werte) : 0, spar: spar / n });
 }
-let lebenWahl = (() => { try { return localStorage.getItem('fd.leben') || 'schnitt'; } catch { return 'schnitt'; } })();
+let lebenWahl = (() => { try { return localStorage.getItem('fd.leben2') || 'vormonat'; } catch { return 'vormonat'; } })();
 // Lebenshaltung so, wie sie im Reiter Fixkosten gewählt ist (Ø 12 Monate, typischer Monat oder eigener Wert)
-const lebenGewaehlt = () => (lebenWahl === 'eigen' && lebenEigen ? lebenEigen : lebenWahl === 'typisch' ? lebenshaltung().typisch : lebenshaltung().schnitt);
+const lebenGewaehlt = () => (lebenWahl === 'eigen' && lebenEigen ? lebenEigen : lebenWahl === 'typisch' ? lebenshaltung().typisch : lebenWahl === 'vormonat' ? lebenshaltung().werte.at(-1) ?? lebenshaltung().schnitt : lebenshaltung().schnitt);
 let lebenEigen = (() => { try { return +localStorage.getItem('fd.lebeneigen') || 0; } catch { return 0; } })();   // Cent
 
 // Geld auf deinen eigenen Konten (ohne Gemeinschaftskonto und Pockets, Mietkaution und die Konten der Kinder);
@@ -2551,16 +2552,16 @@ function tabFixkosten() {
   const teile = [...gross.map((g) => ({ n: FIX_KURZ[g.art] || esc(g.art), c: g.summe, tip: `${g.art}: ${eur0(g.summe)} im Monat · ${pct(g.summe)} vom Gehalt – anklicken: Verträge`, ...vertrZiel(`#${fvId(g.art)}`) })),
     ...(kleinS ? [{ n: 'Übrige', c: kleinS, tip: `${klein.map((g) => `${g.art} ${eur0(g.summe)}`).join(', ')} – zusammen ${eur0(kleinS)} im Monat`, ...vertrZiel(`#${fvId(klein[0].art)}`) }] : [])];
   const lh = lebenshaltung();
-  if (lebenWahl === 'eigen' && !lebenEigen) lebenWahl = 'schnitt';
+  if (lebenWahl === 'eigen' && !lebenEigen) lebenWahl = 'vormonat';
   const knopf = (k, t, wert) => `<button data-leben="${k}" class="${lebenWahl === k ? 'an' : ''}">${t}${wert != null ? ` <small>${eur0(wert)}</small>` : ''}</button>`;
   let h = kopf5('Fixkosten', satz, kontoWahlHtml()) + `<div class="s5-zahlen">${zahlen}</div>
     <section class="card s5-karte fix5-balken"><div class="s5-kt"><div class="s5-kt-t"><h2>Dein Monat in einem Balken</h2>
       <p class="s5-erkl">Dunkel = Fixkosten je Art, hell = Lebenshaltung, rot schraffiert = was fehlt. Der senkrechte Strich ist dein Einkommen (Gehalt + übliche sonstige Einnahmen). Fläche anklicken: Einzelheiten.${ks ? ' <b>Gilt für alle Konten</b> – die Kontenauswahl wirkt nur auf die Verträge.' : ''}</p></div></div>
       ${geldBalken({ ...R, ein: E, aus: R.fix + L, erg: rest }, teile)}
       <details class="fix-grundlage"${fixGrundlageAuf ? ' open' : ''}><summary>Gerechnet mit Gehalt ${eur0(G)} (${monLang(R.gehaltMonat)}), sonstigen Einnahmen ${eur0(R.sonst)} (typischer Monat) und Lebenshaltung ${eur0(L)} (${lebenName()}) · <span class="link">Lebenshaltung ändern</span></summary>
-        <div class="fix-einst"><div class="fix-bezug-zeile"><span>Lebenshaltung</span><div class="seg fix-bezug">${knopf('schnitt', 'Ø 12 Monate', lh.schnitt)}${knopf('typisch', 'typischer Monat', lh.typisch)}${knopf('eigen', 'eigener Wert')}</div>
+        <div class="fix-einst"><div class="fix-bezug-zeile"><span>Lebenshaltung</span><div class="seg fix-bezug">${lh.monate.length ? knopf('vormonat', `Vormonat ${MON[+lh.monate.at(-1).slice(5) - 1]}`, lh.werte.at(-1)) : ''}${knopf('schnitt', 'Ø 12 Monate', lh.schnitt)}${knopf('typisch', 'typischer Monat', lh.typisch)}${knopf('eigen', 'eigener Wert')}</div>
           ${lebenWahl === 'eigen' ? `<label class="fix-eigen"><input type="number" id="leben-eigen" min="0" step="50" inputmode="numeric" value="${Math.round(L / 100)}"> € / Monat</label>` : ''}</div></div>
-        <p class="muted klein">Lebenshaltung = alle übrigen Ausgaben deiner Konten (Einkauf, Tanken, Freizeit, Urlaub, Anschaffungen) ohne Fixkosten und ohne Gemeinschaftskonto, ${esc(monatsText(lh.monate))}. „Typischer Monat“ ist der Median – einzelne teure Monate zählen dann weniger. Die Wahl gilt auch für die Übersicht und die Prognose.</p>
+        <p class="muted klein">Lebenshaltung = alle übrigen Ausgaben deiner Konten (Einkauf, Tanken, Freizeit, Urlaub, Anschaffungen) ohne Fixkosten und ohne Gemeinschaftskonto, ${esc(monatsText(lh.monate))}. „Typischer Monat“ ist der Median – einzelne teure Monate zählen dann weniger. Die Wahl gilt für den normalen Monat überall in der App. Die Kontostand-Prognose rechnet beim Vormonat mit Ø 12 Monate und Saisonprofil, damit ein einzelner günstiger oder teurer Monat sie nicht verzerrt.</p>
       </details>
     </section>`;
   const reiter = (k, t) => `<button data-fixtab="${k}" class="${S.fixtab === k ? 'an' : ''}">${t}</button>`;
