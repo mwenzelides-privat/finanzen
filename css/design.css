@@ -405,7 +405,7 @@ i.cv-strich { background: var(--text-2); width: 3px !important; }
 .rg-v { stroke: var(--accent-2); stroke-linecap: round; }
 .rg-s { stroke: color-mix(in srgb, var(--accent) calc(100% - var(--i) * 34%), var(--surface)); }
 .rg-t { stroke: var(--text-2); stroke-width: 3; stroke-linecap: round; }
-.rg text { font: 650 17px var(--font); fill: var(--text); }
+.rg text { font: 650 17px var(--font); fill: var(--text); stroke: none; }
 .cv-rleg { display: grid; gap: 6px; font-size: var(--fs-s); color: var(--text-2); }
 .cv-rleg span { display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 8px; }
 .cv-rleg i { width: 10px; height: 10px; border-radius: 3px; background: color-mix(in srgb, var(--accent) calc(100% - var(--i, 0) * 34%), var(--surface)); }
