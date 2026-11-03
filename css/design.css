@@ -244,6 +244,9 @@ a { color: var(--accent); }
 .bx-raster { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: stretch; }
 .bx-raster.bx-drei { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .bx-karte { gap: 10px; }
+.bx-rundung { margin: -4px 2px 0; }
+.bl-z.bl-summe { border-top: 1px solid var(--border-strong); padding-top: 6px; margin-top: 2px; }
+.bl-summe .bl-b { visibility: hidden; }
 .bx-karte .cp-fuss { margin-top: auto; padding-top: 4px; }
 .bx-wf .wf { flex: 1 1 auto; }
 .bx-wf .wf-f { height: auto; min-height: 210px; }

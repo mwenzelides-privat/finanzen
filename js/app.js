@@ -886,8 +886,9 @@ function cockpitSeite() {
   const diff = prog != null && bStand != null ? prog - bStand : null;
   const stabil = diff != null && Math.abs(diff) < Math.max(20000, Math.abs(bStand) * 0.03);
   const bMonat = basis ? MONAT[+basis.k.slice(5) - 1] : '';
-  const vergleich = diff == null ? '' : stabil ? `etwa so viel wie Ende ${bMonat}` : `${eur0(Math.abs(diff))} ${diff > 0 ? 'mehr' : 'weniger'} als Ende ${bMonat} (${eur0(bStand)})`;
-  const seitText = anfang ? `${seitAnfang == null ? '–' : pmHtml(seitAnfang)} seit 1. ${monatJ}` : '';
+  const dZ = diff == null ? null : dGezeigt(bStand, prog);
+  const vergleich = diff == null ? '' : stabil ? `etwa so viel wie Ende ${bMonat}` : `${eur0(Math.abs(dZ))} ${dZ > 0 ? 'mehr' : 'weniger'} als Ende ${bMonat} (${eur0(bStand)})`;
+  const seitText = anfang ? `${seitAnfang == null ? '–' : pmHtml(dGezeigt(anfang.c, hs.c))} seit 1. ${monatJ}` : '';
   const verlauf = cockpitVerlauf(V);
 
   const hero = `<section class="card cp-hero">
@@ -919,14 +920,16 @@ function cockpitSeite() {
     cvKarte({ titel: 'Vermögen', wert: vm ? `${vm.ungefaehr ? '≈ ' : ''}${vm.c < 0 ? '−' : ''}${eur0(Math.abs(vm.c))}${vm.ks && !vm.voll ? ' + ?' : ''}` : '–', cls_: vm?.c < 0 ? 'neg' : '', ziel: { tab: 'vermoegen' },
       unter: 'jeder Teil mit eigenem Stichtag · ohne gesetzliche Rente', vis: vmVis }),
     cvKarte({ titel: lauf ? `${monatJ} bisher` : 'Dieser Monat', wert: lauf ? eur0(lauf.x.aus) : '–', ziel: zuBuchungen({ konto: '', ...monatZiel(V.jetzt), art: 'aus' }),
-      unter: lauf ? `ausgegeben von erwartet ≈ ${eur0(lauf.aus)} · Ende ${monatJ} ≈ ${plusMinus(lauf.erg)}` : 'Der Monat ist abgeschlossen.', vis: laufVis }),
+      unter: lauf ? `ausgegeben von ≈ ${eur0(lauf.aus)}, die im ${monatJ} erwartet sind · erwartetes Ergebnis des Monats ≈ ${plusMinus(lauf.erg)}` : 'Der Monat ist abgeschlossen.', vis: laufVis }),
   ].join('');
 
   // Wofür das Geld ausgeht: dieselbe Rechnung wie Kategorien › 12 Monate (alle eigenen Konten)
   const km = abgeschlosseneMonate().slice(-12), a = alleKonten(() => sammle(km, 'aus'));
   const kl = [...a.g.values()].filter((x) => x.c > 0).sort((x, y) => y.c - x.c), kges = kl.reduce((t, x) => t + x.c, 0);
-  const kats = kl.length ? balkenListe(kl.slice(0, 6).map((x) => ({ n: esc(schoen(x.k)), c: x.c / a.n, p: `${Math.round((x.c / kges) * 100)} %`, farbe: 'var(--accent-2)',
-    ziel: { tab: 'uebersicht', kart: 'aus', wahl: x.k, jahr: '', monat: '', zr: '', konto: '' } }))) : '<p class="leer klein">Keine Ausgaben in den letzten 12 Monaten.</p>';
+  const kRest = kl.slice(6), kRestC = kRest.reduce((t, x) => t + x.c, 0), zuKat = (k) => ({ tab: 'uebersicht', kart: 'aus', wahl: k, jahr: '', monat: '', zr: '', konto: '' });
+  const kats = kl.length ? balkenListe([...kl.slice(0, 6).map((x) => ({ n: esc(schoen(x.k)), c: x.c / a.n, p: `${Math.round((x.c / kges) * 100)} %`, farbe: 'var(--accent-2)', ziel: zuKat(x.k) })),
+    ...(kRest.length ? [{ n: `${kRest.length} übrige Kategorien`, sub: kRest.slice(0, 3).map((x) => esc(schoen(x.k))).join(', ') + (kRest.length > 3 ? ' …' : ''), c: kRestC / a.n, p: `${Math.round((kRestC / kges) * 100)} %`, farbe: 'var(--variabel)', ziel: zuKat('') }] : []),
+    { n: '<b>Summe</b>', c: 0, w: `<b>${eur0(kges / a.n)}</b>`, p: '100 %', cls: 'bl-summe' }], { max: Math.max(...kl.map((x) => x.c / a.n)) }) : '<p class="leer klein">Keine Ausgaben in den letzten 12 Monaten.</p>';
 
   const hb = handlungsbedarf(), hbRot = hb.some((x) => x.ampel === 'rot');
   box.innerHTML = `<div class="cp">
@@ -936,11 +939,12 @@ function cockpitSeite() {
       <section class="card cp-karte"><div class="cp-kt"><h2>Was am Monatsende übrig blieb</h2><span class="klein muted">12 Monate · schraffiert: erwartet</span></div>
         <div class="cp-chart cp-chart-m"><canvas id="c-s5-erg" aria-label="Ergebnis je Monat"></canvas></div>
         <p class="cp-fuss">Einnahmen minus Ausgaben je Monat · gestrichelt: Ø ${pmHtml(Math.round(s.erg))} · Säule anklicken: Buchungen des Monats</p></section>
-      <section class="card cp-karte"><div class="cp-kt"><h2>Wofür das Geld ausgeht</h2><span class="klein muted">Ø je Monat · ${eur0(kges / a.n)}</span></div>${kats}
+      <section class="card cp-karte"><div class="cp-kt"><h2>Wofür das Geld ausgeht</h2><span class="klein muted">Ø je Monat, ${esc(monatsText(km))}</span></div>${kats}
         <p class="cp-fuss">Letzte 12 Monate, ohne Kinder- und gemeinsame Konten · ${zl('alle Kategorien', { tab: 'uebersicht', kart: 'aus', wahl: '', jahr: '', monat: '', zr: '', konto: '' })}</p></section>
     </div>
     <section class="card cp-karte cp-td-karte"><div class="cp-kt"><h2>Zu tun</h2>${hb.length ? `<span class="cp-zahl${hbRot ? ' neg' : ''}">${hb.length}</span>` : ''}</div>${handlungHtml(hb)}</section>
     <div id="cp-waechter"${cpWaechterAuf ? '' : ' hidden'}>${cpWaechterAuf ? sicher(() => waechterKarte(H)) : ''}</div>
+    ${RUNDUNG}
   </div>`;
   gehBinden(box);
   if (cpWaechterAuf) sicher(() => waechterBinden(box, H));
@@ -979,6 +983,8 @@ function cpStandZeichnen(ms, id = 'c-cp-stand') {
 // (monatsRechnung, verlauf5, sammle, vermoegen, gehalt.js, steuerprognose.js, unterhalt.js) – hier wird nichts neu gerechnet.
 // Kinder- und gemeinsame Konten zählen in keiner Summe. Ausgaben stehen ohne Vorzeichen; Rot/Grün nur für Vorzeichen und Abweichungen.
 const UEBERBLICK = { geldfluss: () => geldflussSeite(), vermoegen: () => vermoegenSeite(), einkommen: () => einkommenSeite(), familie: () => familieSeite() };
+const dGezeigt = (von, bis) => Math.round(bis / 100) * 100 - Math.round(von / 100) * 100;
+const RUNDUNG = '<p class="cp-fuss bx-rundung">Beträge auf volle Euro gerundet. Summen und Anteile sind aus den genauen Cent-Beträgen gerechnet – addierst du die gerundeten Teile selbst, kann die letzte Stelle um 1 € abweichen.</p>';
 const bxKopf = (ueber, kern, unter = '') => `<header class="cp-kopf"><p class="cp-ueber">${ueber} · Daten bis ${dde(D.bis)}</p><h1 class="cp-kern">${kern}</h1>${unter ? `<p class="cp-kern-u">${unter}</p>` : ''}</header>`;
 const bxKarte = (titel, inhalt, { rechts = '', cls_ = '', fuss = '', id = '' } = {}) => `<section${id ? ` id="${id}"` : ''} class="card cp-karte bx-karte ${cls_}"><div class="cp-kt"><h2>${titel}</h2>${rechts}</div>${inhalt}${fuss ? `<p class="cp-fuss">${fuss}</p>` : ''}</section>`;
 const bxLink = (text, ziel) => `<button class="bx-link"${geh(ziel)}>${text}<span aria-hidden="true"> ›</span></button>`;
@@ -1082,6 +1088,7 @@ function geldflussSeite() {
       ${bxKarte(rahmenTitel, rahmen, { fuss: 'Ausgaben ohne Verträge in den frei gestaltbaren Kategorien · Strich = heute' })}
       ${bxKarte('Reisen', reiseInhalt, { fuss: RS?.karten?.length ? 'Ausgaben von deinen Konten je Reise (Finanzguru-Tags)' : '' })}
     </div>
+    ${RUNDUNG}
   </div>`;
   gehBinden(box);
 }
@@ -1100,7 +1107,7 @@ function vermoegenSeite() {
 
   // Konten: 24 Monatsenden (nur vollständige Summen) und heute
   const ks24 = abgeschlosseneMonate().slice(-24).map((k) => { const s = kontenSumme(monatsletzter(`${k}-01`)); return { k, art: 'ist', stand: vollSumme(s), summe: s }; });
-  const jb = `${+D.bis.slice(0, 4) - 1}-12-31`, seitJahr = diffSumme(kontenSumme(jb < D.von ? D.von : jb), vm.ks);
+  const jb = `${+D.bis.slice(0, 4) - 1}-12-31`, jbS = kontenSumme(jb < D.von ? D.von : jb), seitJahr = diffSumme(jbS, vm.ks) == null ? null : dGezeigt(jbS.c, vm.ks.c);
   // Depot: netto eingezahlt, aufsummiert über alle Monate (Käufe − Verkäufe laut Buchungen)
   let kum = 0;
   const dpKum = (dp?.monate || []).map((m) => (kum += (m.kauf || 0) - (m.verkauf || 0)));
@@ -1108,7 +1115,7 @@ function vermoegenSeite() {
   const kacheln = [
     kachel({ titel: 'Konten', wert: summeText(vm.ks), cls_: vm.ks?.c < 0 ? 'neg' : '', ziel: zuKonten, aend: `${seitJahr == null ? '' : `${pmHtml(seitJahr)} seit 1. Januar`}`, spark: sparkline([...ks24.map((m) => m.stand), vollSumme(vm.ks)]), unter: 'heute · Linie: 24 Monatsenden' }),
     kachel({ titel: 'Depot', marke: dp && !dp.kurse ? 'berechnet' : '', wert: dp ? eur0(dp.wert) : '–', ziel: { ...zuKonten, _springe: '#dp-karte' },
-      aend: !dp ? 'Depot-Daten kommen mit dem nächsten Aufbau' : dp.kurse ? `Kurswert laut Depot-Datei vom ${dde(dp.kurse.stichtag)}` : `eingezahlt (gebucht), kein Kurswert · Stand ${dde(dp.stand)}`,
+      aend: !dp ? 'Depot-Daten kommen mit dem nächsten Aufbau' : dp.kurse ? `Kurswert laut Depot-Datei vom ${dde(dp.kurse.stichtag)}` : `Einstand der Papiere im Bestand, kein Kurswert · Stand ${dde(dp.stand)}`,
       spark: sparkline(dpKum.slice(-36)), unter: 'Linie: netto eingezahlt, aufsummiert (36 Monate)' }),
     kachel({ titel: 'Vorsorge', wert: vm.vertraege.length ? eur0(vm.vorsorge) : '–', ziel: { ...zuKonten, _springe: '#vm-karte' }, marke: vm.vertraege.some((x) => x.alt) ? 'alter Stand' : '',
       aend: vm.vertraege.length ? `${vm.vertraege.length} ${vm.vertraege.length === 1 ? 'Vertrag' : 'Verträge'} · Stand ${daten[0] === daten.at(-1) ? dde(daten[0]) : `${dde(daten[0])} – ${dde(daten.at(-1))}`}` : 'kein Vertrag mit belegtem Wert',
@@ -1127,7 +1134,9 @@ function vermoegenSeite() {
 
   const depotInhalt = !dp ? '<p class="bx-u">Depot-Daten kommen mit dem nächsten Aufbau am PC.</p>'
     : `<dl class="bx-dl"><div><dt>eingezahlt (gebucht)</dt><dd>${eur0(dp.eingezahlt)}</dd></div><div><dt>entnommen (Verkäufe)</dt><dd>${eur0(dp.entnommen)}</dd></div>
-      <div><dt>${dp.kurse ? 'Kurswert' : 'netto eingezahlt'}</dt><dd>${dp.kurse ? eur0(dp.wert) : `<span class="${dp.eingezahlt - dp.entnommen < 0 ? 'neg' : ''}">${eur0(dp.eingezahlt - dp.entnommen)}</span>`}</dd></div></dl>
+      <div><dt>netto eingezahlt</dt><dd><span class="${dp.eingezahlt - dp.entnommen < 0 ? 'neg' : ''}">${eur0(dp.eingezahlt - dp.entnommen)}</span><small>eingezahlt − entnommen</small></dd></div>
+      <div><dt>${dp.kurse ? 'Kurswert' : 'Wert im Vermögen'}</dt><dd>${eur0(dp.wert)}<small>${dp.kurse ? `laut Depot-Datei vom ${dde(dp.kurse.stichtag)}` : 'Einstand, berechnet'}</small></dd></div></dl>
+      ${dp.kurse ? '' : `<p class="bx-u">Der Wert im Vermögen ist der Einstand der Papiere, die noch im Depot liegen (Durchschnittsmethode; wo kein Einstand berechenbar ist, netto eingezahlt${dp.berechnet ? ` · ${dp.berechnet} Papiere` : ''}). Er weicht von „netto eingezahlt“ ab, weil die Verkäufe nicht genau so viel eingebracht haben, wie die verkauften Anteile gekostet hatten.</p>`}
       ${dp.spar ? `<p class="bx-u">Seit ${monKurz(dp.spar.seit)} gehen nur noch <b>${eur0(dp.spar.jetzt)}</b> im Monat in Sparpläne (vorher Ø ${eur0(dp.spar.vorher)}).</p>` : ''}
       ${dp.verkauf12 > 0 ? `<p class="bx-u">In den letzten 12 Monaten verkauft: <b>${eur0(dp.verkauf12)}</b>.</p>` : ''}${bxLink('Depot und Sparpläne', { ...zuKonten, _springe: '#dp-karte' })}`;
   const vorsorgeInhalt = vm.vertraege.length ? balkenListe(vm.vertraege.slice(0, 5).map((x) => ({ n: esc(x.name), sub: `Stand ${dde(x.am)}${x.alt ? ' · alter Stand' : ''}`, c: x.c, ziel: { ...zuKonten, _springe: '#vm-karte' }, farbe: 'var(--accent-2)' })))
@@ -1144,6 +1153,7 @@ function vermoegenSeite() {
       ${bxKarte('Depot', depotInhalt, { fuss: dp ? `Aus deinen Buchungen bis ${dde(dp.stand)}${dp.kurse ? '' : ' · ohne Kurswerte: dafür einen Depot-Export in den Eingang legen'}` : '' })}
       ${bxKarte('Vorsorge', vorsorgeInhalt, { rechts: vm.vertraege.length ? `<b class="bx-wert">${eur0(vm.vorsorge)}</b>` : '', fuss: `Gesetzliche Rente nicht enthalten.${vm.ohneWert ? ` ${vm.ohneWert} ${vm.ohneWert === 1 ? 'Vertrag hat' : 'Verträge haben'} keinen Wert in den Unterlagen.` : ''}` })}
     </div>
+    ${RUNDUNG}
   </div>`;
   gehBinden(box);
   cpStandZeichnen(ks24, 'c-vm-stand');
@@ -1205,6 +1215,7 @@ function einkommenSeite() {
       ${bxKarte(`Steuer-Prognose ${P?.jahr || jetztJ}`, progInhalt, { rechts: '<span class="marke">berechnet</span>', fuss: 'Einzelveranlagung · Orientierung, keine Steuerberatung – mit deiner Steuerberaterin klären' })}
       ${bxKarte('Steuerjahr', stInhalt, { fuss: 'Fristen: Orientierung, berechnet nach fester Regel' })}
     </div>
+    ${RUNDUNG}
   </div>`;
   gehBinden(box);
 }
@@ -1273,6 +1284,7 @@ function familieSeite() {
       ${bxKarte(U?.A?.name ? `Ausgleich mit ${esc(U.A.name)}` : 'Ausgleich', ausgleich, { rechts: U ? `<b class="bx-wert ${U.saldo < 0 ? 'neg' : ''}">${U.saldo > 0 ? '+' : U.saldo < 0 ? '−' : ''}${eur(Math.abs(U.saldo))}</b>` : '', fuss: 'Plus = an dich, minus = von dir · ohne die Unterhaltsraten' })}
       ${bxKarte('Kinder und Fristen', kinderInhalt, { fuss: 'Kinderkonten zählen nicht zu deinen Finanzen' })}
     </div>
+    ${RUNDUNG}
   </div>`;
   gehBinden(box);
 }
