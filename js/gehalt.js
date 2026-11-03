@@ -1005,6 +1005,21 @@ async function excel(G) {
   ]);
 }
 
+// Kurzfassung für die Übersicht Einkommen & Steuer: dieselben Werte wie oben auf der Seite Gehalt (letzte Abrechnung).
+// Beträge in Euro wie im ganzen Modul.
+export function gehaltUeberblick(helfer) {
+  H = helfer;
+  const G = daten();
+  if (!G) return null;
+  const z = G.pdf.at(-1) || G.ist.at(-1), vm = G.ist[G.ist.indexOf(z) - 1] || null, erste = G.ist[0];
+  const stufe = [...G.erh].reverse().find((x) => x.m <= z.m)?.auf ?? erste.gehalt;
+  const W = auto(z) ? autoWerte(G, z) : null;
+  const j = z.m.slice(0, 4), jahrAlle = G.alle.filter((x) => x.m.slice(0, 4) === j && x.quelle !== 'fehlt'), jahrIst = jahrAlle.filter((x) => x.quelle !== 'plan');
+  return { z, vm, erste, stufe, seit: erste.gehalt ? stufe / erste.gehalt - 1 : 0, verlauf: G.ist.slice(-24).map((x) => ({ m: x.m, netto: x.auszahlung, gehalt: x.gehalt })),
+    abgaben: detail(z) ? abgaben(z) : null, auto: W ? { vorteil: W.jetzt, netto: W.jetzt * W.gs, gs: W.gs } : null,
+    jahr: j, jahrNetto: sum(jahrAlle, (x) => x.auszahlung), jahrBrutto: sum(jahrAlle, (x) => x.brutto), jahrPlan: jahrAlle.length > jahrIst.length, nIst: jahrIst.length, fehlt: G.fehlt.map((x) => x.m) };
+}
+
 // Kurzfassung für den Chat
 export function gehaltKurz(D) {
   const G = D?.j?.gehalt?.monate?.filter((z) => z.quelle === 'pdf');

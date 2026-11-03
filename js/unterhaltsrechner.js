@@ -117,6 +117,28 @@ function basisEinkommen(H, F, opt = {}) {
     text: `${letzte.probe ? 'Probeabrechnung' : 'Abrechnung'} ${H.monKurz(letzte.m)} (ohne Sonderzahlungen)` };
 }
 
+// Kern der Rechnung: verbindliche Berechnung, Neuberechnung für dich und neutral, zuletzt überwiesen (auch für die Übersicht Familie)
+export function rechnerKern(H, R, eigeneKinder) {
+  const D = H.D(), F = D?.j?.familie;
+  const kinder = eigeneKinder?.length && eigeneKinder.every((k) => /^\d{4}-\d{2}/.test(k.geb || '')) ? eigeneKinder : F?.kinder;
+  if (!kinder?.length) return null;
+  const B0 = basisEinkommen(H, F || {});
+  if (!B0) return null;
+  const S = F?.rechner?.sandra || { netto: 0, unzumutbar: 0 };
+  const sNetto = wahl.sandra ?? S.netto, eS = r2((sNetto - (wahl.sandra == null ? S.unzumutbar || 0 : 0)) * 0.95);
+  const m = D.bis.slice(0, 7), berechtigte = F?.rechner?.berechtigte || kinder.length + 1;
+  const rechnen = (opt, sockel, eSx = eS) => { const b = basisEinkommen(H, F || {}, opt); return { B: b, X: berechne({ m, eM: b.e, eS: eSx, kinder, berechtigte, sockel }) }; };
+  const N = rechnen({}, wahl.sockel), P = rechnen({ ohneWhg: true, vorsorgeVoll: true }, 'notw');
+  const pro = wahl.sicht !== 'neutral', X = pro ? P.X : N.X;
+  const letzte = (F?.berechnungen || []).filter((b) => b.ab <= m).at(-1);
+  const lfd = R.monate.find((x) => x.k === R.bisM);
+  const jetzt = lfd && (lfd.sum > 0 || !R.laeuft) ? lfd : R.monate.filter((x) => x.k < R.bisM).at(-1) || null;
+  const vormonat = R.monate.filter((x) => x.k < R.bisM).at(-1);
+  const laeuftNoch = !!jetzt && jetzt === lfd && R.laeuft && !(vormonat && lfd.sum >= vormonat.sum);
+  const nurLeo = letzte?.eM && letzte?.eS ? berechne({ m, eM: letzte.eM, eS: letzte.eS, kinder, berechtigte, sockel: 'notw' }) : null;
+  return { m, kinder, letzte, X, N: N.X, P: P.X, pro, jetzt, laeuftNoch, nurLeo, gez: jetzt ? jetzt.sum / 100 : null };
+}
+
 export function rechnerKarte(H, R, eigeneKinder) {
   const D = H.D(), F = D?.j?.familie;
   // Kinder: deine Angaben, wenn alle ein Geburtsdatum haben, sonst die Vorgabe aus den Daten

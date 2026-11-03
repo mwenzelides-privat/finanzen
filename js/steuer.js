@@ -538,6 +538,8 @@ export function steuerZeigen(el, c) {
   // Steuerjahr: das gewählte Jahr, solange es abgeschlossen ist – sonst das letzte volle Jahr (das laufende per Knopf)
   const vollesJahr = letztesVollesJahr(), ej = ctx.einJahr();
   if (!jahr) jahr = ej && ej <= vollesJahr ? ej : Math.min(jahre[0], vollesJahr);
+  // Sprung aus einer anderen Seite (z. B. Überblick Einkommen › Steuer-Prognose): dieses Jahr einmal öffnen
+  if (/^\d{4}$/.test(ctx.S?.sjahr || '') && jahre.includes(+ctx.S.sjahr)) { jahr = +ctx.S.sjahr; ctx.S.sjahr = ''; }
   const alle = einordnen(jahr);
   const istFertig = (x) => x.status === 'bestaetigt' || x.status === 'ausgeschlossen' || x.status === 'veranlagt';
   const wirksam = alle.filter((x) => x.status !== 'ausgeschlossen');

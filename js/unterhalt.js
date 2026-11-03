@@ -6,7 +6,7 @@
 
 const TU = 'Trennungsunterhalt', KU = 'Kindesunterhalt';
 const FREMD_ART = new Set(['Umbuchung', 'Kinderkonto', 'Gemeinschaftskonto']);
-import { rechnerKarte, rechnerBinden } from './unterhaltsrechner.js';
+import { rechnerKarte, rechnerBinden, rechnerKern } from './unterhaltsrechner.js';
 
 const leer = () => ({ kinder: [], soll: [], eigeneKinder: null, eigeneSoll: null, ausgleich: { tags: [], posten: {} }, bavProzent: 4 });
 let E = leer();
@@ -210,6 +210,14 @@ export function unterhaltFristen(H) {
     key: p.key, am: p.er.d, titel: `Anteil an der Steuererstattung ${p.J} an ${A.name} offen (Erstattung ${H.eur(p.er.c)} am ${H.dde(p.er.d)})`,
     ziel: { tab: 'fix', fixtab: 'unterhalt' }, art: 'aus den Daten',
   }));
+}
+
+// Kurzfassung für die Übersicht Familie: dieselben Rechnungen wie auf der Seite Unterhalt
+export function unterhaltKurz(H) {
+  if (!H.D()) return null;
+  vorgabe(H);
+  const R = rasterDaten(H), A = ausgleichDaten(H, R);
+  return { R, A, K: rechnerKern(H, R, E.kinder), saldo: A.rows.reduce((t, r) => t + r.c, 0), offen: A.posten.liste.filter((p) => p.offen), kinder: E.kinder.map((k) => ({ ...k })) };
 }
 
 // ======================================================================= Anzeige

@@ -84,7 +84,7 @@ function rahmenDaten(H) {
 }
 
 // Zeilen mit deinen Rahmen; Summen nur über frei gestaltbare Kategorien mit Rahmen (Rahmen 0 = kein Rahmen)
-function rahmenStand(H) {
+export function rahmenStand(H) {
   const R = rahmenDaten(H), rw = rahmenLesen(), wert = (kat) => (Number.isFinite(rw[kat]) && rw[kat] > 0 ? Math.round(rw[kat]) : 0);
   const z = R.frei.map((x) => ({ kat: x.kat, aus: x.jetzt, vorschlag: x.vorschlag, rahmen: wert(x.kat), frei: true }));
   // gespeicherter Rahmen einer Kategorie, die nicht mehr frei gestaltbar ist: bleibt stehen, mit Hinweis, ohne Summe
