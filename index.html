@@ -8,10 +8,11 @@
   <!-- Erlaubte Quellen: Skripte nur von hier, jsDelivr (Chart.js, Excel, Chat) und der Google-Anmeldung; Verbindungen nur zu
        Google Drive, Anthropic (Chat) und dem Einlese-Dienst auf diesem PC. Der sha256-Wert gehört zum kleinen Skript unten
        (Farbschema) – wird es geändert, muss der Wert neu berechnet werden. -->
-  <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'sha256-g7TW71SSN51yxo98LDcJhaGOpWlGYtZiJLDjLkUpLL8=' https://cdn.jsdelivr.net https://accounts.google.com/gsi/client; connect-src 'self' https://www.googleapis.com https://oauth2.googleapis.com https://accounts.google.com/gsi/ https://api.anthropic.com http://127.0.0.1:48233; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'">
+  <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'sha256-uBC44HByEaSXUkNRR2h4DL81eveI0JXR3rrf6fPucMc=' https://cdn.jsdelivr.net https://accounts.google.com/gsi/client; connect-src 'self' https://www.googleapis.com https://oauth2.googleapis.com https://accounts.google.com/gsi/ https://api.anthropic.com http://127.0.0.1:48233; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'">
   <title>Finanzen</title>
   <meta name="description" content="Private Finanzen – Dashboard mit Suche, Grafiken und Tabellen-Export">
-  <meta name="theme-color" content="#2a78d6">
+  <meta name="theme-color" content="#13294b" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e1420" media="(prefers-color-scheme: dark)">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -22,8 +23,9 @@
   <link rel="stylesheet" href="css/waechter.css">
   <link rel="stylesheet" href="css/planung.css">
   <link rel="stylesheet" href="css/vermoegen.css">
+  <link rel="stylesheet" href="css/design.css">
   <script>
-    try { var t = localStorage.getItem('fd.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else if (!t) document.documentElement.dataset.theme = 'light'; } catch (e) {}
+    try { var t = localStorage.getItem('fd.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
   </script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <script type="module" src="js/app.js"></script>
@@ -35,24 +37,32 @@
     <button class="btn sm kopf-zurueck" id="btn-zurueck" title="Zurück: die letzte Aktion rückgängig machen (auch Maustaste „Zurück“ oder Alt + ←)" hidden><svg viewBox="0 0 24 24" aria-hidden="true" width="16" height="16"><path d="M15 18l-6-6 6-6"/></svg><span>Zurück</span></button>
     <button class="btn sm kopf-zurueck" id="btn-reset" title="Diese Seite wieder so zeigen wie beim Öffnen der App: Zeitraum, Konten, Auswahl und Filter zurücksetzen" hidden><svg viewBox="0 0 24 24" aria-hidden="true" width="16" height="16"><path d="M4 12a8 8 0 1 0 2.34-5.66"/><path d="M4 4v5h5"/></svg><span>Zurücksetzen</span></button>
     </div>
-    <nav class="nav" id="tabs" role="tablist" aria-label="Bereiche" hidden>
-      <button role="tab" data-tab="start"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/></svg><span>Übersicht</span></button>
-      <button role="tab" data-tab="kennzahlen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Kennzahlen</span></button>
-      <button role="tab" data-tab="buchungen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r=".9"/><circle cx="4" cy="12" r=".9"/><circle cx="4" cy="18" r=".9"/></svg><span>Buchungen</span><span class="n" id="tab-n"></span></button>
-      <button role="tab" data-tab="uebersicht"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9h9"/><path d="M20.5 15.5A9 9 0 1 1 8.5 3.7"/></svg><span>Kategorien</span></button>
-      <button role="tab" data-tab="fix"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 2.5 20.5 6 17 9.5"/><path d="M3.5 11V9.5A3.5 3.5 0 0 1 7 6h13.5"/><path d="M7 21.5 3.5 18 7 14.5"/><path d="M20.5 13v1.5A3.5 3.5 0 0 1 17 18H3.5"/></svg><span>Fixkosten</span></button>
-      <button role="tab" data-tab="konten"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9.5 12 4l9 5.5"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8"/><path d="M3 20.5h18"/></svg><span>Konten</span></button>
-      <button role="tab" data-tab="gehalt" title="Gehaltsentwicklung: alle Daten deiner Gehaltsabrechnungen"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10.5h18"/><path d="m7 16 3-2.5 2.5 1.5 4.5-4"/></svg><span>Gehalt</span></button>
-      <button role="tab" data-tab="steuer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2.5h12v19l-3-2-3 2-3-2-3 2z"/><path d="m9 14 6-6"/><circle cx="9.5" cy="8.5" r=".8"/><circle cx="14.5" cy="13.5" r=".8"/></svg><span>Steuer</span></button>
+    <nav class="nav" id="tabs" aria-label="Bereiche" hidden>
+      <button data-bereich="cockpit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15a8 8 0 1 1 16 0"/><path d="m12 15 4-5"/><path d="M3.5 19h17"/></svg><span>Cockpit</span></button>
+      <button data-bereich="geldfluss"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h13l-3-3M20 17H7l3 3"/></svg><span>Geldfluss</span></button>
+      <button data-bereich="vermoegen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9.5 12 4l9 5.5"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8"/><path d="M3 20.5h18"/></svg><span>Vermögen</span></button>
+      <button data-bereich="einkommen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2.5h12v19l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg><span>Einkommen &amp; Steuer</span></button>
+      <button data-bereich="familie"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="7" r="3"/><circle cx="17" cy="9" r="2.3"/><path d="M2.5 20v-1.5A5.5 5.5 0 0 1 13.5 18.5V20"/><path d="M14 14.5a4 4 0 0 1 7.5 2V20"/></svg><span>Familie</span></button>
     </nav>
     <div class="top-r">
     <div class="stand" id="stand"></div>
-    <button class="einlesen-knopf" id="btn-neu" title="Neue Dateien aus dem Eingang einlesen und die neuesten Daten laden" hidden>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg><span>Daten einlesen</span>
+    <button class="icon-btn" id="btn-lupe" title="Buchungen suchen (Taste /)" aria-label="Buchungen suchen" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
     </button>
-    <button class="icon-btn" id="btn-menu" title="Datenquelle und Darstellung">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
-    </button>
+    <div class="mm-box">
+      <button class="icon-btn" id="btn-menu" title="Mehr" aria-label="Mehr" aria-haspopup="true" aria-expanded="false" aria-controls="mm">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+      </button>
+      <div class="mm" id="mm" role="menu" aria-label="Mehr" hidden>
+        <button role="menuitem" id="mm-chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/></svg><span>Chat mit Claude</span></button>
+        <button role="menuitem" id="mm-plan"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3Z"/></svg><span>Planer „Was wäre wenn“</span></button>
+        <button role="menuitem" id="mm-ics"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><span>Kalender-Datei (.ics)</span></button>
+        <button role="menuitem" class="einlesen-knopf" id="btn-neu" title="Neue Dateien aus dem Eingang einlesen und die neuesten Daten laden" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg><span>Daten einlesen</span>
+        </button>
+        <button role="menuitem" id="mm-einst"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg><span>Einstellungen &amp; Abmelden</span></button>
+      </div>
+    </div>
     </div>
   </header>
 
@@ -106,6 +116,8 @@
       <div class="schnell" id="schnell" hidden></div>
       </div>
 
+      <div class="bereich-seg" id="bereich-seg" hidden></div>
+
       <div class="seite" id="seite-start"><div id="s5" class="s5"></div></div>
       <div class="seite" id="seite-kennzahlen" hidden><div id="k2" class="s5"></div></div>
 
@@ -147,7 +159,8 @@
   </dialog>
 
   <dialog id="dlg-menu" class="dlg">
-    <h2>Datenquelle</h2>
+    <h2>Einstellungen</h2>
+    <h3>Datenquelle</h3>
     <p id="menu-quelle" class="muted"></p>
     <p id="m-pc-tipp" class="klein" hidden>Tipp für den PC: <b>Datei verknüpfen</b> und <b>G:\Meine Ablage\10 Finanzen\Auswertung\Finanzen-Daten.json</b> wählen. Dann entfällt die Google-Anmeldung, und neue Daten erscheinen beim Öffnen automatisch.</p>
     <div class="menu-knoepfe">
@@ -155,9 +168,9 @@
       <button class="btn" id="m-drive">Aus Google Drive laden</button>
       <button class="btn" id="m-datei">Datei öffnen …</button>
     </div>
-    <h2>Darstellung</h2>
+    <h3>Darstellung</h3>
     <div class="seg" id="m-theme"><button data-v="auto">Automatisch</button><button data-v="light">Hell</button><button data-v="dark">Dunkel</button></div>
-    <h2>Dieses Gerät</h2>
+    <h3>Dieses Gerät</h3>
     <p class="muted">Abmelden und die hier gespeicherte Kopie deiner Daten sowie den Chat-Schlüssel löschen. Die Datei in Google Drive bleibt erhalten.</p>
     <button class="btn danger" id="m-leeren">Abmelden und Daten löschen</button>
     <form method="dialog"><button class="btn">Schließen</button></form>

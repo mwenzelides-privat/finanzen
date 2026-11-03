@@ -10,10 +10,10 @@ import { gehaltZeigen } from './gehalt.js';
 import { entscheidungenAnwenden, entscheidungenLaden, pruefenSeite, pruefenBinden, pruefenGeoeffnet, det, gruppenSchluessel, offenZahl, ibanText } from './pruefen.js';
 import { prognoseLaden, prognoseKarte, prognoseBinden, prognoseFristen } from './steuerprognose.js';
 import { unterhaltLaden, unterhaltSeite, unterhaltBinden, unterhaltFristen, kinder, ausgleichTags } from './unterhalt.js';
-import { fristenLaden, fristenKarte, fristenListe, fristenBinden } from './fristen.js';
-import { waechterLaden, istNeu, waechterKarte, neuLeiste, chip, waechterBinden } from './waechter.js';
+import { fristenLaden, fristenKarte, fristenListe, fristenBinden, fristenAlle, icsText } from './fristen.js';
+import { waechterLaden, istNeu, waechterKarte, neuLeiste, chip, waechterBinden, treffer } from './waechter.js';
 import { planGehalt, saison, prognoseText, rahmenKarte, freiZeile, rahmenBinden } from './planung.js';
-import { vermoegenLaden, depotKarte, vermoegenKarte, vermoegenBinden, reisenSeite, reisenBinden } from './vermoegen.js';
+import { vermoegenLaden, depotKarte, vermoegenKarte, vermoegenBinden, reisenSeite, reisenBinden, vermoegen } from './vermoegen.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -729,6 +729,216 @@ function termineHtml(l, n = 99) {
   }
   if (weg.length) h += `<div class="nt-mehr">+ ${weg.length} weitere Abbuchungen · ${eur0(weg.reduce((t, f) => t + f.betrag, 0))}</div>`;
   return `<div class="nt">${h}</div>`;
+}
+
+// ---------------------------------------------------------------- Navigation: 5 Bereiche
+// Etappe 1: die Bereiche zeigen die bestehenden Seiten (S.tab bleibt intern gleich, damit alle Verweise weiter gelten)
+const SEGMENTE = {
+  geldfluss: [['uebersicht', 'Kategorien'], ['kennzahlen', 'Kennzahlen'], ['fix', 'Verträge']],
+  einkommen: [['gehalt', 'Gehalt'], ['steuer', 'Steuer']],
+};
+function bereichVon(x = S) {
+  if (x.tab === 'start') return 'cockpit';
+  if (x.tab === 'fix') return x.fixtab === 'unterhalt' ? 'familie' : 'geldfluss';
+  if (x.tab === 'uebersicht' || x.tab === 'kennzahlen') return 'geldfluss';
+  if (x.tab === 'konten') return 'vermoegen';
+  if (x.tab === 'gehalt' || x.tab === 'steuer') return 'einkommen';
+  return '';   // Buchungen: über die Lupe
+}
+const zuletztIm = { geldfluss: 'uebersicht', einkommen: 'gehalt' };   // zuletzt gewählte Ansicht je Bereich
+const segZiel = (t) => (t === 'fix' ? { tab: 'fix', fixtab: 'vertraege' } : { tab: t });
+function bereichOeffnen(b) {
+  if (b === 'cockpit') setze({ tab: 'start' });
+  else if (b === 'vermoegen') setze({ tab: 'konten' });
+  else if (b === 'familie') setze({ tab: 'fix', fixtab: 'unterhalt' });
+  else if (SEGMENTE[b]) setze(segZiel(zuletztIm[b]));
+}
+function navZeigen() {
+  const b = bereichVon();
+  if (SEGMENTE[b]) zuletztIm[b] = S.tab;
+  document.querySelectorAll('#tabs button').forEach((x) => { const an = x.dataset.bereich === b; x.classList.toggle('an', an); if (an) x.setAttribute('aria-current', 'page'); else x.removeAttribute('aria-current'); });
+  $('#btn-lupe').classList.toggle('an', S.tab === 'buchungen');
+  const box = $('#bereich-seg'), l = SEGMENTE[b];
+  box.hidden = !l;
+  if (!l) return;
+  box.innerHTML = `<div class="seg" role="group" aria-label="Ansicht">${l.map(([t, n]) => `<button data-bseg="${t}"${S.tab === t ? ' class="an" aria-pressed="true"' : ' aria-pressed="false"'}>${n}</button>`).join('')}</div>`;
+  box.querySelectorAll('[data-bseg]').forEach((x) => x.onclick = () => setze(segZiel(x.dataset.bseg)));
+}
+// Menü „Mehr“ (⋯): Chat, Planer, Kalender-Datei, Daten einlesen, Einstellungen
+function mehrMenuBinden() {
+  const mm = $('#mm'), knopf = $('#btn-menu');
+  const zu = () => { mm.hidden = true; knopf.setAttribute('aria-expanded', 'false'); };
+  knopf.onclick = (e) => { e.stopPropagation(); mm.hidden = !mm.hidden; knopf.setAttribute('aria-expanded', String(!mm.hidden)); if (!mm.hidden) mm.querySelector('button:not([hidden])')?.focus(); };
+  document.addEventListener('click', (e) => { if (!mm.hidden && !mm.contains(e.target)) zu(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !mm.hidden) { zu(); knopf.focus(); } });
+  mm.addEventListener('click', (e) => { if (e.target.closest('button')) zu(); });
+  const mitDaten = (f) => () => (D ? f() : toast('Lade zuerst deine Daten.'));
+  $('#mm-chat').onclick = mitDaten(() => { if ($('#chat').hidden) $('#chat-knopf').click(); });
+  $('#mm-plan').onclick = mitDaten(() => setze({ tab: 'fix', fixtab: 'plan' }));
+  $('#mm-ics').onclick = mitDaten(() => {
+    try {
+      herunterladen(new Blob([icsText(H)], { type: 'text/calendar;charset=utf-8' }), 'Finanzen-Termine.ics');
+      toast('Kalender-Datei erstellt – öffne sie, um die Termine zu übernehmen.');
+    } catch (e) { console.error(e); toast('Die Kalender-Datei konnte nicht erstellt werden.'); }
+  });
+  $('#mm-einst').onclick = () => $('#dlg-menu').showModal();
+}
+
+// ---------------------------------------------------------------- Cockpit
+// Aussage zuerst, vier Kennzahlen, Handlungsbedarf, eine Grafik, „Diesen Monat“. Alle Zahlen kommen aus den vorhandenen
+// Rechnungen (verlauf5, monatsRechnung, kontenSumme, vermoegen) – hier wird nichts neu gerechnet.
+// Kleine Verlaufslinie (SVG): werte = Zahlen oder null (Lücke); ab = erster Prognose-Index (gestrichelt)
+function sparkline(werte, ab = -1) {
+  const da = werte.filter((x) => x != null);
+  if (da.length < 2) return '';
+  const W = 120, HH = 34, min = Math.min(...da), max = Math.max(...da), sp = max - min || 1;
+  const y = (v) => (HH - 3 - ((v - min) / sp) * (HH - 6)).toFixed(1), x = (i) => ((i / (werte.length - 1)) * W).toFixed(1);
+  const pfad = (von, bis) => { let d = '', auf = false; for (let i = von; i <= bis; i++) { if (werte[i] == null) { auf = false; continue; } d += `${auf ? 'L' : 'M'}${x(i)} ${y(werte[i])}`; auf = true; } return d; };
+  const ende = ab > 0 ? ab - 1 : werte.length - 1;
+  const null0 = min < 0 && max > 0 ? `<path class="sp-0" d="M0 ${y(0)}H${W}"/>` : '';
+  return `<svg class="sp" viewBox="0 0 ${W} ${HH}" preserveAspectRatio="none" aria-hidden="true">${null0}<path class="sp-l" d="${pfad(0, ende)}"/>${ab > 0 ? `<path class="sp-l sp-p" d="${pfad(ab - 1, werte.length - 1)}"/>` : ''}</svg>`;
+}
+// Kleine Säulen (Vorzeichen: grün = Plus, rot = Minus)
+function sparSaeulen(werte) {
+  if (werte.length < 2) return '';
+  const W = 120, HH = 34, m = Math.max(1, ...werte.map(Math.abs)), b = W / werte.length, null0 = HH / 2;
+  return `<svg class="sp" viewBox="0 0 ${W} ${HH}" preserveAspectRatio="none" aria-hidden="true"><path class="sp-0" d="M0 ${null0}H${W}"/>${werte.map((v, i) => {
+    const h = Math.max(1, (Math.abs(v) / m) * (null0 - 2));
+    return `<rect class="${v < 0 ? 'sp-neg' : 'sp-pos'}" x="${(i * b + b * 0.18).toFixed(1)}" width="${(b * 0.64).toFixed(1)}" y="${(v < 0 ? null0 : null0 - h).toFixed(1)}" height="${h.toFixed(1)}" rx="1"/>`;
+  }).join('')}</svg>`;
+}
+const kachel = ({ titel, wert, cls_ = '', aend = '', unter = '', spark = '', ziel = null, marke = '' }) => `<button class="kz"${ziel ? geh(ziel) : ''} title="Anklicken: Einzelheiten">
+  <span class="kz-t">${titel}${marke ? ` <span class="marke">${marke}</span>` : ''}</span><b class="kz-w ${cls_}">${wert}</b>${aend ? `<span class="kz-a">${aend}</span>` : ''}${spark ? `<span class="kz-sp">${spark}</span>` : ''}${unter ? `<span class="kz-u">${unter}</span>` : ''}</button>`;
+
+// Handlungsbedarf: Fristen, Wächter, offene Prüfen-Buchungen, offene Steuer-Entscheidungen – priorisiert, höchstens 3
+const WA_ART = { doppelt: 'doppelte Abbuchung', gid: 'neue Lastschrift', preis: 'Preiserhöhung' };
+let cpWaechterAuf = false;
+function handlungsbedarf() {
+  const l = [], heute = heuteLokal(), tage = (am) => Math.round((Date.parse(`${am}T00:00:00Z`) - Date.parse(`${heute}T00:00:00Z`)) / 864e5);
+  for (const x of (sicher(() => fristenAlle(H)) || []).filter((f) => !f.erledigt)) {
+    const n = tage(x.am);
+    l.push({ prio: n < 0 ? 0 : n <= 14 ? 3 : 6, am: x.am, ampel: n < 0 ? 'rot' : n <= 14 ? 'gelb' : '', text: esc(x.titel),
+      sub: `${n < 0 ? `seit ${-n} ${n === -1 ? 'Tag' : 'Tagen'} überfällig` : n === 0 ? 'heute' : n === 1 ? 'morgen' : `in ${n} Tagen`} · ${tagKurz(x.am)}${x.orientierung ? ' · Orientierung' : ''}`,
+      ziel: x.ziel || { tab: 'fix', fixtab: 'kalender', _springe: '#fr-liste' } });
+  }
+  const wt = (sicher(() => treffer(H)) || []).filter((t) => t.offen && !t.s);
+  if (wt.length) {
+    const arten = [...new Set(wt.map((t) => WA_ART[t.art]).filter(Boolean))];
+    l.push({ prio: 1, ampel: 'gelb', text: `${wt.length} ${wt.length === 1 ? 'Auffälligkeit' : 'Auffälligkeiten'} ansehen`, sub: arten.join(', ') || 'Wächter', waechter: true });
+  }
+  const np = sicher(() => offenZahl(D)) || 0;
+  if (np) l.push({ prio: 2, ampel: 'gelb', text: `${NUM.format(np)} ${np === 1 ? 'Buchung' : 'Buchungen'} prüfen`, sub: 'Kategorie bestätigen oder ändern', ziel: { tab: 'uebersicht', kart: 'pruefen', wahl: '' } });
+  const st = steuerStand();
+  startOhneSteuer = !st;   // nach dem Laden der Steuer-Entscheidungen neu zeichnen
+  if (st?.offen) l.push({ prio: 4, ampel: '', text: `Steuer ${st.jahr}: ${st.offen} ${st.offen === 1 ? 'Entscheidung' : 'Entscheidungen'} offen`, sub: 'Belege zuordnen', ziel: { tab: 'steuer' } });
+  return l.sort((a, b) => a.prio - b.prio || String(a.am || '').localeCompare(String(b.am || '')));
+}
+function handlungHtml(l) {
+  if (!l.length) return '<p class="cp-ruhig"><i class="ampel ok" aria-hidden="true"></i>Nichts zu tun – keine offenen Fristen, Auffälligkeiten oder Prüfungen.</p>';
+  return `<ul class="cp-hb">${l.slice(0, 3).map((x) => `<li><button class="cp-hb-z"${x.waechter ? ` data-cp-waechter aria-expanded="${cpWaechterAuf}"` : geh(x.ziel)}>
+      <i class="ampel ${x.ampel || 'neutral'}" aria-hidden="true"></i><span class="cp-hb-t">${x.text}<small>${x.sub}</small></span><span class="cp-hb-p" aria-hidden="true">${x.waechter ? (cpWaechterAuf ? '▴' : '▾') : '›'}</span></button></li>`).join('')}</ul>
+    ${l.length > 3 ? `<p class="cp-hb-mehr klein muted">+ ${l.length - 3} weitere · ${zl('alle Fristen', { tab: 'fix', fixtab: 'kalender', _springe: '#fr-liste' })}</p>` : ''}`;
+}
+
+// Kontostand: die letzten 24 abgeschlossenen Monate (wie in verlauf5 je Monatsende, nur vollständige Summen), dann die Prognose aus verlauf5
+function cockpitVerlauf(V) {
+  const ist = abgeschlosseneMonate().slice(-24).map((k) => { const s = kontenSumme(monatsletzter(`${k}-01`)); return { k, art: 'ist', stand: vollSumme(s), summe: s }; });
+  return [...ist, ...V.monate.filter((m) => m.art !== 'ist').map((m) => ({ k: m.k, art: m.art, stand: m.stand, summe: null }))];
+}
+
+function cockpitSeite() {
+  const box = $('#s5'), V = verlauf5(), R = V.R, ms = V.monate, lauf = V.lauf, letzte = ms[ms.length - 1];
+  const hs = V.heuteSumme, heute = hs?.c ?? 0, s = V.schnitt, prog = letzte.stand;
+  const anfang = kontenSumme(plusTage(`${V.jetzt}-01`, -1)), seitAnfang = diffSumme(anfang, hs);
+  const monatJ = MONAT[+V.jetzt.slice(5) - 1], monatE = `${MONAT[+letzte.k.slice(5) - 1]}${letzte.k.slice(0, 4) !== V.jetzt.slice(0, 4) ? ` ${letzte.k.slice(0, 4)}` : ''}`;
+  const zuKonten = { tab: 'konten', stichtag: '', konto: '' };
+  const ist = ms.filter((m) => m.art === 'ist');
+
+  // Kernaussage: ein Satz – wohin der Kontostand läuft (Prognose). Richtung: Monatsende gegen Monatsende
+  // (letztes abgeschlossenes Monatsende → Prognose), nicht gegen heute (vor dem Gehalt wäre das schief).
+  const progB = prog == null ? '' : `<b class="${prog < 0 ? 'neg' : ''}">≈ ${eur0(prog)}</b>`;
+  const basis = ist.length ? ist[ist.length - 1] : null, bStand = basis?.stand ?? null;
+  const diff = prog != null && bStand != null ? prog - bStand : null;
+  const richtung = diff == null ? '' : Math.abs(diff) < Math.max(20000, Math.abs(bStand) * 0.03) ? 'bleibt stabil' : diff > 0 ? 'steigt' : 'sinkt';
+  const kern = prog == null
+    ? `Ein normaler Monat endet bei <b class="${R.erg < 0 ? 'neg' : 'pos'}">${plusMinus(R.erg)}</b>. Eine Prognose geht nicht: der Stand heute ist unvollständig.`
+    : prog < 0 ? `Achtung: Ende ${monatE} stehen voraussichtlich ${progB} auf deinen Konten <span class="marke">Prognose</span>`
+      : `${richtung ? `Dein Kontostand ${richtung} – ` : ''}Ende ${monatE} stehen voraussichtlich ${progB} auf deinen Konten <span class="marke">Prognose</span>`;
+  const kernUnter = diff == null ? '' : `Vergleich: Ende ${monLang(basis.k)} ${eur0(bStand)} (${pmHtml(diff)})<span class="cp-nur-breit"> · ${esc(sicher(() => prognoseText(H)) || 'berechnet')}</span>`;
+
+  // Vier Kennzahlen
+  const seitText = anfang ? `${seitAnfang == null ? '–' : pmHtml(seitAnfang)} seit 1. ${monatJ}` : '';
+  const progWerte = [...ist.slice(-3).map((m) => m.stand), V.heuteStand, ...ms.filter((m) => m.art !== 'ist').map((m) => m.stand)];
+  const vm = sicher(() => vermoegen(H)) || null;
+  const vmTeile = vm ? [['Konten', vm.ks?.c || 0], ['Depot', vm.dp?.wert || 0], ['Kaution', vm.kaution?.c || 0], ['Vorsorge', vm.vorsorge]].filter(([, c]) => c > 0) : [];
+  const vmSumme = vmTeile.reduce((t, [, c]) => t + c, 0) || 1;
+  const vmBalken = vmTeile.length ? `<span class="kz-anteil">${vmTeile.map(([n, c], i) => `<i style="width:${((c / vmSumme) * 100).toFixed(1)}%;--i:${i}" title="${n}: ${eur0(c)}"></i>`).join('')}</span>` : '';
+  const kacheln = [
+    kachel({ titel: 'Geld heute', wert: summeText(hs), cls_: heute < 0 ? 'neg' : '', ziel: zuKonten,
+      aend: `${hs && !hs.voll ? `${esc(fehltText(hs))} · ` : ''}${seitText}${lauf?.gehaltKommt ? ' · Gehalt kommt noch' : ''}`, spark: sparkline([...ist.map((m) => m.stand), V.heuteStand]),
+      unter: 'Summe deiner Konten · Linie: 12 Monate' }),
+    kachel({ titel: 'Normaler Monat', wert: plusMinus(R.erg), cls_: R.erg < 0 ? 'neg' : 'pos', ziel: { tab: 'fix', fixtab: 'vertraege', konto: '' },
+      aend: `Ø 12 Monate: ${pmHtml(Math.round(s.erg))}`, spark: sparSaeulen(ist.map((m) => m.erg)),
+      unter: 'Gehalt + Sonstiges − Fixkosten − Lebenshaltung · Säulen: Ergebnis je Monat' }),
+    kachel({ titel: `Ende ${monatE}`, marke: 'Prognose', wert: prog == null ? '–' : `≈ ${eur0(prog)}`, cls_: prog < 0 ? 'neg' : '', ziel: zuKonten,
+      aend: prog == null ? 'nicht berechenbar: der Stand heute ist unvollständig' : `${pmHtml(prog - heute)} ggü. heute`, spark: sparkline(progWerte, ist.slice(-3).length + 1),
+      unter: 'auf deinen Konten · Linie: 3 Monate Ist, dann Prognose' }),
+    kachel({ titel: 'Vermögen', wert: vm ? `${vm.ungefaehr ? '≈ ' : ''}${vm.c < 0 ? '−' : ''}${eur0(Math.abs(vm.c))}${vm.ks && !vm.voll ? ' + ?' : ''}` : '–', cls_: vm?.c < 0 ? 'neg' : '',
+      ziel: { tab: 'konten', stichtag: '', konto: '', _springe: '#vm-karte' }, aend: vmTeile.map(([n]) => n).join(' · '), spark: vmBalken,
+      unter: 'jeder Teil mit eigenem Stichtag · ohne gesetzliche Rente' }),
+  ].join('');
+
+  // Diesen Monat: ausgegeben vs. erwartet (wie bisher aus verlauf5)
+  let monat = '<p class="leer klein">Der Monat ist abgeschlossen.</p>';
+  if (lauf) {
+    const anteilTag = Math.round((lauf.tag / lauf.tage) * 100), anteilAus = Math.min(100, Math.round((lauf.x.aus / Math.max(1, lauf.aus)) * 100));
+    monat = `<button class="mb"${geh(zuBuchungen({ konto: '', ...monatZiel(lauf.k), art: 'aus' }))} title="Anklicken: alle Ausgaben im ${monatJ}">
+        <span class="mb-l"><span>${eur0(lauf.x.aus)} ausgegeben</span><span class="muted">von erwartet ≈ ${eur0(lauf.aus)}</span></span>
+        <span class="mb-b"><i style="width:${anteilAus}%"></i><b style="left:${anteilTag}%"></b></span>
+        <span class="mb-l muted klein"><span>Tag ${lauf.tag} von ${lauf.tage} · Strich = heute</span><span>${anteilAus} % der erwarteten Ausgaben</span></span></button>`;
+  }
+
+  const hb = handlungsbedarf(), hbRot = hb.some((x) => x.ampel === 'rot'), verlauf = cockpitVerlauf(V);
+  box.innerHTML = `<div class="cp">
+    <header class="cp-kopf"><p class="cp-ueber">Cockpit · Daten bis ${dde(D.bis)}</p><h1 class="cp-kern">${kern}</h1>${kernUnter ? `<p class="cp-kern-u">${kernUnter}</p>` : ''}</header>
+    <div class="cp-kz">${kacheln}</div>
+    <div class="cp-raster">
+      <section class="card cp-karte cp-hb-karte"><div class="cp-kt"><h2>Handlungsbedarf</h2>${hb.length ? `<span class="cp-zahl${hbRot ? ' neg' : ''}">${hb.length}</span>` : ''}</div>${handlungHtml(hb)}</section>
+      <section class="card cp-karte cp-grafik"><div class="cp-kt"><h2>Kontostand</h2><span class="klein muted">24 Monate · gestrichelt: Prognose</span></div>
+        <div class="cp-chart"><canvas id="c-cp-stand" aria-label="Kontostand der letzten 24 Monate und Prognose"></canvas></div>
+        <p class="cp-fuss">Summe deiner Konten am Monatsende, ohne Depot, gemeinsame und Kinderkonten.${lueckenText(verlauf.map((m) => m.summe))} Punkt anklicken: Kontostände an diesem Tag.</p></section>
+    </div>
+    <div id="cp-waechter"${cpWaechterAuf ? '' : ' hidden'}>${cpWaechterAuf ? sicher(() => waechterKarte(H)) : ''}</div>
+    <section class="card cp-karte cp-monat"><div class="cp-kt"><h2>${lauf ? `Diesen Monat · ${monatJ}` : 'Diesen Monat'}</h2></div>${monat}</section>
+  </div>`;
+  gehBinden(box);
+  if (cpWaechterAuf) sicher(() => waechterBinden(box, H));
+  box.querySelector('[data-cp-waechter]')?.addEventListener('click', () => { cpWaechterAuf = !cpWaechterAuf; cockpitSeite(); if (cpWaechterAuf) springe('#cp-waechter'); });
+  cpStandZeichnen(verlauf);
+}
+
+function cpStandZeichnen(ms) {
+  if (!$('#c-cp-stand')) return;
+  const ab = ms.findIndex((m) => m.art !== 'ist'), c = css('--accent');
+  const letzteIst = ab < 0 ? ms.length - 1 : ab - 1;
+  const o = basis();
+  o.layout = { padding: { top: 22, left: 4, right: 10 } };
+  o.interaction = { mode: 'index', intersect: false };
+  o.scales = {
+    x: { ...achsenStil(), grid: { display: false }, ticks: { ...achsenStil().ticks, font: { size: 11 }, maxRotation: 0, autoSkip: true, autoSkipPadding: 10 } },
+    y: { ...achsenStil(), ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 5 } },
+  };
+  o.plugins.tooltip.callbacks = { title: (it) => `Ende ${monLang(ms[it[0].dataIndex].k)}${ms[it[0].dataIndex].art !== 'ist' ? ' – Prognose' : ''}`, label: (it) => (it.raw == null ? ' nicht vollständig berechenbar' : ` Konten: ${EUR0.format(it.raw)}`) };
+  o.onClick = (_, el) => { if (!el.length) return; const m = ms[el[0].index]; setze({ tab: 'konten', konto: '', stichtag: m.art === 'ist' ? monatsletzter(`${m.k}-01`) : '' }); };
+  o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
+  zeichne('c-cp-stand', {
+    type: 'line',
+    data: { labels: ms.map((m) => monKurz(m.k)), datasets: [{ data: ms.map((m) => (m.stand == null ? null : m.stand / 100)), borderColor: c, backgroundColor: alpha(c, 0.07), fill: 'origin', cubicInterpolationMode: 'monotone', borderWidth: 2,
+      pointRadius: ms.map((m, i) => (i === letzteIst || i === ms.length - 1 ? 3.5 : 0)), pointHoverRadius: 4, pointBackgroundColor: ms.map((m) => (m.art === 'ist' ? c : css('--surface'))), pointBorderColor: c, pointBorderWidth: 2,
+      segment: { borderDash: (sg) => (ab >= 0 && sg.p1DataIndex >= ab ? [5, 4] : undefined) } }] },
+    options: o,
+    plugins: [prognoseMit(ab, PROGNOSE), punktWerteMit([0, letzteIst, ms.length - 1].filter((i, j, a) => i >= 0 && a.indexOf(i) === j && ms[i]?.stand != null), (v, i) => `${i > letzteIst ? '≈ ' : ''}${kurzWert(v)}`)],
+  });
 }
 
 // ---------------------------------------------------------------- Übersicht: Wie stehe ich da – und wohin läuft es?
@@ -1937,6 +2147,9 @@ function budgetBalken(zeilen, B, G = B) {   // Balkenlänge: B = Einkommen (100 
 
 // Fixkosten: Was ist fest verplant – und was bleibt? Grundlage ist das aktuelle Gehalt; der normale Monat wie in der Übersicht.
 function tabFixkosten() {
+  // Bereich Familie: nur Unterhalt und Unterhaltsrechner (ohne den Fixkosten-Kopf)
+  if (S.fixtab === 'unterhalt') return kopf5('Familie', 'Unterhalt für deine Kinder: Monat für Monat, Ausgleich und Unterhaltsrechner.')
+    + `<div class="s5">${sicher(() => unterhaltSeite(H)) || '<div class="card leer">Die Unterhalts-Übersicht konnte nicht berechnet werden.</div>'}</div>`;
   const ks = kontoSet(), R = monatsRechnung();
   const gefiltert = fixkostenErkennen().filter((f) => !ks || ks.has(f.k));   // Verträge der gewählten Konten
   const alle = gefiltert.filter((f) => !f.gemeinsam), aktiv = alle.filter((f) => f.aktiv);
@@ -1994,7 +2207,7 @@ function tabFixkosten() {
       </details>
     </section>`;
   const reiter = (k, t) => `<button data-fixtab="${k}" class="${S.fixtab === k ? 'an' : ''}">${t}</button>`;
-  h += `<div class="fix-tabs"><div class="seg">${reiter('vertraege', `Verträge <small>${aktiv.length}</small>`)}${reiter('kalender', 'Wann abgebucht wird')}${reiter('plan', 'Was wäre wenn …')}${reiter('unterhalt', 'Unterhalt')}</div></div>`;
+  h += `<div class="fix-tabs"><div class="seg">${reiter('vertraege', `Verträge <small>${aktiv.length}</small>`)}${reiter('kalender', 'Wann abgebucht wird')}${S.fixtab === 'plan' ? reiter('plan', 'Was wäre wenn …') : ''}</div></div>`;
   h += S.fixtab === 'kalender' ? `<div class="card fix-zk k3">${zahlungskalenderHtml(aktiv)}</div>${sicher(() => fristenListe(H))}`
     : S.fixtab === 'unterhalt' ? `<div class="s5">${sicher(() => unterhaltSeite(H)) || '<div class="card leer">Die Unterhalts-Übersicht konnte nicht berechnet werden.</div>'}</div>`
     : S.fixtab === 'plan' ? `<div class="card fix-plan k3" id="fix-plan">${planHtml()}</div>`
@@ -2400,6 +2613,7 @@ const zustand = (x) => JSON.stringify(ZUSTAND.map((k) => x[k]));
 function setze(p, { tippen = false } = {}) {
   const vorher = zustand(S), tabVorher = S.tab;
   Object.assign(S, p);
+  if ('tab' in p && !('fixtab' in p) && S.fixtab === 'unterhalt' && S.tab !== 'fix') S.fixtab = 'vertraege';   // Familie verlassen
   if ('kat' in p && !('ukat' in p)) S.ukat = '';
   const neu = zustand(S) !== vorher && !(tippen && tippt);
   tippt = tippen;
@@ -2418,8 +2632,8 @@ function aktualisieren(hist = 'ersetzen') {
   hashSchreiben(hist);
   const t = S.tab;
   $('#tabs').hidden = false;
-  document.querySelectorAll('#tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === t)));
-  $('#tab-n').textContent = NUM.format(F.length);
+  $('#btn-lupe').hidden = false;
+  navZeigen();
   $('#werkzeug').hidden = t !== 'buchungen';
   schnellSuche();
   $('#fuss').hidden = t === 'start';
@@ -2428,7 +2642,7 @@ function aktualisieren(hist = 'ersetzen') {
   $('#tabelle-card').hidden = t === 'start' || t === 'kennzahlen';
   filterZeigen(conds);
   // jede Grafik für sich: ein Fehler in einer soll die anderen nicht leer lassen (sicher, oben)
-  if (t === 'start') sicher(startSeite);
+  if (t === 'start') sicher(cockpitSeite);
   else if (t === 'kennzahlen') sicher(k5Seite);
   else tabelle(conds);
 }
@@ -2458,7 +2672,7 @@ function hashSchreiben(hist = 'ersetzen') {
 let ersterStart = true;
 // So sieht jede Seite beim Öffnen der App aus: aktuelles Jahr, alle Konten, keine Suche, keine Auswahl
 const startJahr = () => { const jetzt = new Date().getFullYear(); return String(D.rows.some((r) => r.y === jetzt) ? jetzt : +D.bis.slice(0, 4)); };
-const grundZustand = () => ({ ...S0, jahr: startJahr(), tab: S.tab, sort: S.sort, dir: S.dir });
+const grundZustand = () => ({ ...S0, jahr: startJahr(), tab: S.tab, fixtab: S.fixtab === 'unterhalt' ? 'unterhalt' : S0.fixtab, sort: S.sort, dir: S.dir });
 function abweichend() {
   if (!D) return false;
   const g = grundZustand();
@@ -2494,6 +2708,9 @@ function hashLesen() {
   if (['vm', 'vj'].includes(p.get('gbasis'))) S.gbasis = p.get('gbasis');
   if (/^\d{4}$/.test(p.get('gtjahr') || '')) S.gtjahr = p.get('gtjahr');
   if (['kennzahlen', 'buchungen', 'uebersicht', 'konten', 'fix', 'gehalt', 'steuer'].includes(p.get('tab'))) S.tab = p.get('tab');
+  // neue Bereichsnamen (Etappe 1): auf die bestehenden Seiten abbilden
+  const alias = { cockpit: ['start'], geldfluss: ['uebersicht'], vermoegen: ['konten'], einkommen: ['gehalt'], familie: ['fix', 'unterhalt'] }[p.get('tab')];
+  if (alias) { S.tab = alias[0]; if (alias[1]) S.fixtab = alias[1]; }
 }
 
 // Ergebnis der Nachprüfung (nachpruefen.py) – nur wenn etwas nicht bestanden ist, unauffällig mit aufklappbarer Liste
@@ -2535,7 +2752,7 @@ function anzeigen(v) {
   if (LOKAL) window.__fd = { D, fix: () => fixkostenErkennen(), mr: () => monatsRechnung(), sammle, periode };   // nur zum Testen auf dem eigenen Rechner
   chatDaten(D);
   entscheidungenLaden(j).then((fehlen) => { if (fehlen && D?.j === j) { neuAufbauen(); aktualisieren(); } });
-  steuerDaten(D).then(() => { if (S.tab === 'steuer') tabelle(parse(S.q)); else if (S.tab === 'start' && startOhneSteuer) { try { startSeite(); } catch (e) { console.error(e); } } });
+  steuerDaten(D).then(() => { if (S.tab === 'steuer') tabelle(parse(S.q)); else if (S.tab === 'start' && startOhneSteuer) { try { cockpitSeite(); } catch (e) { console.error(e); } } });
   // Zusatzmodule: eigene Angaben aus diesem Gerät (IndexedDB) einmal laden, danach neu zeichnen; neuAufbauen() braucht das nicht
   H ??= modulHelfer();
   Promise.all([prognoseLaden, unterhaltLaden, fristenLaden, waechterLaden, vermoegenLaden].map((f) => Promise.resolve().then(() => f(H)).catch(console.error))).then(() => { if (D?.j === j) aktualisieren(); });
@@ -2808,8 +3025,8 @@ function startZeigen(fehler) {
 
 function themeSetzen(t) {
   if (t) { try { localStorage.setItem('fd.theme', t); } catch {} }
-  let cur = 'light';   // Standard: hell
-  try { cur = localStorage.getItem('fd.theme') || 'light'; } catch {}
+  let cur = 'auto';   // Standard: folgt dem Gerät (hell/dunkel)
+  try { cur = localStorage.getItem('fd.theme') || 'auto'; } catch {}
   if (cur === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = cur;
   document.querySelectorAll('#m-theme button').forEach((b) => b.classList.toggle('an', b.dataset.v === cur));
   if (D) aktualisieren('keins');
@@ -2835,7 +3052,7 @@ function events() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !$('#f-jahr-liste').hidden) { jahrMenu(false); $('#f-jahr').focus(); return; }
     if ((e.key === '/' || (e.key === 'k' && (e.ctrlKey || e.metaKey))) && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
-      e.preventDefault(); $('#q').focus(); $('#q').select();
+      e.preventDefault(); if (D && S.tab !== 'buchungen') setze({ tab: 'buchungen' }); $('#q').focus(); $('#q').select();
     }
   });
   $('#q-hilfe').onclick = () => $('#dlg-hilfe').showModal();
@@ -2861,12 +3078,13 @@ function events() {
   $('#f-kat').onchange = (e) => setze({ kat: e.target.value, ukat: '' });
   $('#f-umb').onchange = (e) => setze({ umb: e.target.checked });
   document.querySelectorAll('#f-art button').forEach((b) => b.onclick = () => setze({ art: b.dataset.v }));
-  document.querySelectorAll('#tabs button').forEach((b) => b.onclick = () => setze({ tab: b.dataset.tab }));
+  document.querySelectorAll('#tabs button').forEach((b) => b.onclick = () => bereichOeffnen(b.dataset.bereich));
+  $('#btn-lupe').onclick = () => { setze({ tab: 'buchungen' }); setTimeout(() => { $('#q').focus(); $('#q').select(); }, 30); };
+  mehrMenuBinden();
   $('#dl-xlsx').onclick = () => exportieren('xlsx');
   $('#dl-csv').onclick = () => exportieren('csv');
   document.querySelectorAll('[data-bild]').forEach((b) => b.onclick = () => bildSpeichern(b.dataset.bild));
 
-  $('#btn-menu').onclick = () => $('#dlg-menu').showModal();
   $('#btn-neu').onclick = () => einlesen();
   const pcKnopf = async (dialog) => {
     try { anzeigen(await Q.pcVerknuepfen()); if (dialog) $('#dlg-menu').close(); toast('Datei verknüpft – die App lädt sie ab jetzt automatisch.'); }
@@ -2888,7 +3106,7 @@ function events() {
     D = null; quelle = null;
     $('#dlg-menu').close();
     history.replaceState(null, '', location.pathname);
-    $('#tabs').hidden = true;
+    $('#tabs').hidden = true; $('#btn-lupe').hidden = true; $('#bereich-seg').hidden = true;
     startZeigen();
   };
   $('#start-drive').onclick = async () => {
