@@ -574,8 +574,8 @@ const prognoseMit = (ab, text = 'Prognose') => ({
     const links = x.getPixelForValue(ab) - b / 2;
     c.save(); c.fillStyle = 'rgba(128, 128, 128, 0.08)'; c.fillRect(links, a.top, a.right - links, a.bottom - a.top);
     c.fillStyle = css('--muted'); c.font = `700 10px ${css('--font')}`; c.textAlign = 'left'; c.textBaseline = 'top';
-    let t = text.toUpperCase();
-    if (c.measureText(t).width > a.right - links - 8) t = text.split(' (')[0].toUpperCase();   // schmal (Handy): nur „Prognose“
+    let t = text;   // normal geschrieben, keine Großbuchstaben (Wunsch des Nutzers)
+    if (c.measureText(t).width > a.right - links - 8) t = text.split(' (')[0];   // schmal (Handy): nur „Prognose“
     c.fillText(t, links + 5, a.top + 3);
     c.restore();
   },

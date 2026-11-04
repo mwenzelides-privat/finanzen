@@ -94,12 +94,12 @@ a { color: var(--accent); }
 .seg button.an { background: var(--surface); color: var(--accent); font-weight: 600; box-shadow: 0 1px 2px rgba(15, 27, 45, .10), inset 0 -2px 0 var(--akzent); }
 
 /* Tabellen */
-.t th { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 650; border-bottom: 1px solid var(--border-strong); }
+.t th { font-size: var(--fs-xs); text-transform: none; letter-spacing: .05em; color: var(--muted); font-weight: 650; border-bottom: 1px solid var(--border-strong); }
 .t td { border-color: var(--border); }
 .t tbody tr:hover td { background: var(--accent-soft); }
 
 /* Marke „Prognose“ / „berechnet“ */
-.marke { display: inline-block; vertical-align: .15em; margin-left: 4px; padding: 1px 7px; border-radius: 99px; font: 650 10.5px/1.5 var(--font); letter-spacing: .05em; text-transform: uppercase;
+.marke { display: inline-block; vertical-align: .15em; margin-left: 4px; padding: 1px 7px; border-radius: 99px; font: 650 10.5px/1.5 var(--font); letter-spacing: .05em; text-transform: none;
   color: var(--akzent); background: var(--akzent-soft); white-space: nowrap; }
 
 /* Ampel-Punkt: nur bei Abweichung farbig */
@@ -157,13 +157,13 @@ a { color: var(--accent); }
 }
 
 /* Dialog Einstellungen */
-.dlg h3 { margin: 16px 0 6px; font-size: var(--fs-s); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.dlg h3 { margin: 16px 0 6px; font-size: var(--fs-s); text-transform: none; letter-spacing: .06em; color: var(--muted); }
 .dlg h2 { font-family: var(--font-titel); font-weight: 600; }
 
 /* ============ Cockpit ============ */
 .cp { display: grid; gap: 18px; min-width: 0; }
 .cp-kopf { padding: 6px 2px 2px; }
-.cp-ueber { margin: 0 0 6px; font-size: var(--fs-s); font-weight: 650; letter-spacing: .07em; text-transform: uppercase; color: var(--akzent); }
+.cp-ueber { margin: 0 0 6px; font-size: var(--fs-s); font-weight: 650; letter-spacing: .07em; text-transform: none; color: var(--akzent); }
 .cp-kern { margin: 0; max-width: 980px; font-family: var(--font-titel); font-weight: 500; font-size: clamp(22px, 2.6vw, 32px); line-height: 1.25; letter-spacing: -.01em; color: var(--text); text-wrap: balance; }
 .cp-kern b { font-weight: 700; color: var(--accent); white-space: nowrap; }
 .cp-kern b.neg { color: var(--aus-text); }
@@ -175,7 +175,7 @@ a { color: var(--accent); }
   background: var(--surface); border: 1px solid var(--border); font: inherit; color: inherit; cursor: pointer;
   transition: box-shadow var(--uebergang), border-color var(--uebergang), transform var(--uebergang); }
 .kz:hover { border-color: var(--border-strong); box-shadow: var(--shadow-hover); transform: translateY(-1px); }
-.kz-t { font-size: var(--fs-s); font-weight: 650; color: var(--muted); letter-spacing: .02em; text-transform: uppercase; }
+.kz-t { font-size: var(--fs-s); font-weight: 650; color: var(--muted); letter-spacing: .02em; text-transform: none; }
 .kz-t .marke { vertical-align: .05em; }
 .kz-w { font-size: var(--fs-kz); font-weight: 650; letter-spacing: -.025em; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
 .kz-w.pos { color: var(--ein-text); }
@@ -289,7 +289,7 @@ a { color: var(--accent); }
 .bx-kz { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(48px, 1fr) auto 86px; align-items: center; gap: 12px; width: 100%; padding: 7px 4px; border: 0; border-top: 1px solid var(--border);
   background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; border-radius: 0; }
 button.bx-kz:hover { background: var(--accent-soft); }
-.bx-kopfz { border-top: 0; padding-top: 0; cursor: default; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 650; }
+.bx-kopfz { border-top: 0; padding-top: 0; cursor: default; font-size: var(--fs-xs); text-transform: none; letter-spacing: .05em; color: var(--muted); font-weight: 650; }
 .bx-kopfz span:nth-child(n+3) { text-align: right; }
 .bx-kz-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 560; font-size: var(--fs-m); }
 .bx-kz-n small { margin-left: 6px; font-weight: 400; color: var(--muted); font-size: var(--fs-xs); }
@@ -322,7 +322,7 @@ button.bx-kz:hover { background: var(--accent-soft); }
 .bx-wo-z.fremd b { font-weight: 500; }
 .bx-dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px 16px; margin: 0; }
 .bx-dl div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.bx-dl dt { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 650; }
+.bx-dl dt { font-size: var(--fs-xs); text-transform: none; letter-spacing: .04em; color: var(--muted); font-weight: 650; }
 .bx-dl dd { margin: 0; font-size: 21px; font-weight: 650; letter-spacing: -.015em; white-space: nowrap; }
 .bx-dl dd.pos { color: var(--ein-text); }
 .bx-dl dd.neg { color: var(--aus-text); }
@@ -486,3 +486,27 @@ i.cv-fehlt { background: repeating-linear-gradient(135deg, var(--aus) 0 3px, tra
 @media (min-width: 901px) { .cp-drei > .cv:first-child { grid-template-columns: minmax(0, 1fr); gap: 8px; } }
 .cv-leg > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; margin-right: 8px; }
 .cv-leg > span i { margin-left: 0 !important; }
+
+/* Keine Großschrift im ganzen Programm (Wunsch des Nutzers, 04.11.2026): alles normal geschrieben */
+body, body *, ::placeholder { text-transform: none !important; }
+
+/* Cockpit 04.11. abends: volle Breite und mehr Höhe; Kachel-Inhalte bleiben in der Kachel */
+.cp { max-width: none; }
+.cp-hero { grid-template-columns: minmax(280px, .7fr) minmax(0, 2fr); padding: 22px 24px 16px; gap: 28px; }
+.cp-hero-chart { height: clamp(250px, 36vh, 440px); }
+.cv { padding: 16px 18px; gap: 14px; }
+.cv-vis, .cv-ring, .cv-rleg, .cv-bal { min-width: 0; }
+.cv-ring { grid-template-columns: 84px minmax(0, 1fr); }
+.cv-rleg span { grid-template-columns: 10px minmax(0, 1fr) auto; }
+.cv-rleg span > :nth-child(2), .cv-rleg span { overflow-wrap: anywhere; }
+.cv-rleg b { white-space: nowrap; }
+.cp-drei > .cv:last-child { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.cp-drei > .cv:last-child .cv-ring { grid-template-columns: 84px minmax(0, 220px); }
+.cp-td-l { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.cp-td { padding: 13px 14px; }
+@media (max-width: 900px) { .cp-drei > .cv:last-child { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); } .cp-drei > .cv:last-child .cv-ring { grid-template-columns: 84px minmax(0, 1fr); } }
+@media (max-width: 480px) { .cp-drei > .cv:last-child { grid-template-columns: minmax(0, 1fr); } }
+/* Startseite: auf großen Bildschirmen fast die volle Breite nutzen */
+main:has(#seite-start:not([hidden])) { max-width: 1900px; }
+@media (max-width: 900px) { .cp-hero { grid-template-columns: minmax(0, 1fr); gap: 16px; } }
+@media (max-width: 640px) { .cp-hero { padding: 16px 14px 12px; } .cp-hero-chart { height: 220px; } }
