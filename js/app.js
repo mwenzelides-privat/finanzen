@@ -849,9 +849,9 @@ const TD_ICON = {
 };
 function handlungHtml(l) {
   if (!l.length) return '<p class="cp-ruhig"><i class="ampel ok" aria-hidden="true"></i>Nichts zu tun – keine offenen Fristen, Auffälligkeiten oder Prüfungen.</p>';
-  return `<div class="cp-td-l">${l.slice(0, 4).map((x) => `<button class="cp-td ${x.ampel || 'neutral'}"${x.waechter ? ` data-cp-waechter aria-expanded="${cpWaechterAuf}"` : geh(x.ziel)}>
+  return `<div class="cp-td-l">${l.slice(0, 4).map((x) => `<button class="cp-td ${x.ampel || 'neutral'}" title="${esc(`${x.text} · ${x.sub}`.replace(/<[^>]+>/g, ''))}"${x.waechter ? ` data-cp-waechter aria-expanded="${cpWaechterAuf}"` : geh(x.ziel)}>
       <span class="cp-td-i">${TD_ICON[x.typ] || TD_ICON.frist}</span><span class="cp-td-t">${x.text}<small>${x.sub}</small></span><span class="cp-td-p" aria-hidden="true">${x.waechter ? (cpWaechterAuf ? '▴' : '▾') : '›'}</span></button>`).join('')}</div>
-    ${l.length > 4 ? `<p class="cp-hb-mehr klein muted">+ ${l.length - 4} weitere · ${zl('alle Fristen', { tab: 'fix', fixtab: 'kalender', _springe: '#fr-liste' })}</p>` : ''}`;
+`;
 }
 
 // Kontostand: die letzten 24 abgeschlossenen Monate (wie in verlauf5 je Monatsende, nur vollständige Summen), dann die Prognose aus verlauf5
@@ -875,7 +875,28 @@ function ringTeile(teile) {
     ab += len; return h;
   }).join('')}</svg>`;
 }
-const cvKarte = ({ titel, wert, cls_ = '', unter = '', vis = '', ziel, marke = '' }) => `<button class="card cv"${geh(ziel)} title="Anklicken: Einzelheiten">
+// Nächste 30 Tage (Prognose): frei verfügbares Geld heute (ohne Mietkaution, gemeinsame und Kinderkonten), dann Tag für Tag
+// die festen Abbuchungen aus den Verträgen (ausstehende sofort), das erwartete Gehalt und die Lebenshaltung gleichmäßig verteilt
+function vorschau30(R) {
+  const start = ruecklagen();
+  if (start == null) return null;
+  const l = naechsteTermine(R.vertraege), g = naechstesGehalt(), proTag = R.leben / tageImMonat(D.bis.slice(0, 7));
+  const am = (d) => l.filter((x) => x.am === d).reduce((t, x) => t + x.f.betrag, 0);
+  let s = start - l.filter((x) => x.am <= D.bis).reduce((t, x) => t + x.f.betrag, 0);
+  const tage = [{ am: D.bis, s }];
+  for (let i = 1; i <= 30; i++) { const d = plusTage(D.bis, i); s += -am(d) - proTag + (g && g.am === d ? g.c : 0); tage.push({ am: d, s }); }
+  const tief = tage.reduce((m, x) => (x.s < m.s ? x : m), tage[0]);
+  return { start, tage, tief, ende: tage.at(-1), n: l.length, fest: l.reduce((t, x) => t + x.f.betrag, 0), g, leben: proTag * 30 };
+}
+// Stufenlinie (SVG) für die 30 Tage, Tiefpunkt markiert, Nulllinie wenn es darunter geht
+function stufenSvg(werte, tiefI) {
+  const W = 220, HH = 64, min = Math.min(0, ...werte), max = Math.max(...werte), sp = max - min || 1;
+  const x = (i) => ((i / (werte.length - 1)) * W).toFixed(1), y = (v) => (HH - 4 - ((v - min) / sp) * (HH - 10)).toFixed(1);
+  let d = `M0 ${y(werte[0])}`;
+  for (let i = 1; i < werte.length; i++) d += `H${x(i)}V${y(werte[i])}`;
+  return `<svg class="st30" viewBox="0 0 ${W} ${HH}" preserveAspectRatio="none" aria-hidden="true">${min < 0 ? `<path class="sp-0" d="M0 ${y(0)}H${W}"/>` : ''}<path class="st30-f" d="${d}V${HH}H0Z"/><path class="sp-l" d="${d}"/><circle class="st30-t" cx="${x(tiefI)}" cy="${y(werte[tiefI])}" r="3.5"/></svg>`;
+}
+const cvKarte = ({ titel, wert, cls_ = '', unter = '', vis = '', ziel, marke = '', tip = '' }) => `<button class="card cv"${geh(ziel)} title="${esc(tip ? `${tip} – anklicken: Einzelheiten` : 'Anklicken: Einzelheiten')}">
   <span class="cv-k"><span class="kz-t">${titel}${marke ? ` <span class="marke">${marke}</span>` : ''}</span><b class="cv-w ${cls_}">${wert}</b><span class="cv-u">${unter}</span></span><span class="cv-vis">${vis}</span></button>`;
 
 function cockpitSeite() {
@@ -925,31 +946,43 @@ function cockpitSeite() {
   const monatTeil = lauf ? Math.min(1, lauf.x.aus / Math.max(1, lauf.aus)) : 1;
   const laufVis = lauf ? `<span class="cv-ring">${ring(monatTeil, lauf.tag / lauf.tage, `${Math.round(monatTeil * 100)} %`)}<span class="cv-rleg"><span><i class="cv-ein"></i>ausgegeben<b>${eur0(lauf.x.aus)}</b></span><span><i class="cv-strich"></i>heute<b>Tag ${lauf.tag}/${lauf.tage}</b></span></span></span>` : '';
   const kacheln = [
-    cvKarte({ titel: 'Normaler Monat', wert: plusMinus(R.erg), cls_: R.erg < 0 ? 'neg' : 'pos', ziel: { tab: 'geldfluss' }, unter: `Lebenshaltung ${eur0(R.leben)} (${esc(lebenName())}, Ø 12 Monate ${eur0(R.lh.schnitt)})`, vis: monatVis }),
+    cvKarte({ titel: 'Normaler Monat', wert: plusMinus(R.erg), cls_: R.erg < 0 ? 'neg' : 'pos', ziel: { tab: 'geldfluss' }, unter: `Lebenshaltung ${esc(lebenName())} · Ø 12 Monate ${eur0(R.lh.schnitt)}`, vis: monatVis,
+      tip: `Gehalt ${eur0(R.gehalt)} + Sonstiges ${eur0(R.sonst)} − Fixkosten ${eur0(R.fix)} (${R.vertraege.length} Verträge) − Lebenshaltung ${eur0(R.leben)} (${lebenName()})` }),
     cvKarte({ titel: 'Vermögen', wert: vm ? `${vm.ungefaehr ? '≈ ' : ''}${vm.c < 0 ? '−' : ''}${eur0(Math.abs(vm.c))}${vm.ks && !vm.voll ? ' + ?' : ''}` : '–', cls_: vm?.c < 0 ? 'neg' : '', ziel: { tab: 'vermoegen' },
-      unter: 'jeder Teil mit eigenem Stichtag · ohne gesetzliche Rente', vis: vmVis }),
+      unter: 'ohne gesetzliche Rente', vis: vmVis, tip: 'Konten, Depot, Vorsorge – jeder Teil mit eigenem Stichtag' }),
     cvKarte({ titel: lauf ? `${monatJ} bisher` : 'Dieser Monat', wert: lauf ? eur0(lauf.x.aus) : '–', ziel: zuBuchungen({ konto: '', ...monatZiel(V.jetzt), art: 'aus' }),
-      unter: lauf ? `ausgegeben von ≈ ${eur0(lauf.aus)} erwartet: ${eur0(lauf.x.aus - lauf.x.var + lauf.offenFest)} feste Abbuchungen im ${monatJ} + ${eur0(lauf.x.var + lauf.varKommt)} Lebenshaltung` : 'Der Monat ist abgeschlossen.', vis: laufVis }),
+      unter: lauf ? `von ≈ ${eur0(lauf.aus)}: ${eur0(lauf.x.aus - lauf.x.var + lauf.offenFest)} fest + ${eur0(lauf.x.var + lauf.varKommt)} Lebenshaltung` : 'Der Monat ist abgeschlossen.', vis: laufVis,
+      tip: lauf ? `Ausgegeben ${eur0(lauf.x.aus)} von erwarteten ${eur0(lauf.aus)}: feste Abbuchungen im ${monatJ} ${eur0(lauf.x.aus - lauf.x.var + lauf.offenFest)} und Lebenshaltung ${eur0(lauf.x.var + lauf.varKommt)} (${lebenName()})` : '' }),
+    (() => {
+      const W = sicher(() => vorschau30(R)) || null;
+      if (!W) return cvKarte({ titel: 'Nächste 30 Tage', wert: '–', ziel: { tab: 'fix', fixtab: 'kalender', konto: '' }, unter: 'Der Stand heute ist nicht vollständig berechenbar.' });
+      const ti = W.tage.indexOf(W.tief);
+      return cvKarte({ titel: 'Nächste 30 Tage', marke: 'Prognose', wert: `≈ ${eur0(W.tief.s)}`, cls_: W.tief.s < 0 ? 'neg' : '', ziel: { tab: 'fix', fixtab: 'kalender', konto: '' },
+        unter: `tiefster freier Stand ${ti === 0 ? 'heute' : `am ${tagKurz(W.tief.am)}`}${W.g && W.g.am > W.tief.am ? ', vor dem Gehalt' : ''}`,
+        tip: `Heute frei verfügbar ${eur0(W.start)} (ohne Mietkaution, gemeinsame und Kinderkonten) · ${W.n} feste Abbuchungen ${eur0(W.fest)}${W.g ? ` · Gehalt ${eur0(W.g.c)} am ${tagKurz(W.g.am)}` : ''} · Lebenshaltung ${eur0(W.leben)} gleichmäßig verteilt`,
+        vis: `<span class="st30-box">${stufenSvg(W.tage.map((t) => t.s), ti)}<span class="st30-ax"><span>heute</span><span>+30 Tage · ≈ ${eur0(W.ende.s)}</span></span></span>` });
+    })(),
   ].join('');
 
   // Wofür das Geld ausgeht: der Vormonat als Grundlage, Strich = Ø 12 Monate
-  const K = katVormonat(), kTop = K.l.slice(0, 6), kRest = K.l.slice(6), kR = K.teil(kRest);
+  const K = katVormonat(), kTop = K.l.slice(0, 5), kRest = K.l.slice(5), kR = K.teil(kRest);
   const kZeile = (x) => ({ n: esc(schoen(x.k)), c: x.c, w: x.c > 0 ? eur0(x.c) : '–', marke: x.o > 0 ? x.o : null, p: x.o > 0 ? `Ø ${eur0(x.o)}` : '–', farbe: 'var(--accent-2)', ziel: katZielVm(x.k, K.vm),
     tip: `${schoen(x.k)}: ${K.kurz} ${eur0(x.c)} · Ø 12 Monate ${eur0(x.o)}` });
   const kats = K.l.length ? `<div class="bl-vm">${balkenListe([...kTop.map(kZeile),
     ...(kRest.length ? [{ n: `${kRest.length} übrige Kategorien`, sub: kRest.slice(0, 3).map((x) => esc(schoen(x.k))).join(', ') + (kRest.length > 3 ? ' …' : ''), c: kR.c, marke: kR.o, p: `Ø ${eur0(kR.o)}`, farbe: 'var(--variabel)', ziel: katZielVm('', K.vm) }] : []),
-    { n: '<b>Summe</b>', c: 0, w: `<b>${eur0(K.sum.c)}</b>`, p: `<b>Ø ${eur0(K.sum.o)}</b>`, cls: 'bl-summe' }], { max: Math.max(1, ...K.l.map((x) => Math.max(x.c, x.o)), kR.c, kR.o), kopf: ['', K.kurz, 'Ø 12 Mon.'] })}</div>`
+    { n: '<b>Summe</b>', c: 0, w: `<b>${eur0(K.sum.c)}</b>`, p: `<b>Ø ${eur0(K.sum.o)}</b>`, cls: 'bl-summe' }], { max: Math.max(1, ...K.l.map((x) => Math.max(x.c, x.o)), kR.c, kR.o), kopf: ['Kategorie', K.kurz, 'Ø 12 Mon.'] })}</div>`
     : '<p class="leer klein">Keine Ausgaben in den letzten 12 Monaten.</p>';
 
   const hb = handlungsbedarf(), hbRot = hb.some((x) => x.ampel === 'rot');
   box.innerHTML = `<div class="cp">
-    ${hero}
-    <div class="cp-drei">${kacheln}</div>
-    <section class="card cp-karte cp-td-karte"><div class="cp-kt"><h2>Zu tun</h2>${hb.length ? `<span class="cp-zahl${hbRot ? ' neg' : ''}">${hb.length}</span>` : ''}</div>${handlungHtml(hb)}</section>
+    <div class="cp-reihe-a">
+      ${hero}
+      <section class="card cp-karte cp-kat"><div class="cp-kt"><h2>Ausgaben im ${esc(K.kurz)}</h2><span class="klein muted">nach Kategorie</span></div>${kats}
+        <p class="cp-fuss" title="Durchschnitt ${esc(monatsText(K.ms))} · ohne Kinder- und gemeinsame Konten · Beträge gerundet, Summen aus den genauen Werten">Strich: Ø 12 Monate · ${zl('alle Kategorien', katAlle)}</p></section>
+    </div>
+    <div class="cp-drei cp-vier">${kacheln}</div>
+    <section class="card cp-karte cp-td-karte"><div class="cp-kt"><h2>Zu tun ${hb.length ? `<span class="cp-zahl${hbRot ? ' neg' : ''}">${hb.length}</span>` : ''}</h2>${hb.length > 4 ? `<span class="klein muted">+ ${hb.length - 4} weitere · ${zl('alle Fristen', { tab: 'fix', fixtab: 'kalender', _springe: '#fr-liste' })}</span>` : ''}</div>${handlungHtml(hb)}</section>
     <div id="cp-waechter"${cpWaechterAuf ? '' : ' hidden'}>${cpWaechterAuf ? sicher(() => waechterKarte(H)) : ''}</div>
-    <section class="card cp-karte"><div class="cp-kt"><h2>Wofür das Geld ausgeht</h2><span class="klein muted">${esc(K.name)} · Strich = Ø 12 Monate</span></div>${kats}
-      <p class="cp-fuss">Balken: Ausgaben im ${esc(K.name)}, rechts der Durchschnitt ${esc(monatsText(K.ms))} · ohne Kinder- und gemeinsame Konten · ${zl('alle Kategorien (12 Monate)', katAlle)}</p></section>
-    ${RUNDUNG}
   </div>`;
   gehBinden(box);
   if (cpWaechterAuf) sicher(() => waechterBinden(box, H));
