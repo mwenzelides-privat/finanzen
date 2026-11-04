@@ -718,3 +718,7 @@ i.cv-offen { background: var(--surface-2); border: 1px solid var(--border-strong
 .bx-mini button { padding: 3px 10px; font-size: var(--fs-xs); }
 .bx-hinw-z { margin: 4px 0 0; padding: 6px 8px; border-radius: var(--radius-s); background: var(--gelb-soft); font-size: var(--fs-xs); color: var(--text-2); }
 #btn-lupe { display: none !important; }
+/* Datenstand oben rechts: zwei Zeilen (Stand, Version), schrumpft nicht auf „…“ */
+.stand { flex: 0 0 auto; max-width: none; display: flex; flex-direction: column; align-items: flex-end; line-height: 1.25; font-size: 12px; }
+.stand small { font-size: 11px; color: var(--muted); opacity: .85; }
+@media (min-width: 901px) and (max-width: 1360px) { .stand { display: flex !important; } .stand span { display: none; } }

@@ -3432,11 +3432,12 @@ function nachpruefungHtml() {
 let appVersion = '';
 function standZeigen() {
   const j = D.j;
-  $('#stand').textContent = `${NUM.format(D.rows.length)} Buchungen · ${dde(D.von)} – ${dde(D.bis)}${appVersion ? ` · Version ${appVersion}` : ''}`;
-  // Versionsnummer steht nur in sw.js (VERSION) – einmal lesen und anhängen
+  // zwei Zeilen: Datenstand, darunter die Versionsnummer (steht nur in sw.js – einmal lesen)
+  const zeigen = () => { $('#stand').innerHTML = `<span>${NUM.format(D.rows.length)} Buchungen · ${dde(D.von)} – ${dde(D.bis)}</span>${appVersion ? `<small>Version ${esc(appVersion)}</small>` : ''}`; };
+  zeigen();
   if (!appVersion) fetch('sw.js', { cache: 'no-store' }).then((r) => r.text()).then((t) => {
     const m = /VERSION = '([^']+)'/.exec(t);
-    if (m && D) { appVersion = m[1]; $('#stand').textContent = `${NUM.format(D.rows.length)} Buchungen · ${dde(D.von)} – ${dde(D.bis)} · Version ${appVersion}`; }
+    if (m && D) { appVersion = m[1]; zeigen(); }
   }).catch(() => {});
   const mail = Q.kontoEmail?.();
   const herkunft = { drive: `aus Google Drive${mail ? ` (${mail})` : ''}`, pc: `aus der verknüpften Datei ${quelle.name} auf diesem PC`, datei: `aus der Datei ${quelle.name}`, lokal: 'lokale Testdaten' }[quelle.quelle] || '';
