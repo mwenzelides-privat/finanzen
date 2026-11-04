@@ -561,17 +561,20 @@ function schraffur(farbe) {
   return x.createPattern(c, 'repeat');
 }
 // Waagrechte Linie mit Beschriftung (Durchschnitt, Gehalt)
+// Die Beschriftung steht rechts NEBEN der Grafik (dafür reserviert beforeInit Platz) – so überdeckt sie keine Säulenwerte
 const linieMit = (id, wert, text, farbe, oben = true) => ({
   id,
+  beforeInit(ch) {
+    const L = (ch.options.layout ??= {}), p = typeof L.padding === 'object' ? L.padding : { top: +L.padding || 0 };
+    L.padding = { ...p, right: Math.max(p.right || 0, Math.round(text.length * 6.2) + 10) };
+  },
   afterDatasetsDraw(ch) {
     const y = ch.scales.y.getPixelForValue(wert), a = ch.chartArea, c = ch.ctx;
     if (y < a.top - 1 || y > a.bottom + 1) return;
     c.save(); c.strokeStyle = farbe; c.lineWidth = 1.5; c.setLineDash([5, 4]);
     c.beginPath(); c.moveTo(a.left, y); c.lineTo(a.right, y); c.stroke(); c.setLineDash([]);
-    c.font = `700 11px ${css('--font')}`; c.textAlign = 'right'; c.textBaseline = oben ? 'bottom' : 'top';
-    const w = c.measureText(text).width;   // rechts beschriftet, dort stören keine Säulenwerte
-    c.fillStyle = css('--surface'); c.fillRect(a.right - w - 8, oben ? y - 15 : y + 1, w + 8, 14);
-    c.fillStyle = farbe; c.fillText(text, a.right - 4, oben ? y - 2 : y + 2);
+    c.font = `700 11px ${css('--font')}`; c.textAlign = 'left'; c.textBaseline = 'middle';
+    c.fillStyle = farbe; c.fillText(text, a.right + 5, y);
     c.restore();
   },
 });
