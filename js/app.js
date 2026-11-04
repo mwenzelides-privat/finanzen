@@ -39,7 +39,7 @@ let H = null;          // Helfer für die Zusatzmodule (modulHelfer), gebaut bei
 // Zusatzmodule: ein Fehler darin soll die Seite nicht leeren – dann fehlt nur dieser Teil ('' = nichts anzeigen)
 const sicher = (f) => { try { return f() ?? ''; } catch (e) { console.error(e); return ''; } };
 let quelle = null;     // gespeicherte Fassung (Text + Herkunft)
-const S0 = { q: '', jahr: '', monat: '', konto: '', kat: '', ukat: '', art: 'alle', umb: false, tab: 'start', sort: 'datum', dir: -1, stichtag: '', wahl: '', kart: 'aus', fixtab: 'vertraege', zr: '', nf: '', neu: '', vertrag: '',
+const S0 = { q: '', jahr: '', monat: '', konto: '', kat: '', ukat: '', art: 'alle', umb: false, tab: 'start', sort: 'datum', dir: -1, stichtag: '', wahl: '', kart: 'aus', fixtab: 'vertraege', zr: '', nf: '', neu: '', vertrag: '', reise: '',
   // Auswahl in Steuer (Jahr, Filter, Abschnitt) und Gehalt (Monat, Vergleich, Tabellenjahr); leer = Grundeinstellung des Reiters
   sjahr: '', sfilter: '', sabf: '', gmonat: '', gbasis: '', gtjahr: '' };
 let S = { ...S0 };
@@ -96,7 +96,7 @@ function pruefer(conds, mitJahr = true, mitArt = true) {
   const ks = kontoSet(), zr = mitJahr && S.zr ? S.zr.split('_') : null;
   const fremdGewaehlt = !!ks && [...ks].some((i) => fremd(D.konten[i]));
   return (r) => (S.umb || r.art !== 'Umbuchung') && (!FREMD_ART.has(r.art) || fremdGewaehlt)
-    && (!jahre.length || jahre.includes(r.y)) && (!monate.length || monate.includes(r.m)) && (!zr || (r.d.slice(0, 7) >= zr[0] && r.d.slice(0, 7) <= zr[1])) && (!S.nf || !fixIds().has(r.i)) && (!S.vertrag || vertragIds(S.vertrag).has(r.i)) && (!ks || ks.has(r.k))
+    && (!jahre.length || jahre.includes(r.y)) && (!monate.length || monate.includes(r.m)) && (!zr || (r.d.slice(0, 7) >= zr[0] && r.d.slice(0, 7) <= zr[1])) && (!S.nf || !fixIds().has(r.i)) && (!S.vertrag || vertragIds(S.vertrag).has(r.i)) && (!S.reise || reiseIds(S.reise).has(r.i)) && (!ks || ks.has(r.k))
     && (!S.kat || r.kat === S.kat) && (!S.ukat || r.ukat === S.ukat)
     && (!mitArt || S.art === 'alle' || (S.art === 'aus' ? r.art === 'Ausgabe' : r.art === 'Einnahme'))
     && test(r);
@@ -107,6 +107,13 @@ function vertragIds(key) {
   if (!D.vIds) D.vIds = new Map();
   if (!D.vIds.has(key)) D.vIds.set(key, new Set(fixkostenErkennen().find((f) => vertragsKey(f) === key)?.rows.map((r) => r.i) || []));
   return D.vIds.get(key);
+}
+// Buchungen genau einer ohne Tag erkannten Reise (Schlüssel = key der Reisekarte) – dieselben, die die Karte zählt
+const reiseKarte = (key) => (sicher(() => reisen(H ??= modulHelfer()))?.karten || []).find((x) => x.key === key);
+function reiseIds(key) {
+  if (!D.rIds) D.rIds = new Map();
+  if (!D.rIds.has(key)) D.rIds.set(key, new Set(reiseKarte(key)?.ids || []));
+  return D.rIds.get(key);
 }
 const vertragText = (key) => { const f = fixkostenErkennen().find((x) => vertragsKey(x) === key); return f ? vertragName(f) : key.split('|')[0]; };
 
@@ -219,6 +226,7 @@ function filterZeigen(conds) {
   if (!filterMehr) for (const [k, t] of mehrAktiv) chips.push(`<button class="chip" data-mehr="${k}" title="Filter entfernen">${t}<span class="x">×</span></button>`);
   if (S.neu) chips.push('<button class="chip" data-neu="1" title="Wieder alle Buchungen zeigen">nur neue<span class="x">×</span></button>');
   if (S.nf) chips.push(`<button class="chip" data-nf="1" title="Auch feste Verträge zeigen">ohne feste Verträge<span class="x">×</span></button>`);
+  if (S.reise) chips.push(`<button class="chip" data-reise="1" title="Reisefilter entfernen">Reise <b>${esc(reiseKarte(S.reise)?.tag || S.reise)}</b><span class="x">×</span></button>`);
   if (S.vertrag) chips.push(`<button class="chip" data-vertrag="1" title="Vertragsfilter entfernen">Vertrag <b>${esc(vertragText(S.vertrag))}</b><span class="x">×</span></button>`);
   if (S.zr) chips.push(`<button class="chip" data-zr="1" title="Zeitraum entfernen">Zeitraum <b>${esc(zrText())}</b><span class="x">×</span></button>`);
   if (S.ukat) chips.push(`<button class="chip" data-ukat="1" title="Unterkategorie-Filter entfernen">Unterkategorie <b>${esc(S.ukat)}</b><span class="x">×</span></button>`);
@@ -231,9 +239,10 @@ function filterZeigen(conds) {
   $('#chips').querySelector('[data-zr]')?.addEventListener('click', () => setze({ zr: '' }));
   $('#chips').querySelector('[data-nf]')?.addEventListener('click', () => setze({ nf: '' }));
   $('#chips').querySelector('[data-vertrag]')?.addEventListener('click', () => setze({ vertrag: '' }));
+  $('#chips').querySelector('[data-reise]')?.addEventListener('click', () => setze({ reise: '' }));
   $('#chips').querySelector('[data-neu]')?.addEventListener('click', () => setze({ neu: '' }));
   $('#chips').querySelectorAll('[data-mehr]').forEach((b) => b.onclick = () => setze(({ konto: { konto: '' }, kat: { kat: '', ukat: '' }, art: { art: 'alle' }, umb: { umb: false } })[b.dataset.mehr]));
-  const aktiv = S.q || S.jahr || S.monat || S.zr || S.nf || S.neu || S.vertrag || S.konto || S.kat || S.ukat || S.art !== 'alle' || S.umb;
+  const aktiv = S.q || S.jahr || S.monat || S.zr || S.nf || S.neu || S.vertrag || S.reise || S.konto || S.kat || S.ukat || S.art !== 'alle' || S.umb;
   $('#btn-reset').hidden = !abweichend();
   $('#btn-zurueck').hidden = stufe <= 0;
 }
@@ -537,7 +546,7 @@ function springe(sel, sanft = true) {
   z.classList.remove('blink'); void z.offsetWidth; z.classList.add('blink');
 }
 // Ziele für Klicks: Buchungen mit genau dem passenden Zeitraum (die gewählten Konten bleiben), das Gehalt, einzelne Monate
-const zuBuchungen = (x = {}) => ({ tab: 'buchungen', q: '', jahr: '', monat: '', zr: '', nf: '', neu: '', vertrag: '', kat: '', ukat: '', art: 'alle', ...x });
+const zuBuchungen = (x = {}) => ({ tab: 'buchungen', q: '', jahr: '', monat: '', zr: '', nf: '', neu: '', vertrag: '', reise: '', kat: '', ukat: '', art: 'alle', ...x });
 function zeitZiel(ms) {
   if (!ms.length) return {};
   const jahre = [...new Set(ms.map((k) => k.slice(0, 4)))];
@@ -2263,9 +2272,9 @@ function keineTreffer(conds) {
   }
   // 2. nur die Suche, ohne Konto, Kategorie, Art und Zeitraum
   const test = matcher(conds), l = D.rows.filter(test);
-  if (l.length && (S.konto || S.kat || S.ukat || S.art !== 'alle' || !S.umb || S.jahr || S.monat || S.nf || S.neu || S.vertrag)) {
+  if (l.length && (S.konto || S.kat || S.ukat || S.art !== 'alle' || !S.umb || S.jahr || S.monat || S.nf || S.neu || S.vertrag || S.reise)) {
     const konten = [...new Set(l.map((r) => r.k))], nurFremd = l.every((r) => FREMD_ART.has(r.art));
-    const ziel = { jahr: '', monat: '', zr: '', nf: '', neu: '', vertrag: '', konto: nurFremd && konten.length === 1 ? D.konten[konten[0]].name : '', kat: '', ukat: '', art: 'alle', umb: l.some((r) => r.art === 'Umbuchung') || S.umb };
+    const ziel = { jahr: '', monat: '', zr: '', nf: '', neu: '', vertrag: '', reise: '', konto: nurFremd && konten.length === 1 ? D.konten[konten[0]].name : '', kat: '', ukat: '', art: 'alle', umb: l.some((r) => r.art === 'Umbuchung') || S.umb };
     const warum = l.every((r) => r.art === 'Umbuchung') ? ' (es sind Umbuchungen, die sonst ausgeblendet sind)' : nurFremd ? ' (auf einem gemeinsamen bzw. Kinderkonto, das sonst nicht mitzählt)' : '';
     return kasten(`Mit den gesetzten Filtern nichts gefunden – ohne Filter gibt es <b>${l.length} Treffer</b>${warum}:`, l, ziel, 'Ohne Filter anzeigen');
   }
@@ -3312,7 +3321,7 @@ function vorschlagNehmen(i) {
 // Knopf „Zurück“ führen zur vorherigen Ansicht. Beim Tippen zählt ein ganzes Suchwort als ein Schritt.
 let tippt = false;
 let stufe = 0;   // eigene Schritte im Browser-Verlauf
-const ZUSTAND = ['q', 'jahr', 'monat', 'konto', 'kat', 'ukat', 'art', 'umb', 'tab', 'stichtag', 'wahl', 'kart', 'fixtab', 'zr', 'nf', 'neu', 'vertrag', 'sjahr', 'sfilter', 'sabf', 'gmonat', 'gbasis', 'gtjahr'];
+const ZUSTAND = ['q', 'jahr', 'monat', 'konto', 'kat', 'ukat', 'art', 'umb', 'tab', 'stichtag', 'wahl', 'kart', 'fixtab', 'zr', 'nf', 'neu', 'vertrag', 'reise', 'sjahr', 'sfilter', 'sabf', 'gmonat', 'gbasis', 'gtjahr'];
 const zustand = (x) => JSON.stringify(ZUSTAND.map((k) => x[k]));
 
 function setze(p, { tippen = false } = {}) {
@@ -3365,7 +3374,7 @@ function schnellSuche() {
 
 function hashSchreiben(hist = 'ersetzen') {
   const p = new URLSearchParams();
-  for (const k of ['q', 'jahr', 'monat', 'zr', 'nf', 'neu', 'vertrag', 'konto', 'kat', 'ukat', 'stichtag', 'wahl', 'sjahr', 'sfilter', 'sabf', 'gmonat', 'gbasis', 'gtjahr']) if (S[k]) p.set(k, S[k]);
+  for (const k of ['q', 'jahr', 'monat', 'zr', 'nf', 'neu', 'vertrag', 'reise', 'konto', 'kat', 'ukat', 'stichtag', 'wahl', 'sjahr', 'sfilter', 'sabf', 'gmonat', 'gbasis', 'gtjahr']) if (S[k]) p.set(k, S[k]);
   if (S.kart !== 'aus') p.set('kart', S.kart);
   if (S.fixtab !== 'vertraege') p.set('fixtab', S.fixtab);
   if (S.art !== 'alle') p.set('art', S.art);
@@ -3406,6 +3415,7 @@ function hashLesen() {
   if (p.get('nf') === '1') S.nf = '1';
   if (p.get('neu') === '1') S.neu = '1';
   if (p.get('vertrag')) S.vertrag = p.get('vertrag');
+  if (p.get('reise')) S.reise = p.get('reise');
   if (['aus', 'ein'].includes(p.get('art'))) S.art = p.get('art');
   S.umb = p.get('umb') === '1';
   if (/^\d{4}$/.test(p.get('sjahr') || '')) S.sjahr = p.get('sjahr');

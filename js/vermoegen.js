@@ -219,6 +219,55 @@ const NUR_ZEICHEN = new Set(['urlaub', 'steuer']);
 // Klick: Buchungen mit diesem Tag (mit Leerzeichen als Wortfolge in Anführungszeichen; Jahr in Anführungszeichen = Text, nicht Buchungsjahr)
 const zuTag = (H, t, jahr = '') => H.zuBuchungen({ q: `${/\s/.test(t) ? `"${t}"` : t}${jahr ? ` "${jahr}"` : ''}`, konto: '' });
 
+// Reisen ohne Tag: Buchungen ohne Tag mit der Finanzguru-Unterkategorie „Urlaub“ oder „Hotel & Urlaubswohnung“.
+// Liegen sie höchstens REISE_LUECKE Tage auseinander, sind sie eine Reise; dazu kommen Buchungen ohne Tag bei denselben Empfängern
+// bis 3 Tage davor und danach, nur Freizeit und Essen & Trinken (z. B. das Restaurant im Hotel). Eine Reise dauert höchstens REISE_MAX Tage.
+// Buchungen im Zeitraum einer getaggten Reise gehören zu dieser; Bewegungen zwischen eigenen Konten zählen nicht.
+// Steht im Buchungstext ein Zeitraum („30.10. bis 01.11.2026“), gilt er als Reisezeitraum.
+const REISE_UKAT = new Set(['Urlaub', 'Hotel & Urlaubswohnung']), REISE_LUECKE = 14, REISE_MAX = 45, REISE_MIN = 10000;
+const DAZU_KAT = new Set(['Freizeit', 'Essen & Trinken']);
+const ALLGEMEIN = /^(booking\.?com|airbnb|camping|hotel|urlaub)$/;                       // als Name nur, wenn es keinen besseren gibt
+const NICHTSSAGEND = /^(paypal|ec-pos|hobex|landesbank|payolution|sepa|visa|kartenzahlung|lastschrift)\b/;   // nie als Name
+const MON_K = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+const plusTage = (d, n) => new Date(Date.parse(d) + n * 864e5).toISOString().slice(0, 10);
+const ZEITRAUM = /(\d{1,2})\.(\d{1,2})\.(\d{4})?\s*(?:bis|-|–)\s*(\d{1,2})\.(\d{1,2})\.(\d{4})/;
+function zeitraumAus(rows) {
+  for (const r of rows) {
+    const m = ZEITRAUM.exec(`${r.z} ${r.g}`);
+    if (!m) continue;
+    const z = (t, mo, j) => `${j}-${mo.padStart(2, '0')}-${t.padStart(2, '0')}`;
+    const bis = z(m[4], m[5], m[6]), von = z(m[1], m[2], m[3] || (+m[2] > +m[5] ? String(+m[6] - 1) : m[6]));
+    if (von <= bis && tageZw(von, bis) < 60) return { von, bis };
+  }
+  return null;
+}
+function reisenOhneTag(D, N, getaggt) {
+  const eigen = new Set(D.konten.map((k) => N(k.name)));
+  const frei = (r) => !String(r.t || '').trim() && r.art !== 'Umbuchung' && r.art !== 'Sparen' && !eigen.has(N(r.g || ''));
+  const inTag = (d) => getaggt.some(([a, b]) => d >= a && d <= b);
+  // Datum für die Gruppierung: Reisebeginn laut Buchungstext (Anzahlung Wochen vorher), sonst das Buchungsdatum
+  const tag = new Map(D.rows.filter((r) => frei(r) && REISE_UKAT.has(r.ukat)).map((r) => [r, zeitraumAus([r])?.von || r.d]));
+  const kand = [...tag.keys()].filter((r) => !inTag(tag.get(r))).sort((a, b) => (tag.get(a) < tag.get(b) ? -1 : tag.get(a) > tag.get(b) ? 1 : 0));
+  const haufen = [];
+  for (const r of kand) {
+    const h = haufen.at(-1), d = tag.get(r);
+    if (h && tageZw(tag.get(h.at(-1)), d) <= REISE_LUECKE && tageZw(tag.get(h[0]), d) <= REISE_MAX) h.push(r); else haufen.push([r]);
+  }
+  const wer = (r) => String(r.g || r.z || '').trim();
+  return haufen.map((h) => {
+    const von = tag.get(h[0]), bis = tag.get(h.at(-1)), a = plusTage(von, -3), b = plusTage(bis, 3), drin = new Set(h);
+    const empf = new Set(h.map((r) => N(wer(r))).filter(Boolean));
+    const rows = [...h, ...D.rows.filter((r) => !drin.has(r) && frei(r) && DAZU_KAT.has(r.kat) && r.d >= a && r.d <= b && empf.has(N(wer(r))))];
+    // Name: Empfänger mit den meisten Buchungen (dann größter Betrag); allgemeine (Booking.com, Airbnb …) nur, wenn es keinen anderen gibt; nichtssagende nie
+    const je = new Map();
+    for (const r of h) { const w = wer(r); if (w && !NICHTSSAGEND.test(N(w))) { const x = je.get(w) || [0, 0]; x[0]++; x[1] += Math.abs(r.c); je.set(w, x); } }
+    const namen = [...je].sort((x, y) => y[1][0] - x[1][0] || y[1][1] - x[1][1]).map(([w]) => w), name = namen.find((w) => !ALLGEMEIN.test(N(w))) || namen[0] || '';
+    const jahr = bis.slice(0, 4), zr = zeitraumAus(rows), titel = name ? `${name} ${jahr}` : `Reise ${MON_K[+von.slice(5, 7) - 1]} ${von.slice(0, 4)}`;
+    return { key: N(titel), tag: titel, name: titel, basis: name || titel, jahr, rows, urlaub: true, erkannt: true, zeitraum: zr,
+      ziel: { reise: N(titel), konto: '' } };
+  });
+}
+
 export function reisen(H) {
   const D = H.D(), N = H.norm;
   const ausgleich = new Set((H.ausgleichTags?.() || []).map(N)), aus = new Set(E.reisenAus.map(N));
@@ -248,6 +297,10 @@ export function reisen(H) {
       if (rows.length) gruppen.push({ ...g, name: j ? `${g.tag} ${j}` : g.tag, jahr: j, rows });
     }
   }
+  // Zeiträume der getaggten Gruppen (bis 60 Tage, 3 Tage Rand) – darin erkannte Buchungen gehören schon zu einer Reise
+  const getaggt = gruppen.map((g) => g.rows.map((r) => r.d).sort()).filter((d) => tageZw(d[0], d.at(-1)) <= 60).map((d) => [plusTage(d[0], -3), plusTage(d.at(-1), 3)]);
+  const erkannt = reisenOhneTag(D, N, getaggt);
+  gruppen.push(...erkannt);
   const karten = [], ausgeblendet = [];
   for (const g of gruppen) {
     if (aus.has(N(g.name)) || aus.has(g.key)) { ausgeblendet.push(g.name); continue; }
@@ -264,33 +317,36 @@ export function reisen(H) {
       const kat = r.kat || 'Ohne Kategorie';
       kats.set(kat, (kats.get(kat) || 0) - r.c);
     }
-    const erste = rows[0].d, letzte = rows.at(-1).d, tage = tageZw(erste, letzte) + 1;
-    karten.push({ tag: g.name, basis: g.tag, jahr: g.jahr, key: g.key, urlaub: g.urlaub, c, n, nAlle: rows.length, erste, letzte, tage, jeTag: c / tage,
+    if (g.erkannt && c + gem + kind < REISE_MIN) continue;   // unter 100 € zusammen keine eigene Reise
+    const erste = g.zeitraum?.von || rows[0].d, letzte = g.zeitraum?.bis || rows.at(-1).d, tage = tageZw(erste, letzte) + 1;
+    karten.push({ tag: g.name, basis: g.erkannt ? g.basis : g.tag, jahr: g.jahr, key: g.key, urlaub: g.urlaub, erkannt: !!g.erkannt, ausText: !!g.zeitraum,
+      ziel: g.erkannt ? H.zuBuchungen(g.ziel) : zuTag(H, g.tag, g.jahr), c, n, nAlle: rows.length, ids: rows.map((r) => r.i), erste, letzte, tage, jeTag: c / tage,
       kats: [...kats].map(([k, v]) => ({ k, c: v })).filter((x) => x.c !== 0).sort((a, b) => b.c - a.c), gem, kind, anteil, vor: null });
   }
   // Vergleich mit der vorigen Reise: vorheriger Tag mit Kennzeichen Urlaub nach Startdatum
   const urlaube = karten.filter((x) => x.urlaub).sort((a, b) => (a.erste < b.erste ? -1 : a.erste > b.erste ? 1 : 0));
-  urlaube.forEach((x, i) => { const v = urlaube[i - 1]; if (v) x.vor = { tag: v.tag, basis: v.basis, jahr: v.jahr, erste: v.erste, dC: x.c - v.c, dTag: x.jeTag - v.jeTag }; });
+  urlaube.forEach((x, i) => { const v = urlaube[i - 1]; if (v) x.vor = { tag: v.tag, ziel: v.ziel, erste: v.erste, dC: x.c - v.c, dTag: x.jeTag - v.jeTag }; });
   karten.sort((a, b) => (a.erste < b.erste ? 1 : a.erste > b.erste ? -1 : 0));
-  return { karten, ausgeblendet: ausgeblendet.sort((a, b) => a.localeCompare(b, 'de')), mitTag, gesamt: karten.length, c: summe(karten, (x) => x.c) };
+  return { karten, ausgeblendet: ausgeblendet.sort((a, b) => a.localeCompare(b, 'de')), mitTag: mitTag + erkannt.length, nErkannt: karten.filter((x) => x.erkannt).length,
+    gesamt: karten.length, c: summe(karten, (x) => x.c) };
 }
 
 const KAT_KURZ = 3;   // so viele Kategorien sofort, weitere füllen freie Fläche
 function reiseKarte(H, x) {
-  const { esc, eur0, dde } = H, ziel = zuTag(H, x.basis, x.jahr);
+  const { esc, eur0, dde } = H, ziel = x.ziel;
   const max = Math.max(1, ...x.kats.map((k) => Math.abs(k.c))), pos = summe(x.kats.filter((k) => k.c > 0), (k) => k.c);
   const item = (k) => ({ n: esc(H.schoen(k.k)), c: k.c, w: k.c < 0 ? `<span class="neg">−${eur0(-k.c)}</span>` : eur0(k.c),
     p: k.c > 0 && pos ? `${Math.round((k.c / pos) * 100)} %` : '', ziel: { ...ziel, kat: k.k }, tip: `${H.schoen(k.k)} – anklicken: Buchungen` });
   const balken = x.kats.length ? H.balkenListe(x.kats.slice(0, KAT_KURZ).map(item), { max })
     + x.kats.slice(KAT_KURZ).map((k, i) => `<div class="fuell-aus" data-fuell="${i + 1}" data-stopp>${H.balkenListe([item(k)], { max })}</div>`).join('')
     : '<p class="s5-erkl">Keine Buchungen auf deinen Konten.</p>';
-  const vgl = x.vor ? `<p class="rs-vgl">ggü. ${H.zl(esc(x.vor.tag), zuTag(H, x.vor.basis, x.vor.jahr))} (${dde(x.vor.erste).slice(3)}): ${pm(H, x.vor.dC)} · ${pm(H, x.vor.dTag)} je Tag</p>` : '';
+  const vgl = x.vor ? `<p class="rs-vgl">ggü. ${H.zl(esc(x.vor.tag), x.vor.ziel)} (${dde(x.vor.erste).slice(3)}): ${pm(H, x.vor.dC)} · ${pm(H, x.vor.dTag)} je Tag</p>` : '';
   const info = [x.gem ? `${betrag(H, x.gem)} auf gemeinsamen Konten` : '', x.kind ? `${betrag(H, x.kind)} auf Kinderkonten` : '', x.anteil ? `${eur0(x.anteil)} Anteile von anderen erhalten` : '']
     .filter(Boolean);
-  const titel = `${esc(x.tag)}${x.urlaub ? ' <small class="rs-u">Urlaub</small>' : ''}`;
+  const titel = `${esc(x.tag)}${x.erkannt ? ' <small class="rs-u" title="Ohne Tag: erkannt an der Unterkategorie Urlaub bzw. Hotel">erkannt</small>' : x.urlaub ? ' <small class="rs-u">Urlaub</small>' : ''}`;
   const rechts = `<button class="rs-weg" data-rs-aus="${esc(x.tag)}" title="„${esc(x.tag)}“ ausblenden" aria-label="ausblenden">×</button>`;
-  return H.karte5(titel, `${dde(x.erste)} – ${dde(x.letzte)} · ${x.tage} ${x.tage === 1 ? 'Tag' : 'Tage'} (erste bis letzte Buchung)`,
-    `<button class="rs-summe"${H.geh(ziel)} title="Anklicken: alle Buchungen mit „${esc(x.tag)}“">
+  return H.karte5(titel, `${dde(x.erste)} – ${dde(x.letzte)} · ${x.tage} ${x.tage === 1 ? 'Tag' : 'Tage'} ${x.ausText ? '(laut Buchungstext)' : '(erste bis letzte Buchung)'}`,
+    `<button class="rs-summe"${H.geh(ziel)} title="Anklicken: ${x.erkannt ? 'die Buchungen dieser Reise' : `alle Buchungen mit „${esc(x.tag)}“`}">
       <b>${betrag(H, x.c)}</b><span>von deinen Konten · ${x.n} ${x.n === 1 ? 'Buchung' : 'Buchungen'}${x.c && x.tage > 1 ? ` · ${betrag(H, Math.round(x.jeTag))} je Tag` : ''}</span></button>
     ${balken}<div class="rs-unten">${vgl}${info.length ? `<p class="rs-info">nur zur Info: ${info.join(' · ')}</p>` : ''}</div>`, 'rs-k');
 }
@@ -298,11 +354,11 @@ function reiseKarte(H, x) {
 export function reisenSeite(H, rechts = '') {
   const R = reisen(H), { esc, eur0 } = H, titel = 'Reisen und Projekte';
   if (!R.mitTag) return H.kopf5(titel, 'Vergib in Finanzguru Tags, dann erscheinen hier deine Reisen.', rechts);
-  const weg = `<p class="s5-erkl rs-fuss">Nicht gezeigt: Jahreszahlen, „Urlaub“ (dient nur als Kennzeichen für den Vergleich), „Steuer“ (Reiter Steuer) und Ausgleich-Tags.${R.ausgeblendet.length
+  const weg = `<p class="s5-erkl rs-fuss">Reisen ohne Tag („erkannt“) bildet die App aus Buchungen mit der Unterkategorie Urlaub oder Hotel &amp; Urlaubswohnung, die höchstens ${REISE_LUECKE} Tage auseinanderliegen, ab ${eur0(REISE_MIN)} zusammen. Falsch erkannt? Mit × ausblenden oder in Finanzguru ein Tag vergeben. Nicht gezeigt: Jahreszahlen, „Urlaub“ (dient nur als Kennzeichen für den Vergleich), „Steuer“ (Reiter Steuer) und Ausgleich-Tags.${R.ausgeblendet.length
     ? ` Von dir ausgeblendet: ${R.ausgeblendet.map((t) => `<button class="rs-ein" data-rs-ein="${esc(t)}" title="Wieder zeigen">${esc(t)} ↺</button>`).join(' ')}` : ''}</p>`;
   if (!R.karten.length) return H.kopf5(titel, 'Alle Tags sind ausgeblendet.', rechts) + weg;
   const neu = R.karten[0];
-  const satz = `<b>${R.gesamt}</b> ${R.gesamt === 1 ? 'Reise oder Projekt' : 'Reisen und Projekte'} aus deinen Finanzguru-Tags – zusammen ${betrag(H, R.c)} von deinen Konten. Zuletzt: ${H.zl(`<b>${esc(neu.tag)}</b>`, zuTag(H, neu.basis, neu.jahr))} (${betrag(H, neu.c)}).`;
+  const satz = `<b>${R.gesamt}</b> ${R.gesamt === 1 ? 'Reise oder Projekt' : 'Reisen und Projekte'} ${R.nErkannt ? `– ${R.gesamt - R.nErkannt} aus deinen Finanzguru-Tags, ${R.nErkannt} ohne Tag erkannt` : 'aus deinen Finanzguru-Tags'} – zusammen ${betrag(H, R.c)} von deinen Konten. Zuletzt: ${H.zl(`<b>${esc(neu.tag)}</b>`, neu.ziel)} (${betrag(H, neu.c)}).`;
   return H.kopf5(titel, satz, rechts) + `<div class="s5-raster rs5">${R.karten.map((x) => reiseKarte(H, x)).join('')}</div>` + weg;
 }
 
