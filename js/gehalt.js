@@ -1015,7 +1015,8 @@ export function gehaltUeberblick(helfer) {
   const stufe = [...G.erh].reverse().find((x) => x.m <= z.m)?.auf ?? erste.gehalt;
   const W = auto(z) ? autoWerte(G, z) : null;
   const j = z.m.slice(0, 4), jahrAlle = G.alle.filter((x) => x.m.slice(0, 4) === j && x.quelle !== 'fehlt'), jahrIst = jahrAlle.filter((x) => x.quelle !== 'plan');
-  return { z, vm, erste, stufe, seit: erste.gehalt ? stufe / erste.gehalt - 1 : 0, verlauf: G.ist.slice(-24).map((x) => ({ m: x.m, netto: x.auszahlung, gehalt: x.gehalt })),
+  return { z, vm, erste, stufe, seit: erste.gehalt ? stufe / erste.gehalt - 1 : 0, verlauf: G.ist.slice(-24).map((x) => ({ m: x.m, netto: x.auszahlung, gehalt: x.gehalt, brutto: x.brutto })),
+    teile: detail(z) ? { brutto: z.brutto, steuer: steuer(z), sozial: sozial(z), auto: auto(z), bav: z.bav_an || 0, auszahlung: z.auszahlung } : null,
     abgaben: detail(z) ? abgaben(z) : null, auto: W ? { vorteil: W.jetzt, netto: W.jetzt * W.gs, gs: W.gs } : null,
     jahr: j, jahrNetto: sum(jahrAlle, (x) => x.auszahlung), jahrBrutto: sum(jahrAlle, (x) => x.brutto), jahrPlan: jahrAlle.length > jahrIst.length, nIst: jahrIst.length, fehlt: G.fehlt.map((x) => x.m) };
 }

@@ -547,5 +547,67 @@ main:has(#seite-start:not([hidden])) { max-width: 1900px; }
 .cp-td-karte .cp-kt h2 { display: flex; align-items: center; gap: 8px; }
 .cp-td-t { overflow: hidden; }
 .cp-td-t, .cp-td-t small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-@media (max-height: 820px) and (min-width: 1301px) { .cp { gap: 10px; } .cv { padding: 10px 14px !important; } .cp-hero { padding: 12px 18px 10px; } }
+@media (max-height: 820px) and (min-width: 1301px) { .cp:not(.bx) { gap: 10px; } .cv { padding: 10px 14px !important; } .cp-hero { padding: 12px 18px 10px; } }
 .cp-kat .bl-kopf span { white-space: nowrap; }
+
+/* Reihe D: füllt den Rest der Bildschirmhöhe */
+.cp:not(.bx) { min-height: calc(100vh - 100px); display: flex; flex-direction: column; }
+.cp-reihe-d { flex: 1 1 auto; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr); gap: 14px; min-height: 230px; }
+.cp-reihe-d > .card { margin: 0; padding: 14px 18px; gap: 8px; }
+.cp-ab { display: flex; flex-direction: column; }
+.cp-ab-chart { flex: 1 1 auto; height: auto; min-height: 150px; position: relative; }
+.cp-fx .bl-z { padding: 3px 2px; }
+.cp-fx .bl-kopf span, .cp-kat .bl-kopf span { white-space: nowrap; }
+.cp-ber { display: grid; }
+.cp-ber-z { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; padding: 9px 4px; border: 0; border-top: 1px solid var(--border); background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.cp-ber-z:first-child { border-top: 0; }
+.cp-ber-z:hover { background: var(--accent-soft); }
+.cp-ber-z span { display: flex; flex-direction: column; min-width: 0; font-weight: 600; font-size: var(--fs-m); }
+.cp-ber-z small { font-weight: 400; font-size: var(--fs-xs); color: var(--muted); }
+.cp-ber-z b { font-size: 19px; font-weight: 650; white-space: nowrap; }
+.cp-ber-z b.pos { color: var(--ein-text); }
+.cp-ber-z b.neg { color: var(--aus-text); }
+@media (max-width: 1300px) { .cp-reihe-d { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .cp-ab { grid-column: 1 / -1; } .cp-ab-chart { min-height: 200px; } }
+@media (max-width: 900px) { .cp:not(.bx) { min-height: 0; } .cp-reihe-d { grid-template-columns: minmax(0, 1fr); } }
+
+/* Cockpit füllt genau die Bildschirmhöhe: oben und unten wachsen die Grafiken, Kacheln und Zu tun behalten ihre Höhe */
+@media (min-width: 901px) {
+  .cp:not(.bx) { display: grid; min-height: calc(100vh - 96px); grid-template-rows: minmax(min-content, 1.45fr) auto auto minmax(min-content, 1fr); grid-template-columns: minmax(0, 1fr); }
+  .cp-reihe-a, .cp-reihe-d { min-height: 0; }
+  .cp-hero-g { min-height: 0; }
+  .cp-hero-chart { flex: 1 1 auto; height: auto !important; min-height: 160px; }
+  .cp-ab-chart { min-height: 130px; }
+  .cp-reihe-d { min-height: 0; }
+}
+#cp-waechter > .card { margin-top: 10px; box-shadow: none; }
+@media (min-width: 901px) { .cp:not(.bx) { height: calc(100vh - 96px); min-height: 900px; grid-template-rows: minmax(0, 1.45fr) auto auto minmax(0, 1fr); } }
+.cp-ber-z { padding: 6px 4px; }
+.cp-ber-z b { font-size: 17px; }
+.cp-reihe-d > .card { padding: 12px 16px; gap: 6px; }
+@media (min-width: 901px) { main:has(#seite-start:not([hidden])) { padding-bottom: 14px; } .cp:not(.bx) { height: calc(100vh - 92px); min-height: 880px; grid-template-rows: minmax(330px, 1.4fr) auto auto minmax(262px, 1fr); } }
+
+/* Einkommen & Steuer: zweite Reihe */
+.ek-reihe2 { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); }
+.ek-verlauf { display: flex; flex-direction: column; }
+.ek-chart { flex: 1 1 auto; height: auto; min-height: 260px; }
+.ek-wf .bl-z { padding: 2px; }
+.ek-wf { margin-bottom: 6px; }
+@media (max-width: 1100px) { .ek-reihe2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .ek-reihe2 > :first-child { grid-column: 1 / -1; } }
+@media (max-width: 900px) { .ek-reihe2 { grid-template-columns: minmax(0, 1fr); } .ek-chart { min-height: 220px; } }
+.ek-wf .bx-rz { padding: 5px 2px; }
+.ek-wf .bx-rz span { flex-direction: row; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.ek-wf .bx-rz.bx-gilt { border-top: 1px solid var(--border-strong); }
+.ek-wf .bx-rz.bx-gilt:first-child { border-top: 0; }
+
+/* Überblicksseiten kompakter, damit sie in die Bildschirmhöhe passen */
+.bx { gap: 12px; }
+.bx .cp-kern { font-size: clamp(20px, 1.9vw, 27px); }
+.bx .cp-kopf { padding-top: 0; }
+.bx .cp-karte { padding: 14px 18px; gap: 8px; }
+.ek-wf .bx-rz { padding: 3px 2px; }
+.ek-wf .bx-rz b { font-size: var(--fs-m); }
+.ek-wf .bx-rz.bx-gilt b { font-size: var(--fs-b); }
+.ek-chart { min-height: 230px; }
+.bx .kz { padding: 13px 16px 12px; }
+.bx .kz-sp, .bx .kz-sp .sp { height: 26px; }
+.bx .cp-kern { max-width: none; }

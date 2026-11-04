@@ -974,6 +974,33 @@ function cockpitSeite() {
     : '<p class="leer klein">Keine Ausgaben in den letzten 12 Monaten.</p>';
 
   const hb = handlungsbedarf(), hbRot = hb.some((x) => x.ampel === 'rot');
+
+  // Reihe D: feste Abbuchungen der nächsten 30 Tage (Tag für Tag, mit Gehalt), Fixkosten nach Art, Eckwerte der anderen Bereiche
+  const T30 = naechsteTermine(R.vertraege), T30s = T30.reduce((t, x) => t + x.f.betrag, 0), gK = naechstesGehalt(), zuKal = { tab: 'fix', fixtab: 'kalender', konto: '' };
+  const arten = new Map();
+  for (const f of R.vertraege) { const art = fixArt(f), x = arten.get(art) || arten.set(art, { art, c: 0, n: 0 }).get(art); x.c += f.proMonat; x.n++; }
+  const al = [...arten.values()].sort((a1, b1) => b1.c - a1.c), alR = al.slice(4), alRc = alR.reduce((t, x) => t + x.c, 0), zuFix = { tab: 'fix', fixtab: 'vertraege', konto: '' };
+  const pzG = (c) => (R.gehalt ? `${((c / R.gehalt) * 100).toLocaleString('de-DE', { maximumFractionDigits: 0 })} %` : '');
+  const fixL = balkenListe([...al.slice(0, 4).map((x) => ({ n: FIX_KURZ[x.art] || esc(x.art), c: x.c, p: pzG(x.c), ziel: zuFix, farbe: 'var(--fest)', tip: `${x.art}: ${eur0(x.c)} im Monat · ${x.n} ${x.n === 1 ? 'Vertrag' : 'Verträge'}` })),
+    ...(alR.length ? [{ n: `${alR.length} weitere Arten`, tip: alR.map((x) => `${x.art} ${eur0(x.c)}`).join(', '), c: alRc, p: pzG(alRc), ziel: zuFix, farbe: 'var(--fest)' }] : []),
+    { n: '<b>Summe</b>', c: 0, w: `<b>${eur0(R.fix)}</b>`, p: `<b>${pzG(R.fix)}</b>`, cls: 'bl-summe' }], { max: Math.max(1, ...al.map((x) => x.c), alRc), kopf: ['Art', 'im Monat', 'vom Gehalt'] });
+  const ber = [];
+  const gU = sicher(() => gehaltUeberblick(gehaltHelfer())) || null;
+  if (gU?.z) ber.push({ t: `Gehalt netto ${MONAT[+gU.z.m.slice(5) - 1]}`, sub: `Grundgehalt ${eurE0(gU.stufe)} brutto${gU.auto ? ` · Dienstwagen kostet ${eurE0(gU.auto.netto)} netto` : ''}`, w: eurE0(gU.z.auszahlung), ziel: { tab: 'einkommen' } });
+  const sP = sicher(() => prognoseRechnen(H, +D.bis.slice(0, 4))) || null;
+  if (sP) ber.push({ t: `Steuer ${sP.jahr}`, sub: `${sP.ohne.erg >= 0 ? 'Erstattung' : 'Nachzahlung'} ohne Anlage U · berechnet${sP.mit ? ` · mit Anlage U ${plusMinus(sP.mit.erg)}` : ''}`, w: plusMinus(sP.ohne.erg), cls_: sP.ohne.erg >= 0 ? 'pos' : 'neg', ziel: { tab: 'einkommen' } });
+  const uK = sicher(() => unterhaltKurz(H)) || null, uL = uK?.K?.letzte;
+  if (uL) { const ri = Math.round((uK.K.X.summe - uL.summe) * 100); ber.push({ t: 'Unterhalt verbindlich', sub: `Berechnung vom ${dde(uL.datum)} · Risiko bei Neuberechnung ${ri >= 0 ? '+' : '−'}${eur(Math.abs(ri))}`, w: eurE(uL.summe), ziel: { tab: 'familie' } }); }
+  const st0 = steuerStand();
+  if (st0) ber.push({ t: `Belege ${st0.jahr}`, sub: st0.offen ? 'Steuer-Entscheidungen offen' : 'alle Steuer-Entscheidungen getroffen', w: st0.offen ? `${st0.offen} offen` : 'erledigt', ziel: { tab: 'steuer' } });
+  const bereiche = ber.length ? `<div class="cp-ber">${ber.map((x) => `<button class="cp-ber-z"${geh(x.ziel)}><span>${x.t}<small>${x.sub}</small></span><b class="${x.cls_ || ''}">${x.w}</b></button>`).join('')}</div>` : '<p class="leer klein">Noch keine Angaben.</p>';
+  const reiheD = `<div class="cp-reihe-d">
+      <section class="card cp-karte cp-ab"><div class="cp-kt"><h2>Abbuchungen der nächsten 30 Tage</h2>${zl(`<b class="bx-wert">${eur0(T30s)}</b>`, zuKal)}</div>
+        <p class="cp-leg"><i class="cp-leg-a"></i>feste Abbuchungen je Tag ${gK ? `<i class="cp-leg-e"></i>Gehalt am ${tagKurz(gK.am)}` : ''}<span>· ${T30.length} Abbuchungen laut Verträgen</span></p>
+        <div class="cp-chart cp-ab-chart"><canvas id="c-cp-abb" aria-label="Feste Abbuchungen der nächsten 30 Tage"></canvas></div></section>
+      <section class="card cp-karte cp-fx"><div class="cp-kt"><h2>Fixkosten nach Art</h2><span class="klein muted">${R.vertraege.length} laufende Verträge</span></div>${fixL}</section>
+      <section class="card cp-karte cp-bk"><div class="cp-kt"><h2>Aus den anderen Bereichen</h2></div>${bereiche}</section>
+    </div>`;
   box.innerHTML = `<div class="cp">
     <div class="cp-reihe-a">
       ${hero}
@@ -981,13 +1008,45 @@ function cockpitSeite() {
         <p class="cp-fuss" title="Durchschnitt ${esc(monatsText(K.ms))} · ohne Kinder- und gemeinsame Konten · Beträge gerundet, Summen aus den genauen Werten">Strich: Ø 12 Monate · ${zl('alle Kategorien', katAlle)}</p></section>
     </div>
     <div class="cp-drei cp-vier">${kacheln}</div>
-    <section class="card cp-karte cp-td-karte"><div class="cp-kt"><h2>Zu tun ${hb.length ? `<span class="cp-zahl${hbRot ? ' neg' : ''}">${hb.length}</span>` : ''}</h2>${hb.length > 4 ? `<span class="klein muted">+ ${hb.length - 4} weitere · ${zl('alle Fristen', { tab: 'fix', fixtab: 'kalender', _springe: '#fr-liste' })}</span>` : ''}</div>${handlungHtml(hb)}</section>
-    <div id="cp-waechter"${cpWaechterAuf ? '' : ' hidden'}>${cpWaechterAuf ? sicher(() => waechterKarte(H)) : ''}</div>
+    <section class="card cp-karte cp-td-karte"><div class="cp-kt"><h2>Zu tun ${hb.length ? `<span class="cp-zahl${hbRot ? ' neg' : ''}">${hb.length}</span>` : ''}</h2>${hb.length > 4 ? `<span class="klein muted">+ ${hb.length - 4} weitere · ${zl('alle Fristen', { tab: 'fix', fixtab: 'kalender', _springe: '#fr-liste' })}</span>` : ''}</div>${handlungHtml(hb)}
+      <div id="cp-waechter"${cpWaechterAuf ? '' : ' hidden'}>${cpWaechterAuf ? sicher(() => waechterKarte(H)) : ''}</div></section>
+    ${reiheD}
   </div>`;
   gehBinden(box);
   if (cpWaechterAuf) sicher(() => waechterBinden(box, H));
   box.querySelector('[data-cp-waechter]')?.addEventListener('click', () => { cpWaechterAuf = !cpWaechterAuf; cockpitSeite(); if (cpWaechterAuf) springe('#cp-waechter'); });
   sicher(() => cpMonateZeichnen(V.monate));
+  sicher(() => cpAbbZeichnen(T30, gK));
+}
+
+// Feste Abbuchungen je Tag (30 Tage ab dem Datenstand; fällige, noch nicht gebuchte am ersten Tag) und das erwartete Gehalt
+function cpAbbZeichnen(l, g) {
+  if (!$('#c-cp-abb')) return;
+  const tage = Array.from({ length: 31 }, (_, i) => plusTage(D.bis, i)), je = tage.map(() => []);
+  for (const x of l) je[Math.max(0, tage.indexOf(x.am) < 0 ? (x.am <= D.bis ? 0 : -1) : tage.indexOf(x.am))]?.push(x);
+  const ab = je.map((xs) => xs.reduce((t, x) => t + x.f.betrag, 0) / 100), gh = tage.map((d) => (g && g.am === d ? g.c / 100 : 0));
+  const o = basis();
+  o.interaction = { mode: 'index', intersect: false };
+  o.layout = { padding: { top: 6 } };
+  o.scales = {
+    x: { ...achsenStil(), stacked: true, grid: { display: false }, ticks: { ...achsenStil().ticks, font: { size: 10.5 }, maxRotation: 0, autoSkip: true, autoSkipPadding: 8 } },
+    y: { ...achsenStil(), stacked: true, beginAtZero: true, ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 4 } },
+  };
+  o.plugins.tooltip.callbacks = {
+    title: (it) => `${tagKurz(tage[it[0].dataIndex])}${it[0].dataIndex === 0 ? ' (heute, mit fälligen noch nicht gebuchten)' : ''}`,
+    label: (it) => (it.raw ? ` ${it.dataset.label}: ${EUR0.format(it.raw)}` : null),
+    afterBody: (it) => je[it[0].dataIndex].slice(0, 8).map((x) => `${vertragName(x.f)}: ${eur0(x.f.betrag)}`),
+  };
+  o.onClick = () => setze({ tab: 'fix', fixtab: 'kalender', konto: '' });
+  o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
+  zeichne('c-cp-abb', {
+    type: 'bar',
+    data: { labels: tage.map((d) => `${+d.slice(8)}.${+d.slice(5, 7)}.`), datasets: [
+      { label: 'Abbuchungen', data: ab, backgroundColor: css('--fest'), borderRadius: 3, maxBarThickness: 18 },
+      { label: 'Gehalt', data: gh, backgroundColor: css('--akzent'), borderRadius: 3, maxBarThickness: 18 },
+    ] },
+    options: o,
+  });
 }
 
 // Einnahmen und Ausgaben je Monat: die letzten Monate (Handy weniger), der laufende Monat und die Prognose (schraffiert),
@@ -1246,8 +1305,8 @@ function einkommenSeite() {
   const z = g?.z;
   const pm = (c) => `${c >= 0 ? '+' : '−'}${eur0(Math.abs(c))}`;
   const kern = !z ? 'Noch keine Gehaltsdaten in der Datei.'
-    : `Im ${MONAT[+z.m.slice(5) - 1]} kamen <b>${eurE0(z.auszahlung)}</b> netto aufs Konto${P ? ` – für ${P.jahr} ist voraussichtlich eine <b class="${P.ohne.erg >= 0 ? 'pos' : 'neg'}">${P.ohne.erg >= 0 ? 'Erstattung' : 'Nachzahlung'} von ${eur0(Math.abs(P.ohne.erg))}</b> zu erwarten` : ''}.`;
-  const unter = z ? `Abrechnung ${monLang(z.m)}: brutto ${eurE0(z.brutto)}, Grundgehalt ${eurE0(g.stufe)}${g.auto ? `, Dienstwagen ${eurE0(g.auto.vorteil)} geldwerter Vorteil` : ''}${P ? ' · Steuer-Prognose: Einzelveranlagung, ohne Anlage U · Orientierung, keine Steuerberatung' : ''}` : '';
+    : `${MONAT[+z.m.slice(5) - 1]}: <b>${eurE0(z.auszahlung)}</b> netto aufs Konto${P ? ` · Steuer ${P.jahr}: voraussichtlich <b class="${P.ohne.erg >= 0 ? 'pos' : 'neg'}">${P.ohne.erg >= 0 ? '+' : '−'}${eur0(Math.abs(P.ohne.erg))} ${P.ohne.erg >= 0 ? 'Erstattung' : 'Nachzahlung'}</b>` : ''}`;
+  const unter = z ? `Abrechnung ${monLang(z.m)}: brutto ${eurE0(z.brutto)}, Grundgehalt ${eurE0(g.stufe)}${g.auto ? `, Dienstwagen ${eurE0(g.auto.vorteil)} geldwerter Vorteil` : ''}${P ? ' · Steuer: Einzelveranlagung, ohne Anlage U, Orientierung' : ''} · Beträge gerundet` : '';
   const kacheln = !z ? '' : [
     kachel({ titel: `Netto ${MON[+z.m.slice(5) - 1]}`, wert: eurE0(z.auszahlung), ziel: zuG, aend: g.vm ? `${pmHtml(Math.round((z.auszahlung - g.vm.auszahlung) * 100))} ggü. ${MON[+g.vm.m.slice(5) - 1]}` : 'erste Abrechnung',
       spark: sparkline(g.verlauf.map((x) => Math.round((x.netto || 0) * 100))), unter: 'aufs Konto · Linie: 24 Abrechnungen' }),
@@ -1286,17 +1345,73 @@ function einkommenSeite() {
     ${fr.map((x) => { const n = tage(x.am); return `<p class="bx-zeile"><i class="ampel ${n < 0 ? 'rot' : n <= 14 ? 'gelb' : 'neutral'}" aria-hidden="true"></i>${x.ziel ? zl(esc(x.titel), x.ziel) : esc(x.titel)} · ${n < 0 ? `seit ${-n} Tagen überfällig` : n === 0 ? 'heute' : `in ${n} Tagen`}</p>`; }).join('')}
     ${bxLink('Belege und Steuerjahr', { tab: 'steuer', sjahr: '' })}`;
 
+  // Vom Brutto zur Auszahlung (letzte Abrechnung mit allen Einzelheiten): gedruckte Werte, „übrige“ = Differenz nach fester Regel
+  let brutto = '<p class="bx-u">Die letzte Abrechnung hat keine Einzelheiten.</p>';
+  const T = g?.teile;
+  if (T) {
+    const c = (v) => Math.round(v) * 100;   // auf volle Euro, damit die gezeigten Zeilen genau aufgehen
+    const B = c(T.brutto), St = c(T.steuer), So = c(T.sozial), N = B - St - So, Au = c(T.auto), Bv = c(T.bav), Az = c(T.auszahlung), Ue = N - Au - Bv - Az;
+    // Rechenzeichen beim Namen, Betrag ohne Vorzeichen (Abzüge sind normale Ausgaben, nicht rot)
+    const z1 = (n, sub, v, cls_ = '', summe = false) => `<div class="bx-rz${summe ? ' bx-gilt' : ''}"><span>${summe ? '' : v > 0 ? '− ' : '+ '}${n}<small>${sub}</small></span><b class="${cls_}">${eur0(Math.abs(v))}</b></div>`;
+    brutto = `<div class="ek-wf">
+      ${z1('Brutto', `Abrechnung ${monLang(z.m)}`, B, '', true)}
+      ${z1('Steuern', 'Lohnsteuer, Soli, Kirche', St)}
+      ${z1('Sozialversicherung', 'Rente, Arbeitslosen-, Kranken-, Pflege-', So)}
+      ${z1('= Netto', 'Brutto minus Abgaben', N, '', true)}
+      ${Au ? z1('Dienstwagen', 'versteuert, nicht ausgezahlt', Au) : ''}
+      ${Bv ? z1('Betriebsrente', 'Entgeltumwandlung', Bv) : ''}
+      ${Math.abs(Ue) >= 100 ? z1(Ue > 0 ? 'übrige Abzüge' : 'übrige Zuschläge', 'Differenz, berechnet', Ue) : ''}
+      ${z1('= Auszahlung', 'aufs Konto', Az, 'pos', true)}</div>`;
+  }
+
+  // Steuer laut Bescheid je Jahr
+  const soJ = D.j.steuer_offiziell?.jahre || {}, bJ = Object.keys(soJ).filter((k) => /bescheid/i.test(soJ[k]?.art || '') && soJ[k]?.ergebnis?.est != null).sort();
+  const bescheide = bJ.length ? `${balkenListe(bJ.map((j) => { const e = soJ[j].ergebnis; return { n: j, sub: `zu versteuern ${eurE0(e.zve || 0)}`, c: Math.round(e.est * 100), w: eurE0(e.est),
+      p: e.erstattung != null ? `<span class="${e.erstattung >= 0 ? 'pos' : 'neg'}">${e.erstattung >= 0 ? '+' : '−'}${eurE0(Math.abs(e.erstattung))}</span>` : '', farbe: 'var(--fest)', ziel: { tab: 'steuer', sjahr: j } }; }), { kopf: ['Jahr', 'Einkommensteuer', 'Erstattung'] })}`
+    : '<p class="bx-u">Noch kein Steuerbescheid in den Daten.</p>';
+
+  const reihe2 = z ? `<div class="bx-raster ek-reihe2">
+      ${bxKarte('Brutto und Auszahlung je Abrechnung', `<p class="cp-leg"><i class="cp-leg-e"></i>Brutto <i class="cp-leg-a"></i>aufs Konto <span>· ${g.verlauf.length} Abrechnungen</span></p><div class="cp-chart ek-chart"><canvas id="c-ek-verlauf" aria-label="Brutto und Auszahlung je Abrechnung"></canvas></div>`, { cls_: 'ek-verlauf' })}
+      ${bxKarte(`Vom Brutto zur Auszahlung · ${MON[+z.m.slice(5) - 1]}`, brutto)}
+      ${bxKarte('Steuer laut Bescheid', bescheide)}
+    </div>` : '';
+
   box.innerHTML = `<div class="cp bx">
     ${bxKopf('Einkommen & Steuer', kern, unter)}
     ${kacheln ? `<div class="cp-kz">${kacheln}</div>` : ''}
     <div class="bx-raster bx-drei">
-      ${z ? bxKarte(`Gehalt ${g.jahr}`, jahrInhalt, { fuss: 'Werte laut Abrechnungen' }) : ''}
-      ${bxKarte(`Steuer-Prognose ${P?.jahr || jetztJ}`, progInhalt, { rechts: '<span class="marke">berechnet</span>', fuss: 'Einzelveranlagung · Orientierung, keine Steuerberatung – mit deiner Steuerberaterin klären' })}
-      ${bxKarte('Steuerjahr', stInhalt, { fuss: 'Fristen: Orientierung, berechnet nach fester Regel' })}
+      ${z ? bxKarte(`Gehalt ${g.jahr}`, jahrInhalt) : ''}
+      ${bxKarte(`Steuer-Prognose ${P?.jahr || jetztJ}`, progInhalt, { rechts: '<span class="marke" title="Einzelveranlagung · Orientierung, keine Steuerberatung – mit deiner Steuerberaterin klären">berechnet</span>' })}
+      ${bxKarte('Steuerjahr', stInhalt)}
     </div>
-    ${RUNDUNG}
+    ${reihe2}
   </div>`;
   gehBinden(box);
+  if (g?.verlauf?.length) sicher(() => ekVerlaufZeichnen(g.verlauf));
+}
+
+// Brutto und Auszahlung je Abrechnung (Euro aus gehalt.js)
+function ekVerlaufZeichnen(v) {
+  if (!$('#c-ek-verlauf')) return;
+  const ms = matchMedia('(max-width: 640px)').matches ? v.slice(-8) : v;
+  const o = basis();
+  o.interaction = { mode: 'index', intersect: false };
+  o.layout = { padding: { top: 6 } };
+  o.scales = {
+    x: { ...achsenStil(), grid: { display: false }, ticks: { ...achsenStil().ticks, font: { size: 10.5 }, maxRotation: 0, autoSkip: true, autoSkipPadding: 8 } },
+    y: { ...achsenStil(), beginAtZero: true, ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 4 } },
+  };
+  o.plugins.tooltip.callbacks = { title: (it) => `Abrechnung ${monLang(ms[it[0].dataIndex].m)}`, label: (it) => ` ${it.dataset.label}: ${EUR0.format(it.raw)}` };
+  o.onClick = (_, el) => { if (el.length) setze({ tab: 'gehalt', gmonat: ms[el[0].index].m }); };
+  o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
+  zeichne('c-ek-verlauf', {
+    type: 'bar',
+    data: { labels: ms.map((x) => monKurz(x.m)), datasets: [
+      { label: 'Brutto', data: ms.map((x) => Math.round(x.brutto || 0)), backgroundColor: css('--akzent'), borderRadius: 3, maxBarThickness: 16, categoryPercentage: 0.74, barPercentage: 0.92 },
+      { label: 'aufs Konto', data: ms.map((x) => Math.round(x.netto || 0)), backgroundColor: css('--fest'), borderRadius: 3, maxBarThickness: 16, categoryPercentage: 0.74, barPercentage: 0.92 },
+    ] },
+    options: o,
+  });
 }
 
 // ---------------------------------------------------------------- Familie
