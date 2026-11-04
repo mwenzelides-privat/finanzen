@@ -611,3 +611,33 @@ main:has(#seite-start:not([hidden])) { max-width: 1900px; }
 .bx .kz { padding: 13px 16px 12px; }
 .bx .kz-sp, .bx .kz-sp .sp { height: 26px; }
 .bx .cp-kern { max-width: none; }
+
+/* Überblick Geldfluss, Vermögen, Familie: drei Spalten × zwei Reihen auf breiten Bildschirmen */
+.bx-raster.bx-sechs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.bx-flex { display: flex; flex-direction: column; }
+.bx-chart { flex: 1 1 auto; height: auto; min-height: 210px; }
+@media (max-width: 1300px) { .bx-raster.bx-sechs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 900px) { .bx-raster.bx-sechs { grid-template-columns: minmax(0, 1fr); } .bx-chart { min-height: 200px; } }
+
+/* drei Spalten: Inhalte kompakt, Grafiken füllen den Rest der Karte, Fußzeilen einzeilig (ganzer Text im Tooltip) */
+.bx-sechs > .card { display: flex; flex-direction: column; padding: 12px 16px; gap: 6px; }
+.bx-sechs .cp-chart { flex: 1 1 auto; height: auto; min-height: 150px; }
+.bx-sechs .wf-f { height: auto; min-height: 140px; }
+.bx-sechs .wf { flex: 1 1 auto; }
+.bx-sechs .cp-fuss { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bx-sechs .bx-kz { padding: 4px 4px; }
+.bx-sechs .bx-rz, .bx-sechs .bx-wo-z, .bx-sechs .bx-mz { padding: 4px 2px; }
+.bx-sechs .bx-u { font-size: var(--fs-s); }
+.bx-sechs .bx-leg { gap: 2px 12px; }
+.bx-sechs .bl-z { padding: 2px; }
+.bx-sechs .bx-dl dd { font-size: 19px; }
+
+@media (min-width: 901px) {
+  .bx:has(.bx-sechs) .kz-u { display: none; }
+  .bx:has(.bx-sechs) { gap: 10px; }
+  .bx-raster.bx-sechs { gap: 12px; }
+  .bx:has(.bx-sechs) .kz { padding: 11px 15px 10px; }
+}
+.bx-rund-k { display: none; }
+@media (min-width: 901px) { .bx:has(.bx-sechs) .bx-rund-k { display: inline; } .bx:has(.bx-sechs) .bx-rundung { display: none; } }
+@media (max-width: 900px) { .bx-sechs .cp-fuss { white-space: normal; overflow: visible; } }
