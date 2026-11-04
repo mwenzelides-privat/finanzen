@@ -1018,6 +1018,8 @@ export function gehaltUeberblick(helfer) {
   const j = z.m.slice(0, 4), jahrAlle = G.alle.filter((x) => x.m.slice(0, 4) === j && x.quelle !== 'fehlt'), jahrIst = jahrAlle.filter((x) => x.quelle !== 'plan');
   return { z, vm, erste, stufe, seit: erste.gehalt ? stufe / erste.gehalt - 1 : 0, verlauf: G.ist.slice(-24).map((x) => ({ m: x.m, netto: x.auszahlung, gehalt: x.gehalt, brutto: x.brutto })),
     alle: G.ist.map((x) => ({ m: x.m, gehalt: x.gehalt, stufe: stufeAm(x.m) })), erh: G.erh.filter((x) => !x.plan),
+    // Arbeitgeber je Zeitraum (aufeinanderfolgende Abrechnungen mit demselben Arbeitgeber)
+    arbeitgeber: G.ist.reduce((l, x) => { const n = String(x.arbeitgeber || '').trim() || 'unbekannt', z = l.at(-1); if (z && z.name === n) z.bis = x.m; else l.push({ name: n, von: x.m, bis: x.m }); return l; }, []),
     teile: detail(z) ? { brutto: z.brutto, steuer: steuer(z), sozial: sozial(z), auto: auto(z), bav: z.bav_an || 0, auszahlung: z.auszahlung } : null,
     abgaben: detail(z) ? abgaben(z) : null, auto: W ? { vorteil: autoTeile(z).lfd, netto: autoTeile(z).lfd * W.gs, gs: W.gs, m: z.m } : null,
     jahr: j, jahrNetto: sum(jahrAlle, (x) => x.auszahlung), jahrBrutto: sum(jahrAlle, (x) => x.brutto), jahrPlan: jahrAlle.length > jahrIst.length, nIst: jahrIst.length, fehlt: G.fehlt.map((x) => x.m) };

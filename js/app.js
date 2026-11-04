@@ -1475,7 +1475,8 @@ function einkommenSeite() {
     : '<p class="bx-u">Noch kein Steuerbescheid in den Daten.</p>';
 
   const reihe2 = z ? `<div class="bx-raster ek-reihe2">
-      ${bxKarte('Grundgehalt und Erhöhungen', `<p class="cp-leg"><i class="cp-leg-a"></i>Grundgehalt brutto im Monat <span>· Punkte: Erhöhungen mit Prozent</span></p><div class="cp-chart ek-chart"><canvas id="c-ek-verlauf" aria-label="Grundgehalt und Erhöhungen"></canvas></div>`, { cls_: 'ek-verlauf', fuss: `Von ${eurE0(g.erste.gehalt)} (${monKurz(g.erste.m)}) auf ${eurE0(g.stufe)} – laut Abrechnungen` })}
+      ${bxKarte('Grundgehalt und Erhöhungen', `<div class="ek-gg"><div><span>seit ${monKurz(g.erste.m)}</span><b class="pos">+${Math.round(g.seit * 100)} %</b></div><div><span>in Euro brutto im Monat</span><b>${eurE0(g.erste.gehalt)} → ${eurE0(g.stufe)}</b><small>+${eurE0(g.stufe - g.erste.gehalt)} · ${g.erh.length} Erhöhungen</small></div>
+        <div><span>Arbeitgeber</span>${g.arbeitgeber.map((a) => `<b class="ek-ag">${esc(a.name)}</b><small>${monKurz(a.von)} – ${a.bis === g.alle.at(-1).m ? 'heute' : monKurz(a.bis)}</small>`).join('')}</div></div><p class="cp-leg"><i class="cp-leg-a"></i>Grundgehalt brutto im Monat <span>· Punkte: Erhöhungen mit Prozent</span></p><div class="cp-chart ek-chart"><canvas id="c-ek-verlauf" aria-label="Grundgehalt und Erhöhungen"></canvas></div>`, { cls_: 'ek-verlauf', fuss: `Von ${eurE0(g.erste.gehalt)} (${monKurz(g.erste.m)}) auf ${eurE0(g.stufe)} – laut Abrechnungen` })}
       ${bxKarte(`Vom Brutto zur Auszahlung · ${MON[+z.m.slice(5) - 1]}`, brutto)}
       ${bxKarte('Steuer laut Bescheid', bescheide)}
     </div>` : '';
@@ -2301,12 +2302,15 @@ function tabBuchungen(conds) {
   for (let k = von.slice(0, 7); k <= bis.slice(0, 7); k = mVor(k, 1)) monate.push(k);
   const nM = monate.length, je = (c) => (nM > 1 ? ` · Ø ${eur0(c / nM)} im Monat` : '');
   const extraText = nExtra ? ` · extra: Sparen/Umbuchungen <span class="${extra < 0 ? 'neg' : ''}">${plusMinus(extra)}</span>` : '';
+  const msA = [], msE = [];
+  for (let k = von.slice(0, 7); k <= bis.slice(0, 7); k = mVor(k, 1)) { msA.push(mon.get(k)?.aus || 0); msE.push(mon.get(k)?.ein || 0); }
   const zahlen = [
-    zahl5('Treffer', NUM.format(rows.length), von === bis ? dde(von) : `${dde(von)} – ${dde(bis)}`),
-    zahl5('Ausgaben', eur0(aus), `${nAus} Buchungen${je(aus)}`, { cls: aus ? 'neg' : '' }),
-    zahl5('Einnahmen', eur0(ein), `${nEin} Buchungen${je(ein)}`, { cls: ein > 0 ? 'pos' : ein < 0 ? 'neg' : '' }),
-    zahl5('Saldo', plusMinus(ein - aus), `Einnahmen minus Ausgaben${extraText}`, { cls: ein - aus >= 0 ? 'pos' : 'neg' }),
+    kachel({ titel: 'Treffer', wert: NUM.format(rows.length), aend: von === bis ? dde(von) : `${dde(von)} – ${dde(bis)}`, unter: 'Buchungen mit den gewählten Filtern' }),
+    kachel({ titel: 'Ausgaben', wert: eur0(aus), aend: `${nAus} Buchungen${je(aus)}`, spark: msA.length > 1 ? sparkline(msA) : '', unter: 'Linie: je Monat' }),
+    kachel({ titel: 'Einnahmen', wert: eur0(ein), cls_: ein < 0 ? 'neg' : '', aend: `${nEin} Buchungen${je(ein)}`, spark: msE.length > 1 ? sparkline(msE) : '', unter: 'Linie: je Monat' }),
+    kachel({ titel: 'Saldo', wert: plusMinus(ein - aus), cls_: ein - aus >= 0 ? 'pos' : 'neg', aend: `Einnahmen minus Ausgaben${extraText}`, unter: 'Sparen und Umbuchungen extra' }),
   ].join('');
+  const bkKern = `${NUM.format(rows.length)} ${rows.length === 1 ? 'Buchung' : 'Buchungen'}${von === bis ? ` am ${dde(von)}` : ` von ${dde(von)} bis ${dde(bis)}`}: Ausgaben <b>${eur0(aus)}</b> · Einnahmen <b>${eur0(ein)}</b>`;
   if (nM > 36) {   // lange Zeiträume: je Jahr
     const jahr = new Map();
     for (const [k, m] of mon) { const y = k.slice(0, 4), x = jahr.get(y) || { ein: 0, aus: 0 }; x.ein += m.ein; x.aus += m.aus; jahr.set(y, x); }
@@ -2332,8 +2336,8 @@ function tabBuchungen(conds) {
   });
   let fuss = `<div class="bt-summe"><span>Summe ${rows.length === 1 ? 'der Buchung' : `aller ${NUM.format(rows.length)} Treffer`}<small>Einnahmen ${eur(ein)} · Ausgaben ${eur(-aus)}${nExtra ? ` · Sparen/Umbuchungen ${eur(extra)}` : ''}</small></span><b class="${cls(ein - aus + extra)}">${eur(ein - aus + extra)}</b></div>`;
   if (rows.length > limit) fuss += `<div class="mehr">${NUM.format(limit)} von ${NUM.format(rows.length)} angezeigt <button class="btn sm" id="mehr">Weitere ${NUM.format(Math.min(500, rows.length - limit))} anzeigen</button></div>`;
-  return `<div class="bt">
-    <div class="s5-zahlen bt-zahlen">${zahlen}</div>
+  return `<div class="bt cp bx bk">${bxKopf('Buchungen', bkKern, 'Suche und Filter oben · Zeile anklicken: Einzelheiten · Säule anklicken: nur dieser Zeitraum')}
+    <div class="cp-kz bt-zahlen">${zahlen}</div>
     ${buchGrafik ? `<div class="bt-grafik"><div class="bt-g-t"><b>Je ${buchGrafik.jahre ? 'Jahr' : 'Monat'}</b><span class="muted klein">Ausgaben orange, Einnahmen grün${nExtra ? ' (ohne Sparen/Umbuchungen)' : ''} · Säule anklicken: nur ${buchGrafik.jahre ? 'dieses Jahr' : 'dieser Monat'}</span></div><div class="s5-chart bt-chart"><canvas id="c-buch"></canvas></div></div>` : ''}
     ${sicher(() => neuLeiste(H))}
     <div class="bt-leiste"><span class="muted klein">${gruppiert ? 'Nach Datum, bei mehreren Buchungen am Tag mit Tagessumme' : S.sort === 'betrag' ? 'Nach Betrag sortiert' : 'Nach Empfänger sortiert'} · Zeile anklicken: Einzelheiten</span>${sortKnoepfe}</div>

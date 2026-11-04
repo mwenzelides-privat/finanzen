@@ -722,3 +722,17 @@ i.cv-offen { background: var(--surface-2); border: 1px solid var(--border-strong
 .stand { flex: 0 0 auto; max-width: none; display: flex; flex-direction: column; align-items: flex-end; line-height: 1.25; font-size: 12px; }
 .stand small { font-size: 11px; color: var(--muted); opacity: .85; }
 @media (min-width: 901px) and (max-width: 1360px) { .stand { display: flex !important; } .stand span { display: none; } }
+
+/* Buchungen im Stil der anderen Seiten */
+.bk { gap: 12px; }
+.bk .bt-grafik, .bk .bt-leiste + .bt-liste { background: var(--surface); }
+#werkzeug { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; margin-bottom: 14px; }
+#tabelle-card:has(.bk) > .card-h h2 { display: none; }
+.bk .bt-grafik { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+/* Grundgehalt: Gesamtplus und Arbeitgeber */
+.ek-gg { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.ek-gg > div { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border-radius: var(--radius-s); background: var(--surface-2); }
+.ek-gg span { font-size: var(--fs-xs); color: var(--muted); }
+.ek-gg b { font-size: 18px; font-weight: 650; }
+.ek-gg b.ek-ag { font-size: var(--fs-m); }
+.ek-gg small { font-size: var(--fs-xs); color: var(--muted); }
