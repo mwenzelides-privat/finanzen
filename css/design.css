@@ -443,3 +443,46 @@ i.cv-strich { background: var(--text-2); width: 3px !important; }
   .cv-ring { grid-template-columns: 84px 1fr; }
   .rg { width: 84px; height: 84px; }
 }
+
+/* ============ Cockpit kompakt (04.11.): Kopf mit Grafik daneben, Kacheln quer, Zu tun ohne Scrollen ============ */
+.cp { max-width: 1280px; width: 100%; margin: 0 auto; gap: 14px; }
+.cp-hero { display: grid; grid-template-columns: minmax(250px, .75fr) minmax(0, 1.75fr); gap: 22px; padding: 18px 20px 14px; align-items: stretch; }
+.cp-hero-k { flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 14px; }
+.cp-hero-w { font-size: clamp(36px, 3.6vw, 50px); }
+.cp-hero-p { justify-items: start; text-align: left; min-width: 0; }
+.cp-hero-p b { font-size: 28px; }
+.cp-hero-p .cp-alt { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--border); width: 100%; }
+.cp-hero-g { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cp-hero-g .cp-kt h2 { font-size: var(--fs-b); }
+.cp-hero-chart { height: 230px; min-height: 210px; }
+.cp-leg { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; font-size: var(--fs-xs); color: var(--muted); }
+.cp-leg i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+.cp-leg-e { background: var(--akzent); }
+.cp-leg-a { background: var(--fest); margin-left: 6px; }
+.cv { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); grid-template-rows: none; align-items: center; gap: 12px; padding: 13px 15px; }
+.cv-w { font-size: 24px; }
+.cv-u { font-size: var(--fs-xs); }
+i.cv-bleibt { background: var(--ein); }
+i.cv-fehlt { background: repeating-linear-gradient(135deg, var(--aus) 0 3px, transparent 3px 6px); }
+.cv-leg i { margin-left: 8px; }
+.rg { width: 84px; height: 84px; }
+.cv-ring { grid-template-columns: 84px 1fr; gap: 10px; }
+.cp-td-karte { padding: 14px 18px; gap: 10px; }
+.cp-td-l { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.cp-td { padding: 10px 12px; }
+@media (max-width: 1100px) {
+  .cp-drei { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .cv { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .cp-hero { grid-template-columns: minmax(0, 1fr); }
+  .cp-drei { grid-template-columns: minmax(0, 1fr); }
+  .cv { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); }
+}
+@media (max-width: 480px) {
+  .cv { grid-template-columns: minmax(0, 1fr); }
+  .cp-hero-chart { height: 200px; min-height: 190px; }
+}
+@media (min-width: 901px) { .cp-drei > .cv:first-child { grid-template-columns: minmax(0, 1fr); gap: 8px; } }
+.cv-leg > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; margin-right: 8px; }
+.cv-leg > span i { margin-left: 0 !important; }

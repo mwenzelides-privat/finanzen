@@ -618,7 +618,7 @@ function monatsRechnung() {
   const vertraege = fixkostenErkennen().filter((f) => f.aktiv && !f.gemeinsam);
   const fix = vertraege.reduce((t, f) => t + f.proMonat, 0);
   const leben = lebenGewaehlt();
-  const lebenProg = lebenWahl === 'vormonat' ? lebenshaltung().schnitt : leben;   // Prognose: ein einzelner Monat wäre zu zufällig
+  const lebenProg = leben;   // laufender Monat und Prognose rechnen mit derselben Lebenshaltung wie der normale Monat
   return (D.mr = { gehalt, gehaltMonat: ek.letzter, sonst, fix, leben, lebenProg, ein: gehalt + sonst, aus: fix + leben, erg: gehalt + sonst - fix - leben, vertraege, ref, gt: gehaltstag(), lh: lebenshaltung() });
 }
 const lebenName = () => (lebenWahl === 'eigen' && lebenEigen ? 'dein eigener Wert' : lebenWahl === 'typisch' ? 'typischer Monat' : lebenWahl === 'vormonat' && lebenshaltung().monate.length ? `Vormonat ${MONAT[+lebenshaltung().monate.at(-1).slice(5) - 1]}` : 'Ø 12 Monate');
@@ -629,9 +629,13 @@ const planG = (k) => { try { return planGehalt(H, k); } catch (e) { console.erro
 const saisonF = (k) => { try { return saison(H).f[+k.slice(5) - 1] ?? 1; } catch (e) { console.error(e); return 1; } };
 // Die letzten 12 abgeschlossenen Monate, der laufende Monat (bisher + erwartet) und 3 Monate Prognose,
 // je mit Ergebnis und Kontostand am Monatsende. Prognose: normaler Monat, feste Abbuchungen im jeweiligen Monat.
-function verlauf5() {
-  if (D.v5) return D.v5;
-  const R = monatsRechnung(), heute = D.bis, jetzt = heute.slice(0, 7), laeuft = heute !== monatsletzter(heute);
+// alt = true: dieselbe Rechnung mit Ø 12 Monate und Saisonprofil (zum Vergleich, wenn der Vormonat die Grundlage ist)
+function verlauf5(alt = false) {
+  const key = alt ? 'v5s' : 'v5';
+  if (D[key]) return D[key];
+  const R0 = monatsRechnung(), R = alt ? { ...R0, lebenProg: R0.lh.schnitt } : R0;
+  const sfx = (k) => (alt || lebenWahl !== 'vormonat' ? saisonF(k) : 1);   // Saisonprofil nur auf Durchschnitte, nicht auf den Vormonat
+  const heute = D.bis, jetzt = heute.slice(0, 7), laeuft = heute !== monatsletzter(heute);
   const fx = fixIds(), leer = () => ({ ein: 0, lohn: 0, aus: 0, var: 0, spar: 0 });
   const ist = new Map();
   for (const r of D.rows) {
@@ -653,7 +657,7 @@ function verlauf5() {
   if (laeuft) {
     const x = w(jetzt), ende = monatsletzter(`${jetzt}-01`);
     const offenFest = R.vertraege.reduce((t, f) => t + faellig(f, plusTage(heute, 1), ende), 0);
-    const gehaltKommt = x.lohn > 0 ? 0 : (planG(jetzt) ?? R.gehalt), sonstKommt = Math.max(0, R.sonst - (x.ein - x.lohn)), varKommt = Math.max(0, Math.round(R.lebenProg * saisonF(jetzt)) - x.var);
+    const gehaltKommt = x.lohn > 0 ? 0 : (planG(jetzt) ?? R.gehalt), sonstKommt = Math.max(0, R.sonst - (x.ein - x.lohn)), varKommt = Math.max(0, Math.round(R.lebenProg * sfx(jetzt)) - x.var);
     const ein = x.ein + gehaltKommt + sonstKommt, aus = x.aus + offenFest + varKommt;
     weiter(gehaltKommt + sonstKommt - offenFest - varKommt + Math.min(0, spar - x.spar));
     lauf = { k: jetzt, art: 'laeuft', ein, aus, erg: ein - aus, x, offenFest, gehaltKommt, varKommt, tag: +heute.slice(8), tage: +ende.slice(8), stand };
@@ -662,7 +666,7 @@ function verlauf5() {
   for (let i = 1; i <= 3; i++) {
     const k = mVor(jetzt, i), ende = monatsletzter(`${k}-01`);
     const fest = R.vertraege.reduce((t, f) => t + faellig(f, `${k}-01`, ende), 0);
-    const pg = planG(k), sf = saisonF(k);
+    const pg = planG(k), sf = sfx(k);
     const ein = (pg ?? R.gehalt) + R.sonst, aus = Math.round(R.lebenProg * sf) + fest;
     weiter(ein - aus + spar);
     monate.push({ k, art: 'prognose', ein, aus, erg: ein - aus, fest, stand, plan: pg != null, sf });
@@ -675,7 +679,7 @@ function verlauf5() {
   const lohnMed = lohnRows.length ? median(lohnRows.map((r) => r.c)) : 0;
   const sonder = D.rows.filter((r) => eigen(r) && (r.ukat === 'Lohn / Gehalt' ? lohnMed && r.c > lohnMed * 1.3 : r.c >= 100000))
     .map((r) => ({ r, extra: r.ukat === 'Lohn / Gehalt' ? r.c - lohnMed : r.c })).sort((a, b) => b.extra - a.extra);
-  return (D.v5 = { monate, R, lauf, heuteStand, heuteSumme, spar, schnitt, sonder, jetzt });
+  return (D[key] = { monate, R, lauf, heuteStand, heuteSumme, spar, schnitt, sonder, jetzt });
 }
 const sonderText = (l) => l.map(({ r }) => zl(`${r.ukat === 'Lohn / Gehalt' ? 'dem hohen Gehalt' : esc(schoen(r.ukat || 'Einnahme'))} im ${MONAT[+r.d.slice(5, 7) - 1]} ${r.d.slice(0, 4)} (${eur0(r.c)})`, zuBuchungen({ konto: '', art: 'ein', kat: r.kat, ukat: r.ukat, ...monatZiel(r.d.slice(0, 7)) }))).join(' und ');
 
@@ -890,7 +894,9 @@ function cockpitSeite() {
   const dZ = diff == null ? null : dGezeigt(bStand, prog);
   const vergleich = diff == null ? '' : stabil ? `etwa so viel wie Ende ${bMonat}` : `${eur0(Math.abs(dZ))} ${dZ > 0 ? 'mehr' : 'weniger'} als Ende ${bMonat} (${eur0(bStand)})`;
   const seitText = anfang ? `${seitAnfang == null ? '–' : pmHtml(dGezeigt(anfang.c, hs.c))} seit 1. ${monatJ}` : '';
-  const verlauf = cockpitVerlauf(V);
+  // Vergleich: dieselbe Prognose mit Ø 12 Monate (nur wenn die Grundlage der Vormonat ist)
+  const progAlt = lebenWahl === 'vormonat' ? sicher(() => verlauf5(true).monate.at(-1).stand) : '';
+  const progGrund = lebenWahl === 'vormonat' ? `Plan-Gehalt, feste Abbuchungen je Monat, Lebenshaltung wie im ${MONAT[+R.lh.monate.at(-1).slice(5) - 1]} (${eur0(R.leben)})` : esc(sicher(() => prognoseText(H)) || 'berechnet');
 
   const hero = `<section class="card cp-hero">
     <div class="cp-hero-k">
@@ -899,17 +905,19 @@ function cockpitSeite() {
         <p class="cp-hero-u">${seitText}${lauf?.gehaltKommt ? ' · das Gehalt kommt noch' : ''}${hs && !hs.voll ? ` · ${esc(fehltText(hs))}` : ''}</p></div>
       <div class="cp-hero-p"><span class="marke">Prognose</span>
         ${prog == null ? '<p>Eine Prognose geht nicht: der Stand heute ist unvollständig.</p>'
-          : `<p>Ende ${monatE} voraussichtlich</p><b class="${prog < 0 ? 'neg' : ''}">≈ ${eur0(prog)}</b>${vergleich ? `<small>${vergleich}</small>` : ''}`}</div>
+          : `<p>Ende ${monatE} auf deinen Konten</p><b class="${prog < 0 ? 'neg' : ''}">≈ ${eur0(prog)}</b>${vergleich ? `<small>${vergleich}</small>` : ''}${progAlt !== '' && progAlt != null ? `<small class="cp-alt">mit Ø 12 Monate gerechnet: ≈ ${eur0(progAlt)}</small>` : ''}`}</div>
     </div>
-    <div class="cp-chart cp-hero-chart"><canvas id="c-cp-stand" aria-label="Kontostand der letzten 24 Monate und Prognose"></canvas></div>
-    <p class="cp-fuss">Summe deiner Konten am Monatsende, ohne Depot, gemeinsame und Kinderkonten · gestrichelt: Prognose<span class="cp-nur-breit"> (${esc(sicher(() => prognoseText(H)) || 'berechnet')}).${lueckenText(verlauf.map((m) => m.summe))} Punkt anklicken: Kontostände an diesem Tag.</span></p>
+    <div class="cp-hero-g"><div class="cp-kt"><h2>Einnahmen und Ausgaben je Monat</h2></div>
+      <p class="cp-leg"><i class="cp-leg-e"></i>Einnahmen <i class="cp-leg-a"></i>Ausgaben <span>· Zahl darunter: Ergebnis · schraffiert: erwartet</span></p>
+      <div class="cp-chart cp-hero-chart"><canvas id="c-cp-monate" aria-label="Einnahmen und Ausgaben je Monat mit Ergebnis"></canvas></div>
+      <p class="cp-fuss">Ohne Kinder- und gemeinsame Konten<span class="cp-nur-breit"> · Prognose: ${progGrund}</span> · Säule anklicken: Buchungen des Monats</p></div>
   </section>`;
 
   // Drei Kacheln mit Bild: normaler Monat (Einkommen gegen Ausgaben), Vermögen (Ring), laufender Monat (Ring mit Tag)
   const maxB = Math.max(R.ein, R.aus, 1), bw = (c) => ((Math.max(0, c) / maxB) * 100).toFixed(1);
   const monatVis = `<span class="cv-bal"><span class="cv-bz"><span>Einkommen</span><span class="cv-b"><i class="cv-ein" style="width:${bw(R.ein)}%"></i></span><b>${eur0(R.ein)}</b></span>
-    <span class="cv-bz"><span>Ausgaben</span><span class="cv-b"><i class="cv-fest" style="width:${bw(R.fix)}%"></i><i class="cv-leben" style="width:${bw(R.leben)}%"></i></span><b>${eur0(R.aus)}</b></span>
-    <span class="cv-leg"><i class="cv-fest"></i>Fixkosten ${eur0(R.fix)}<i class="cv-leben"></i>Lebenshaltung ${eur0(R.leben)}</span></span>`;
+    <span class="cv-bz"><span>Ausgaben</span><span class="cv-b"><i class="cv-fest" style="width:${bw(R.fix)}%"></i><i class="cv-leben" style="width:${bw(R.leben)}%"></i>${R.erg > 0 ? `<i class="cv-bleibt" style="width:${bw(R.erg)}%"></i>` : ''}</span><b>${eur0(R.aus)}</b></span>
+    <span class="cv-leg"><span><i class="cv-ein"></i>Einkommen</span><span><i class="cv-fest"></i>Fixkosten</span><span><i class="cv-leben"></i>Lebenshaltung</span>${R.erg > 0 ? `<span><i class="cv-bleibt"></i>bleibt ${eur0(R.erg)}</span>` : R.erg < 0 ? `<span><i class="cv-fehlt"></i>fehlt ${eur0(-R.erg)}</span>` : ''}</span></span>`;
   const vm = sicher(() => vermoegen(H)) || null;
   const vmTeile = vm ? [['Konten', vm.ks?.c || 0], ['Depot', vm.dp?.wert || 0], ['Kaution', vm.kaution?.c || 0], ['Vorsorge', vm.vorsorge]].filter(([, c]) => c > 0) : [];
   const vmSum = vmTeile.reduce((t, [, c]) => t + c, 0) || 1;
@@ -917,11 +925,11 @@ function cockpitSeite() {
   const monatTeil = lauf ? Math.min(1, lauf.x.aus / Math.max(1, lauf.aus)) : 1;
   const laufVis = lauf ? `<span class="cv-ring">${ring(monatTeil, lauf.tag / lauf.tage, `${Math.round(monatTeil * 100)} %`)}<span class="cv-rleg"><span><i class="cv-ein"></i>ausgegeben<b>${eur0(lauf.x.aus)}</b></span><span><i class="cv-strich"></i>heute<b>Tag ${lauf.tag}/${lauf.tage}</b></span></span></span>` : '';
   const kacheln = [
-    cvKarte({ titel: 'Normaler Monat', wert: plusMinus(R.erg), cls_: R.erg < 0 ? 'neg' : 'pos', ziel: { tab: 'geldfluss' }, unter: `Lebenshaltung: ${lebenName()} (Ø 12 Monate ${eur0(R.lh.schnitt)}) · Ergebnis Ø 12 Monate ${pmHtml(Math.round(s.erg))}`, vis: monatVis }),
+    cvKarte({ titel: 'Normaler Monat', wert: plusMinus(R.erg), cls_: R.erg < 0 ? 'neg' : 'pos', ziel: { tab: 'geldfluss' }, unter: `Lebenshaltung ${eur0(R.leben)} (${esc(lebenName())}, Ø 12 Monate ${eur0(R.lh.schnitt)})`, vis: monatVis }),
     cvKarte({ titel: 'Vermögen', wert: vm ? `${vm.ungefaehr ? '≈ ' : ''}${vm.c < 0 ? '−' : ''}${eur0(Math.abs(vm.c))}${vm.ks && !vm.voll ? ' + ?' : ''}` : '–', cls_: vm?.c < 0 ? 'neg' : '', ziel: { tab: 'vermoegen' },
       unter: 'jeder Teil mit eigenem Stichtag · ohne gesetzliche Rente', vis: vmVis }),
     cvKarte({ titel: lauf ? `${monatJ} bisher` : 'Dieser Monat', wert: lauf ? eur0(lauf.x.aus) : '–', ziel: zuBuchungen({ konto: '', ...monatZiel(V.jetzt), art: 'aus' }),
-      unter: lauf ? `ausgegeben von ≈ ${eur0(lauf.aus)}, die im ${monatJ} erwartet sind · erwartetes Ergebnis des Monats ≈ ${plusMinus(lauf.erg)}` : 'Der Monat ist abgeschlossen.', vis: laufVis }),
+      unter: lauf ? `ausgegeben von ≈ ${eur0(lauf.aus)} erwartet: ${eur0(lauf.x.aus - lauf.x.var + lauf.offenFest)} feste Abbuchungen im ${monatJ} + ${eur0(lauf.x.var + lauf.varKommt)} Lebenshaltung` : 'Der Monat ist abgeschlossen.', vis: laufVis }),
   ].join('');
 
   // Wofür das Geld ausgeht: der Vormonat als Grundlage, Strich = Ø 12 Monate
@@ -937,22 +945,49 @@ function cockpitSeite() {
   box.innerHTML = `<div class="cp">
     ${hero}
     <div class="cp-drei">${kacheln}</div>
-    <div class="bx-raster">
-      <section class="card cp-karte"><div class="cp-kt"><h2>Was am Monatsende übrig blieb</h2><span class="klein muted">12 Monate · schraffiert: erwartet</span></div>
-        <div class="cp-chart cp-chart-m"><canvas id="c-s5-erg" aria-label="Ergebnis je Monat"></canvas></div>
-        <p class="cp-fuss">Einnahmen minus Ausgaben je Monat · gestrichelt: Ø ${pmHtml(Math.round(s.erg))} · Säule anklicken: Buchungen des Monats</p></section>
-      <section class="card cp-karte"><div class="cp-kt"><h2>Wofür das Geld ausgeht</h2><span class="klein muted">${esc(K.name)} · Strich = Ø 12 Monate</span></div>${kats}
-        <p class="cp-fuss">Balken: Ausgaben im ${esc(K.name)}, rechts der Durchschnitt ${esc(monatsText(K.ms))} · ohne Kinder- und gemeinsame Konten · ${zl('alle Kategorien (12 Monate)', katAlle)}</p></section>
-    </div>
     <section class="card cp-karte cp-td-karte"><div class="cp-kt"><h2>Zu tun</h2>${hb.length ? `<span class="cp-zahl${hbRot ? ' neg' : ''}">${hb.length}</span>` : ''}</div>${handlungHtml(hb)}</section>
     <div id="cp-waechter"${cpWaechterAuf ? '' : ' hidden'}>${cpWaechterAuf ? sicher(() => waechterKarte(H)) : ''}</div>
+    <section class="card cp-karte"><div class="cp-kt"><h2>Wofür das Geld ausgeht</h2><span class="klein muted">${esc(K.name)} · Strich = Ø 12 Monate</span></div>${kats}
+      <p class="cp-fuss">Balken: Ausgaben im ${esc(K.name)}, rechts der Durchschnitt ${esc(monatsText(K.ms))} · ohne Kinder- und gemeinsame Konten · ${zl('alle Kategorien (12 Monate)', katAlle)}</p></section>
     ${RUNDUNG}
   </div>`;
   gehBinden(box);
   if (cpWaechterAuf) sicher(() => waechterBinden(box, H));
   box.querySelector('[data-cp-waechter]')?.addEventListener('click', () => { cpWaechterAuf = !cpWaechterAuf; cockpitSeite(); if (cpWaechterAuf) springe('#cp-waechter'); });
-  cpStandZeichnen(verlauf);
-  sicher(() => s5ErgebnisZeichnen(V));
+  sicher(() => cpMonateZeichnen(V.monate));
+}
+
+// Einnahmen und Ausgaben je Monat: die letzten Monate (Handy weniger), der laufende Monat und die Prognose (schraffiert),
+// darunter das Ergebnis je Monat. Ausgaben in der Leitfarbe – Grün/Rot nur für das Vorzeichen des Ergebnisses.
+function cpMonateZeichnen(alle) {
+  if (!$('#c-cp-monate')) return;
+  const schmal = matchMedia('(max-width: 640px)').matches, n = schmal ? 3 : 9, ist = alle.filter((m) => m.art === 'ist');
+  const ms = [...ist.slice(-n), ...alle.filter((m) => m.art !== 'ist')], ab = ms.findIndex((m) => m.art !== 'ist');
+  const cE = css('--akzent'), cA = css('--fest'), pE = schraffur(cE), pA = schraffur(cA);
+  const o = basis();
+  o.interaction = { mode: 'index', intersect: false };
+  o.layout = { padding: { top: 18 } };
+  o.scales = {
+    x: { ...achsenStil(), grid: { display: false }, ticks: { ...achsenStil().ticks, padding: 20, font: { size: 11 }, maxRotation: 0, autoSkip: false } },
+    y: { ...achsenStil(), beginAtZero: true, ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 5 } },
+  };
+  o.plugins.tooltip.callbacks = {
+    title: (it) => { const m = ms[it[0].dataIndex]; return `${monLang(m.k)}${m.art === 'laeuft' ? ' – bisher + erwartet' : m.art === 'prognose' ? ' – Prognose' : ''}`; },
+    label: (it) => ` ${it.dataset.label}: ${EUR0.format(it.raw)}`,
+    footer: (it) => { const m = ms[it[0].dataIndex]; return `${m.erg >= 0 ? 'Überschuss' : 'Fehlbetrag'}: ${eur0(m.erg)}`; },
+  };
+  o.onClick = (_, el) => { const m = el.length && ms[el[0].index]; if (m && m.art !== 'prognose') setze(zuBuchungen({ konto: '', ...monatZiel(m.k) })); };
+  o.onHover = (e, el) => { e.native.target.style.cursor = el.length && ms[el[0].index].art !== 'prognose' ? 'pointer' : 'default'; };
+  const satz = (c, p) => ms.map((m) => (m.art === 'ist' ? c : p));
+  zeichne('c-cp-monate', {
+    type: 'bar',
+    data: { labels: ms.map((m) => (schmal ? MON[+m.k.slice(5) - 1] : monKurz(m.k))), datasets: [
+      { label: 'Einnahmen', data: ms.map((m) => m.ein / 100), backgroundColor: satz(cE, pE), hoverBackgroundColor: cE, borderRadius: 4, maxBarThickness: 22, categoryPercentage: 0.74, barPercentage: 0.92 },
+      { label: 'Ausgaben', data: ms.map((m) => m.aus / 100), backgroundColor: satz(cA, pA), hoverBackgroundColor: cA, borderRadius: 4, maxBarThickness: 22, categoryPercentage: 0.74, barPercentage: 0.92 },
+    ] },
+    options: o,
+    plugins: [prognoseMit(ab, 'Prognose'), ergebnisZeileMit(ms.map((m) => m.erg / 100), (i) => ms[i].art !== 'ist')],
+  });
 }
 
 function cpStandZeichnen(ms, id = 'c-cp-stand') {
@@ -2166,14 +2201,14 @@ function tabelle(conds) {
     lebenWahl = b.dataset.leben;
     if (lebenWahl === 'eigen' && !lebenEigen) lebenEigen = Math.round(lebenshaltung().schnitt / 100) * 100;
     try { localStorage.setItem('fd.leben2', lebenWahl); localStorage.setItem('fd.lebeneigen', String(lebenEigen)); } catch {}
-    D.mr = D.v5 = null;   // Übersicht und Prognose rechnen mit derselben Lebenshaltung
+    D.mr = D.v5 = D.v5s = null;   // Übersicht und Prognose rechnen mit derselben Lebenshaltung
     tabelle(conds);
     if (lebenWahl === 'eigen') $('#leben-eigen')?.select();
   });
   $('#leben-eigen')?.addEventListener('change', (e) => {
     lebenEigen = Math.max(0, Math.round((+e.target.value || 0) * 100));
     try { localStorage.setItem('fd.lebeneigen', String(lebenEigen)); } catch {}
-    D.mr = D.v5 = null;
+    D.mr = D.v5 = D.v5s = null;
     tabelle(conds);
   });
   if (S.tab === 'fix') planBinden();
@@ -2561,7 +2596,7 @@ function tabFixkosten() {
       <details class="fix-grundlage"${fixGrundlageAuf ? ' open' : ''}><summary>Gerechnet mit Gehalt ${eur0(G)} (${monLang(R.gehaltMonat)}), sonstigen Einnahmen ${eur0(R.sonst)} (typischer Monat) und Lebenshaltung ${eur0(L)} (${lebenName()}) · <span class="link">Lebenshaltung ändern</span></summary>
         <div class="fix-einst"><div class="fix-bezug-zeile"><span>Lebenshaltung</span><div class="seg fix-bezug">${lh.monate.length ? knopf('vormonat', `Vormonat ${MON[+lh.monate.at(-1).slice(5) - 1]}`, lh.werte.at(-1)) : ''}${knopf('schnitt', 'Ø 12 Monate', lh.schnitt)}${knopf('typisch', 'typischer Monat', lh.typisch)}${knopf('eigen', 'eigener Wert')}</div>
           ${lebenWahl === 'eigen' ? `<label class="fix-eigen"><input type="number" id="leben-eigen" min="0" step="50" inputmode="numeric" value="${Math.round(L / 100)}"> € / Monat</label>` : ''}</div></div>
-        <p class="muted klein">Lebenshaltung = alle übrigen Ausgaben deiner Konten (Einkauf, Tanken, Freizeit, Urlaub, Anschaffungen) ohne Fixkosten und ohne Gemeinschaftskonto, ${esc(monatsText(lh.monate))}. „Typischer Monat“ ist der Median – einzelne teure Monate zählen dann weniger. Die Wahl gilt für den normalen Monat überall in der App. Die Kontostand-Prognose rechnet beim Vormonat mit Ø 12 Monate und Saisonprofil, damit ein einzelner günstiger oder teurer Monat sie nicht verzerrt.</p>
+        <p class="muted klein">Lebenshaltung = alle übrigen Ausgaben deiner Konten (Einkauf, Tanken, Freizeit, Urlaub, Anschaffungen) ohne Fixkosten und ohne Gemeinschaftskonto, ${esc(monatsText(lh.monate))}. „Typischer Monat“ ist der Median – einzelne teure Monate zählen dann weniger. Die Wahl gilt überall: normaler Monat, laufender Monat und Prognose. Beim Vormonat zeigt das Cockpit zum Vergleich die Prognose mit Ø 12 Monate.</p>
       </details>
     </section>`;
   const reiter = (k, t) => `<button data-fixtab="${k}" class="${S.fixtab === k ? 'an' : ''}">${t}</button>`;
