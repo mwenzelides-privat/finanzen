@@ -641,3 +641,37 @@ main:has(#seite-start:not([hidden])) { max-width: 1900px; }
 .bx-rund-k { display: none; }
 @media (min-width: 901px) { .bx:has(.bx-sechs) .bx-rund-k { display: inline; } .bx:has(.bx-sechs) .bx-rundung { display: none; } }
 @media (max-width: 900px) { .bx-sechs .cp-fuss { white-space: normal; overflow: visible; } }
+
+/* Cockpit: die nächsten 30 Tage als Agenda */
+.cp-ab-k { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.cp-ab-k > div { display: grid; gap: 1px; padding: 8px 10px; border-radius: var(--radius-s); background: var(--surface-2); }
+.cp-ab-k span { font-size: var(--fs-xs); color: var(--muted); }
+.cp-ab-k b { font-size: 19px; font-weight: 650; }
+.cp-ab-k small { font-size: var(--fs-xs); color: var(--muted); }
+.cp-ab-k .cp-ab-g { background: color-mix(in srgb, var(--ein) 12%, transparent); }
+.cp-ab-k .cp-ab-g b { color: var(--ein-text); }
+.cp-ab-k .cp-ab-s { background: var(--accent-soft); }
+.cp-agenda { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.cp-agenda .nt { display: block; columns: 3 220px; column-gap: 18px; }
+.cp-agenda .nt-tag { break-inside: avoid; margin-bottom: 6px; }
+.cp-agenda .nt-k b, .cp-agenda .nt-k b.ist-minus, .cp-agenda .nt-k b.neg { color: var(--text) !important; }
+.cp-agenda .nt-lohn b { color: var(--ein-text); }
+.cp-agenda .nt-mehr { column-span: all; font-size: var(--fs-xs); color: var(--muted); }
+/* Fixkosten nach Art: feste Spalten, Name kürzt sich */
+.cp-fx .bl-z { grid-template-columns: minmax(70px, 1.1fr) minmax(40px, 1fr) auto 64px; gap: 8px; }
+.cp-fx .bl-n, .cp-fx .bl-p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-bk .cp-ber-z { padding: 5px 4px; }
+@media (max-width: 900px) { .cp-agenda { overflow: visible; } .cp-agenda .nt { columns: 1; } }
+@media (min-width: 901px) { .cp-reihe-d > .cp-ab { min-height: 0; overflow: hidden; } .cp-agenda { height: 0; } }
+@media (min-width: 1301px) { .cp-reihe-d { grid-template-rows: minmax(0, 1fr); } .cp-reihe-d > .card { min-height: 0; } }
+@media (min-width: 901px) { .cp:not(.bx) { grid-template-rows: minmax(330px, 1.25fr) auto auto minmax(290px, 1fr); } }
+@media (min-width: 901px) { .cp-agenda .nt { height: 100%; column-fill: auto; columns: 3 200px; } .cp-agenda .nt-mehr { display: none; } }
+@media (min-width: 901px) {
+  .cp:not(.bx) { grid-template-rows: minmax(345px, 1.45fr) auto auto minmax(272px, 1fr); }
+  .cp-vier > .cv, .cp-vier > .cv:first-child, .cp-vier > .cv:last-child { padding: 10px 14px; gap: 6px; }
+  .cp-vier .rg { width: 70px; height: 70px; }
+  .cp-vier .cv-ring { grid-template-columns: 70px minmax(0, 1fr) !important; }
+  .cp-vier .st30 { height: 50px; }
+  .cp-td-karte { padding: 8px 16px 10px; }
+  .cp-td { padding: 6px 12px; }
+}

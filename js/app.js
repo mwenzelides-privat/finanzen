@@ -965,7 +965,7 @@ function cockpitSeite() {
   ].join('');
 
   // Wofür das Geld ausgeht: der Vormonat als Grundlage, Strich = Ø 12 Monate
-  const K = katVormonat(), kTop = K.l.slice(0, 5), kRest = K.l.slice(5), kR = K.teil(kRest);
+  const K = katVormonat(), kTop = K.l.slice(0, 8), kRest = K.l.slice(8), kR = K.teil(kRest);
   const kZeile = (x) => ({ n: esc(schoen(x.k)), c: x.c, w: x.c > 0 ? eur0(x.c) : '–', marke: x.o > 0 ? x.o : null, p: x.o > 0 ? `Ø ${eur0(x.o)}` : '–', farbe: 'var(--accent-2)', ziel: katZielVm(x.k, K.vm),
     tip: `${schoen(x.k)}: ${K.kurz} ${eur0(x.c)} · Ø 12 Monate ${eur0(x.o)}` });
   const kats = K.l.length ? `<div class="bl-vm">${balkenListe([...kTop.map(kZeile),
@@ -977,11 +977,12 @@ function cockpitSeite() {
 
   // Reihe D: feste Abbuchungen der nächsten 30 Tage (Tag für Tag, mit Gehalt), Fixkosten nach Art, Eckwerte der anderen Bereiche
   const T30 = naechsteTermine(R.vertraege), T30s = T30.reduce((t, x) => t + x.f.betrag, 0), gK = naechstesGehalt(), zuKal = { tab: 'fix', fixtab: 'kalender', konto: '' };
+  const vorG = T30.filter((x) => !gK || x.am < gK.am), abVor = vorG.reduce((t, x) => t + x.f.betrag, 0), nVor = vorG.length;
   const arten = new Map();
   for (const f of R.vertraege) { const art = fixArt(f), x = arten.get(art) || arten.set(art, { art, c: 0, n: 0 }).get(art); x.c += f.proMonat; x.n++; }
-  const al = [...arten.values()].sort((a1, b1) => b1.c - a1.c), alR = al.slice(4), alRc = alR.reduce((t, x) => t + x.c, 0), zuFix = { tab: 'fix', fixtab: 'vertraege', konto: '' };
+  const al = [...arten.values()].sort((a1, b1) => b1.c - a1.c), alR = al.length > 6 ? al.slice(5) : [], alRc = alR.reduce((t, x) => t + x.c, 0), zuFix = { tab: 'fix', fixtab: 'vertraege', konto: '' };
   const pzG = (c) => (R.gehalt ? `${((c / R.gehalt) * 100).toLocaleString('de-DE', { maximumFractionDigits: 0 })} %` : '');
-  const fixL = balkenListe([...al.slice(0, 4).map((x) => ({ n: FIX_KURZ[x.art] || esc(x.art), c: x.c, p: pzG(x.c), ziel: zuFix, farbe: 'var(--fest)', tip: `${x.art}: ${eur0(x.c)} im Monat · ${x.n} ${x.n === 1 ? 'Vertrag' : 'Verträge'}` })),
+  const fixL = balkenListe([...al.slice(0, alR.length ? 5 : 6).map((x) => ({ n: FIX_KURZ[x.art] || esc(x.art), c: x.c, p: pzG(x.c), ziel: zuFix, farbe: 'var(--fest)', tip: `${x.art}: ${eur0(x.c)} im Monat · ${x.n} ${x.n === 1 ? 'Vertrag' : 'Verträge'}` })),
     ...(alR.length ? [{ n: `${alR.length} weitere Arten`, tip: alR.map((x) => `${x.art} ${eur0(x.c)}`).join(', '), c: alRc, p: pzG(alRc), ziel: zuFix, farbe: 'var(--fest)' }] : []),
     { n: '<b>Summe</b>', c: 0, w: `<b>${eur0(R.fix)}</b>`, p: `<b>${pzG(R.fix)}</b>`, cls: 'bl-summe' }], { max: Math.max(1, ...al.map((x) => x.c), alRc), kopf: ['Art', 'im Monat', 'vom Gehalt'] });
   const ber = [];
@@ -990,14 +991,22 @@ function cockpitSeite() {
   const sP = sicher(() => prognoseRechnen(H, +D.bis.slice(0, 4))) || null;
   if (sP) ber.push({ t: `Steuer ${sP.jahr}`, sub: `${sP.ohne.erg >= 0 ? 'Erstattung' : 'Nachzahlung'} ohne Anlage U · berechnet${sP.mit ? ` · mit Anlage U ${plusMinus(sP.mit.erg)}` : ''}`, w: plusMinus(sP.ohne.erg), cls_: sP.ohne.erg >= 0 ? 'pos' : 'neg', ziel: { tab: 'einkommen' } });
   const uK = sicher(() => unterhaltKurz(H)) || null, uL = uK?.K?.letzte;
-  if (uL) { const ri = Math.round((uK.K.X.summe - uL.summe) * 100); ber.push({ t: 'Unterhalt verbindlich', sub: `Berechnung vom ${dde(uL.datum)} · Risiko bei Neuberechnung ${ri >= 0 ? '+' : '−'}${eur(Math.abs(ri))}`, w: eurE(uL.summe), ziel: { tab: 'familie' } }); }
+  if (uL) { const ri = Math.round((uK.K.X.summe - uL.summe) * 100); ber.push({ t: 'Unterhalt verbindlich', sub: `Berechnung vom ${dde(uL.datum)} · Risiko bei Neuberechnung ${ri >= 0 ? '+' : '−'}${eur0(Math.abs(ri))}`, w: eurE0(uL.summe), ziel: { tab: 'familie' } }); }
+  const vm0 = sicher(() => vermoegen(H)) || null;
+  if (vm0) ber.push({ t: 'Vermögen', sub: 'Konten, Depot, Vorsorge · ohne gesetzliche Rente', w: `${vm0.ungefaehr ? '≈ ' : ''}${eur0(vm0.c)}`, ziel: { tab: 'vermoegen' } });
+  if (uK && uK.A?.rows?.length) ber.push({ t: `Ausgleich mit ${esc(uK.A.name || 'der Gegenseite')}`, sub: uK.offen.length ? `${uK.offen.length} Posten offen` : 'keine offenen Steueranteile · plus = an dich', w: `${uK.saldo > 0 ? '+' : uK.saldo < 0 ? '−' : ''}${eur0(Math.abs(uK.saldo))}`, cls_: uK.saldo < 0 ? 'neg' : uK.saldo > 0 ? 'pos' : '', ziel: { tab: 'familie' } });
   const st0 = steuerStand();
-  if (st0) ber.push({ t: `Belege ${st0.jahr}`, sub: st0.offen ? 'Steuer-Entscheidungen offen' : 'alle Steuer-Entscheidungen getroffen', w: st0.offen ? `${st0.offen} offen` : 'erledigt', ziel: { tab: 'steuer' } });
+  if (st0?.offen) ber.push({ t: `Belege ${st0.jahr}`, sub: st0.offen ? 'Steuer-Entscheidungen offen' : 'alle Steuer-Entscheidungen getroffen', w: st0.offen ? `${st0.offen} offen` : 'erledigt', ziel: { tab: 'steuer' } });
   const bereiche = ber.length ? `<div class="cp-ber">${ber.map((x) => `<button class="cp-ber-z"${geh(x.ziel)}><span>${x.t}<small>${x.sub}</small></span><b class="${x.cls_ || ''}">${x.w}</b></button>`).join('')}</div>` : '<p class="leer klein">Noch keine Angaben.</p>';
   const reiheD = `<div class="cp-reihe-d">
-      <section class="card cp-karte cp-ab"><div class="cp-kt"><h2>Abbuchungen der nächsten 30 Tage</h2>${zl(`<b class="bx-wert">${eur0(T30s)}</b>`, zuKal)}</div>
-        <p class="cp-leg"><i class="cp-leg-a"></i>feste Abbuchungen je Tag ${gK ? `<i class="cp-leg-e"></i>Gehalt am ${tagKurz(gK.am)}` : ''}<span>· ${T30.length} Abbuchungen laut Verträgen</span></p>
-        <div class="cp-chart cp-ab-chart"><canvas id="c-cp-abb" aria-label="Feste Abbuchungen der nächsten 30 Tage"></canvas></div></section>
+      <section class="card cp-karte cp-ab"><div class="cp-kt"><h2>Die nächsten 30 Tage</h2>${zl('ganzer Kalender', zuKal)}</div>
+        <div class="cp-ab-k">
+          <div><span>vor dem Gehalt</span><b>${eur0(abVor)}</b><small>${nVor} Abbuchungen</small></div>
+          ${gK ? `<div class="cp-ab-g"><span>Gehalt ${tagKurz(gK.am)}</span><b>+${eur0(gK.c)}</b><small>erwartet</small></div>` : ''}
+          <div><span>${gK ? 'nach dem Gehalt' : 'danach'}</span><b>${eur0(dGezeigt(abVor, T30s))}</b><small>${T30.length - nVor} Abbuchungen</small></div>
+          <div class="cp-ab-s"><span>zusammen</span><b>${eur0(T30s)}</b><small>${T30.length} feste Abbuchungen</small></div>
+        </div>
+        <div class="cp-agenda">${termineHtml(T30, 24)}</div></section>
       <section class="card cp-karte cp-fx"><div class="cp-kt"><h2>Fixkosten nach Art</h2><span class="klein muted">${R.vertraege.length} laufende Verträge</span></div>${fixL}</section>
       <section class="card cp-karte cp-bk"><div class="cp-kt"><h2>Aus den anderen Bereichen</h2></div>${bereiche}</section>
     </div>`;
@@ -1016,7 +1025,6 @@ function cockpitSeite() {
   if (cpWaechterAuf) sicher(() => waechterBinden(box, H));
   box.querySelector('[data-cp-waechter]')?.addEventListener('click', () => { cpWaechterAuf = !cpWaechterAuf; cockpitSeite(); if (cpWaechterAuf) springe('#cp-waechter'); });
   sicher(() => cpMonateZeichnen(V.monate));
-  sicher(() => cpAbbZeichnen(T30, gK));
 }
 
 // Feste Abbuchungen je Tag (30 Tage ab dem Datenstand; fällige, noch nicht gebuchte am ersten Tag) und das erwartete Gehalt
@@ -1135,7 +1143,7 @@ const bxDelta = (c, schlechtWennMehr = true) => (Math.abs(c) < 100 ? '<span clas
   : `<span class="bx-d ${(c > 0) === schlechtWennMehr ? 'neg' : 'pos'}" title="${c > 0 ? 'mehr' : 'weniger'} als im Vorjahr">${c > 0 ? '▲' : '▼'} ${eur0(Math.abs(c))}</span>`);
 // Rechnungen über alle eigenen Konten – unabhängig von der Kontoauswahl auf den Detailseiten
 function alleKonten(f) { const k = S.konto; S.konto = ''; try { return f(); } finally { S.konto = k; } }
-const eurE = (v) => eur(Math.round(v * 100)), eurE0 = (v) => eur0(Math.round(v * 100));   // Beträge in Euro (Gehalt, Unterhalt)
+const eurE = (v) => eur0(Math.round(v * 100)), eurE0 = (v) => eur0(Math.round(v * 100));   // Beträge in Euro (Gehalt, Unterhalt)
 const gehaltHelfer = () => ({ D, S, setze: (p) => setze(p), kopf5, karte5, zahl5, zl, zs, geh, gehBinden, freiFuellen, springe, zeichne, basis, achsenStil, css, alpha, achse, kurzWert, schraffur,
   zuBuchungen, monatZiel, mVor, monKurz, monLang, MON, MONAT, NUM, dde, eur, eur0, esc });
 
@@ -1459,27 +1467,27 @@ function familieSeite() {
   const gez = K?.gez, abw = gez != null && l ? Math.round((gez - l.summe) * 100) : null;
   const risiko = K && l ? Math.round((K.X.summe - l.summe) * 100) : null, risikoN = K && l ? Math.round((K.N.summe - l.summe) * 100) : null;
   const kern = !l ? 'Unterhalt: keine verbindliche Berechnung in den Daten.'
-    : `Verbindlich sind <b>${eurE(l.summe)}</b> Unterhalt im Monat – laut Berechnung vom ${dde(l.datum)}.`;
-  const unter = l ? `${(l.ku || []).map(eurE).join(' + ')} Kinder + ${eurE(l.tu)} Trennung · gilt, bis die Gegenseite Auskunft verlangt<span class="cp-nur-breit"> (§ 1605 BGB) · mehr erst ab Aufforderung (§ 1613 BGB) · Orientierung, keine Rechtsberatung</span>` : '';
+    : `Verbindlich sind <b>${eurE0(l.summe)}</b> Unterhalt im Monat – laut Berechnung vom ${dde(l.datum)}.`;
+  const unter = l ? `${(l.ku || []).map(eurE).join(' + ')} Kinder + ${eurE0(l.tu)} Trennung · gilt, bis die Gegenseite Auskunft verlangt<span class="cp-nur-breit"> (§ 1605 BGB) · mehr erst ab Aufforderung (§ 1613 BGB) · Orientierung, keine Rechtsberatung</span>` : '';
   const ms = (U?.R?.monate || []).filter((m) => !U.R.laeuft || m.k < U.R.bisM).slice(-12);
   const kacheln = !U ? '' : [
     kachel({ titel: 'Verbindlich', wert: l ? eurE0(l.summe) : '–', ziel: { ...zuU, _springe: '#uh-rechner' }, aend: l ? `Berechnung vom ${dde(l.datum)}` : '', spark: sparkline(ms.map((m) => m.soll)), unter: 'im Monat · Linie: Soll je Monat' }),
     kachel({ titel: K?.jetzt ? `Überwiesen ${MON[+K.jetzt.k.slice(5) - 1]}` : 'Überwiesen', wert: gez != null ? eurE0(gez) : '–', ziel: { ...zuU, _springe: '#uh-a' },
-      aend: abw == null ? '' : Math.abs(abw) <= 100 ? 'passt zur Berechnung' : `<span class="neg">${eur(Math.abs(abw))} ${abw < 0 ? 'weniger' : 'mehr'}</span> als berechnet${K.laeuftNoch ? ' · Monat läuft noch' : ''}`,
+      aend: abw == null ? '' : Math.abs(abw) <= 100 ? 'passt zur Berechnung' : `<span class="neg">${eur0(Math.abs(abw))} ${abw < 0 ? 'weniger' : 'mehr'}</span> als berechnet${K.laeuftNoch ? ' · Monat läuft noch' : ''}`,
       spark: sparkline(ms.map((m) => m.sum)), unter: 'laut Buchungen · Linie: 12 Monate' }),
-    kachel({ titel: 'Risiko Neuberechnung', marke: 'berechnet', wert: risiko == null ? '–' : `${risiko >= 0 ? '+' : '−'}${eur(Math.abs(risiko))}`, cls_: risiko > 0 ? 'neg' : risiko < 0 ? 'pos' : '', ziel: { ...zuU, _springe: '#uh-rechner' },
-      aend: risiko == null ? '' : `im Monat, ${K.pro ? 'für dich gerechnet' : 'neutral'}${K.pro && risikoN != null ? ` · neutral ${risikoN >= 0 ? '+' : '−'}${eur(Math.abs(risikoN))}` : ''}`, unter: 'nur falls die Gegenseite Auskunft verlangt' }),
+    kachel({ titel: 'Risiko Neuberechnung', marke: 'berechnet', wert: risiko == null ? '–' : `${risiko >= 0 ? '+' : '−'}${eur0(Math.abs(risiko))}`, cls_: risiko > 0 ? 'neg' : risiko < 0 ? 'pos' : '', ziel: { ...zuU, _springe: '#uh-rechner' },
+      aend: risiko == null ? '' : `im Monat, ${K.pro ? 'für dich gerechnet' : 'neutral'}${K.pro && risikoN != null ? ` · neutral ${risikoN >= 0 ? '+' : '−'}${eur0(Math.abs(risikoN))}` : ''}`, unter: 'nur falls die Gegenseite Auskunft verlangt' }),
     kachel({ titel: 'Ausgleich', wert: `${U.saldo > 0 ? '+' : U.saldo < 0 ? '−' : ''}${eur0(Math.abs(U.saldo))}`, cls_: U.saldo < 0 ? 'neg' : U.saldo > 0 ? 'pos' : '', ziel: { ...zuU, _springe: '#uh-b' },
       aend: U.offen.length ? `<span class="neg">${U.offen.length} ${U.offen.length === 1 ? 'Posten' : 'Posten'} offen</span>` : 'keine offenen Steueranteile', unter: `Saldo mit ${esc(U.A.name || 'der Gegenseite')} seit ${U.A.seit ? monLang(U.A.seit.slice(0, 7)) : '–'} · plus = an dich` }),
   ].join('');
 
   // Monat für Monat: die letzten 6 abgeschlossenen Monate mit Abweichung zum Soll
   const monate = ms.slice(-6).reverse().map((m) => `<button class="bx-mz"${geh(zuBuchungen({ konto: '', q: 'unterhalt', ...monatZiel(m.k) }))} title="Anklicken: Buchungen des Monats">
-      <span>${monLang(m.k)}</span><b>${eur(m.sum)}</b>${m.abw == null ? '<span class="muted">kein Soll</span>' : Math.abs(m.abw) < 100 ? '<span class="bx-ok">passt</span>' : `<span class="bx-d neg">${m.abw < 0 ? 'fehlt' : 'mehr'} ${eur(Math.abs(m.abw))}</span>`}</button>`).join('');
+      <span>${monLang(m.k)}</span><b>${eur0(m.sum)}</b>${m.abw == null ? '<span class="muted">kein Soll</span>' : Math.abs(m.abw) < 100 ? '<span class="bx-ok">passt</span>' : `<span class="bx-d neg">${m.abw < 0 ? 'fehlt' : 'mehr'} ${eur0(Math.abs(m.abw))}</span>`}</button>`).join('');
 
   // Risiko bei Neuberechnung: verbindlich gegen die Rechnungen des Rechners
-  const rz = (t, c, sub, cls_ = '') => `<div class="bx-rz ${cls_}"><span>${t}<small>${sub}</small></span><b>${eurE(c)}</b></div>`;
-  const dz = (c) => (c == null ? '' : `${c >= 0 ? '+' : '−'}${eurE(Math.abs(c))} ggü. verbindlich`);
+  const rz = (t, c, sub, cls_ = '') => `<div class="bx-rz ${cls_}"><span>${t}<small>${sub}</small></span><b>${eurE0(c)}</b></div>`;
+  const dz = (c) => (c == null ? '' : `${c >= 0 ? '+' : '−'}${eurE0(Math.abs(c))} ggü. verbindlich`);
   const risikoInhalt = !K || !l ? '<p class="bx-u">Der Unterhaltsrechner braucht Abrechnungen und die Angaben zu den Kindern.</p>'
     : `${rz('verbindlich', l.summe, `Berechnung vom ${dde(l.datum)}`, 'bx-gilt')}
       ${rz('bei Neuberechnung, für dich gerechnet', K.P.summe, dz(K.P.summe - l.summe), K.P.summe > l.summe ? 'bx-r' : '')}
@@ -1491,7 +1499,7 @@ function familieSeite() {
   // Ausgleich: Gruppen mit Saldo
   const GR = [['steuer', 'Steueranteile'], ['kinder', 'Sonderbedarf Kinder'], ['auslagen', 'Auslagen/Erstattungen'], ['sonst', 'Sonstiges']];
   const ausgleich = !U ? '' : `${GR.map(([k, t]) => { const r = U.A.rows.filter((x) => U.A.gruppe(x) === k); if (!r.length) return ''; const c = r.reduce((s, x) => s + x.c, 0);
-      return `<div class="bx-rz"><span>${t}<small>${r.length} ${r.length === 1 ? 'Buchung' : 'Buchungen'}</small></span><b class="${c < 0 ? 'neg' : c > 0 ? 'pos' : ''}">${c > 0 ? '+' : c < 0 ? '−' : ''}${eur(Math.abs(c))}</b></div>`; }).join('')}
+      return `<div class="bx-rz"><span>${t}<small>${r.length} ${r.length === 1 ? 'Buchung' : 'Buchungen'}</small></span><b class="${c < 0 ? 'neg' : c > 0 ? 'pos' : ''}">${c > 0 ? '+' : c < 0 ? '−' : ''}${eur0(Math.abs(c))}</b></div>`; }).join('')}
     ${U.offen.map((p) => `<p class="bx-zeile"><i class="ampel gelb" aria-hidden="true"></i>offen: Anteil an der Steuererstattung ${p.J}</p>`).join('')}
     ${bxLink('Alle Buchungen und offenen Posten', { ...zuU, _springe: '#uh-b' })}`;
 
@@ -1512,20 +1520,20 @@ function familieSeite() {
   const uhArten = [{ n: 'Trennungsunterhalt', f: 'var(--fest)', w: (m) => m.tu }, ...uhKi.map((k, i) => ({ n: k.name || `Kind ${i + 1}`, f: farbenK[(i + 1) % farbenK.length], w: (m) => m.kind[i] || 0 })),
     { n: 'nicht aufgeteilt', f: 'var(--surface-3)', w: (m) => m.na }].filter((a1) => uhM.some((m) => a1.w(m)));
   const uhSum = uhM.reduce((t, m) => t + m.sum, 0), uhSoll = uhM.every((m) => m.soll != null) ? uhM.reduce((t, m) => t + m.soll, 0) : null;
-  const gezahlt = `${uhArten.map((a1) => { const c = uhM.reduce((t, m) => t + a1.w(m), 0); return `<div class="bx-rz"><span>${esc(a1.n)}</span><b>${eur(c)}</b></div>`; }).join('')}
-    <div class="bx-rz bx-gilt"><span>Summe gezahlt</span><b>${eur(uhSum)}</b></div>
-    ${uhSoll != null ? `<div class="bx-rz"><span>Soll laut deinen Angaben<small>Abweichung ${uhSum - uhSoll >= 0 ? '+' : '−'}${eur(Math.abs(uhSum - uhSoll))}</small></span><b>${eur(uhSoll)}</b></div>` : ''}`;
+  const gezahlt = `${uhArten.map((a1) => { const c = uhM.reduce((t, m) => t + a1.w(m), 0); return `<div class="bx-rz"><span>${esc(a1.n)}</span><b>${eur0(c)}</b></div>`; }).join('')}
+    <div class="bx-rz bx-gilt"><span>Summe gezahlt</span><b>${eur0(uhSum)}</b></div>
+    ${uhSoll != null ? `<div class="bx-rz"><span>Soll laut deinen Angaben<small>Abweichung ${uhSum - uhSoll >= 0 ? '+' : '−'}${eur0(Math.abs(uhSum - uhSoll))}</small></span><b>${eur0(uhSoll)}</b></div>` : ''}`;
   box.innerHTML = `<div class="cp bx">
     ${bxKopf('Familie', kern, unter)}
     ${kacheln ? `<div class="cp-kz">${kacheln}</div>` : ''}
     <div class="bx-raster bx-sechs">
       ${bxKarte('Risiko bei Neuberechnung', risikoInhalt, { rechts: '<span class="marke">berechnet</span>', fuss: 'Nichts selbst anstoßen – neu gerechnet wird erst, wenn die Gegenseite Auskunft verlangt. Mit RA Vitti abstimmen.' })}
       ${bxKarte('Monat für Monat', `<div class="bx-ml">${monate || '<p class="bx-u">Keine Unterhaltszahlungen auf deinen Konten.</p>'}</div>${bxLink('Alle Monate', { ...zuU, _springe: '#uh-a' })}`, { rechts: '<span class="klein muted">gezahlt · Abweichung zum Soll</span>' })}
-      ${bxKarte(U?.A?.name ? `Ausgleich mit ${esc(U.A.name)}` : 'Ausgleich', ausgleich, { rechts: U ? `<b class="bx-wert ${U.saldo < 0 ? 'neg' : ''}">${U.saldo > 0 ? '+' : U.saldo < 0 ? '−' : ''}${eur(Math.abs(U.saldo))}</b>` : '', fuss: 'Plus = an dich, minus = von dir · ohne die Unterhaltsraten' })}
+      ${bxKarte(U?.A?.name ? `Ausgleich mit ${esc(U.A.name)}` : 'Ausgleich', ausgleich, { rechts: U ? `<b class="bx-wert ${U.saldo < 0 ? 'neg' : ''}">${U.saldo > 0 ? '+' : U.saldo < 0 ? '−' : ''}${eur0(Math.abs(U.saldo))}</b>` : '', fuss: 'Plus = an dich, minus = von dir · ohne die Unterhaltsraten' })}
       ${bxKarte('Kinder und Fristen', kinderInhalt, { fuss: 'Kinderkonten zählen nicht zu deinen Finanzen' })}
       ${uhM.length ? bxKarte('Unterhalt je Monat', `<p class="cp-leg">${uhArten.map((a1, i) => `<i style="background:${a1.f}"></i>${esc(a1.n)}`).join(' ')} <span>· Linie: Soll</span></p><div class="cp-chart bx-chart"><canvas id="c-fam-uh" aria-label="Unterhalt je Monat nach Art"></canvas></div>`,
         { cls_: 'bx-flex', fuss: 'Gezahlt laut Buchungen deiner Konten · ein Kind bekommt einen Betrag nur, wenn der Verwendungszweck es nennt' }) : ''}
-      ${uhM.length ? bxKarte(`Gezahlt seit ${esc(monLang(uhM[0].k))}`, gezahlt, { rechts: `<b class="bx-wert">${eur(uhSum)}</b>`, fuss: `${uhM.length} Monate · Soll laut deinen Angaben${uhSoll != null ? '' : ' (nicht für alle Monate hinterlegt)'}` }) : ''}
+      ${uhM.length ? bxKarte(`Gezahlt seit ${esc(monLang(uhM[0].k))}`, gezahlt, { rechts: `<b class="bx-wert">${eur0(uhSum)}</b>`, fuss: `${uhM.length} Monate · Soll laut deinen Angaben${uhSoll != null ? '' : ' (nicht für alle Monate hinterlegt)'}` }) : ''}
     </div>
     ${RUNDUNG}
   </div>`;
@@ -1541,8 +1549,8 @@ function famUhZeichnen(ms, arten) {
   o.layout = { padding: { top: 6 } };
   o.scales = { x: { ...achsenStil(), stacked: true, grid: { display: false }, ticks: { ...achsenStil().ticks, font: { size: 10.5 }, maxRotation: 0, autoSkip: true, autoSkipPadding: 8 } },
     y: { ...achsenStil(), stacked: true, beginAtZero: true, ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 4 } } };
-  o.plugins.tooltip.callbacks = { title: (it) => monLang(ms[it[0].dataIndex].k), label: (it) => (it.raw ? ` ${it.dataset.label}: ${EUR.format(it.raw)}` : null),
-    footer: (it) => { const m = ms[it[0].dataIndex]; return `gezahlt ${eur(m.sum)}${m.soll != null ? ` · Soll ${eur(m.soll)}` : ''}`; } };
+  o.plugins.tooltip.callbacks = { title: (it) => monLang(ms[it[0].dataIndex].k), label: (it) => (it.raw ? ` ${it.dataset.label}: ${EUR0.format(it.raw)}` : null),
+    footer: (it) => { const m = ms[it[0].dataIndex]; return `gezahlt ${eur0(m.sum)}${m.soll != null ? ` · Soll ${eur0(m.soll)}` : ''}`; } };
   zeichne('c-fam-uh', { type: 'bar',
     data: { labels: ms.map((m) => monKurz(m.k)), datasets: [
       ...arten.map((a1) => ({ label: a1.n, data: ms.map((m) => a1.w(m) / 100), backgroundColor: farbe(a1.f), maxBarThickness: 24, stack: 'g' })),
