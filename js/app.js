@@ -944,23 +944,28 @@ function cockpitSeite() {
   const vmSum = vmTeile.reduce((t, [, c]) => t + c, 0) || 1;
   const vmVis = vmTeile.length ? `<span class="cv-ring">${ringTeile(vmTeile)}<span class="cv-rleg">${vmTeile.map(([n, c], i) => `<span><i style="--i:${i}"></i>${n}<b>${Math.round((c / vmSum) * 100)} %</b></span>`).join('')}</span></span>` : '';
   const monatTeil = lauf ? Math.min(1, lauf.x.aus / Math.max(1, lauf.aus)) : 1;
-  const laufVis = lauf ? `<span class="cv-ring">${ring(monatTeil, lauf.tag / lauf.tage, `${Math.round(monatTeil * 100)} %`)}<span class="cv-rleg"><span><i class="cv-ein"></i>ausgegeben<b>${eur0(lauf.x.aus)}</b></span><span><i class="cv-strich"></i>heute<b>Tag ${lauf.tag}/${lauf.tage}</b></span></span></span>` : '';
+  // Ring: ausgegeben ÷ erwartet; Legende: fest gebucht + Lebenshaltung = ausgegeben, dazu noch erwartet (aus gezeigten Werten)
+  const laufVis = lauf ? `<span class="cv-ring">${ring(monatTeil, lauf.tag / lauf.tage, `${Math.round(monatTeil * 100)} %`)}<span class="cv-rleg">
+      <span><i class="cv-ein"></i>fest abgebucht<b>${eur0(lauf.x.aus - lauf.x.var)}</b></span>
+      <span><i class="cv-ein"></i>Lebenshaltung<b>${eur0(dGezeigt(lauf.x.aus - lauf.x.var, lauf.x.aus))}</b></span>
+      <span><i class="cv-offen"></i>kommt noch<b>≈ ${eur0(dGezeigt(lauf.x.aus, lauf.aus))}</b></span>
+      <span><i class="cv-strich"></i>heute<b>Tag ${lauf.tag} von ${lauf.tage}</b></span></span></span>` : '';
   const kacheln = [
     cvKarte({ titel: 'Normaler Monat', wert: plusMinus(R.erg), cls_: R.erg < 0 ? 'neg' : 'pos', ziel: { tab: 'geldfluss' }, unter: `Lebenshaltung ${esc(lebenName())} · Ø 12 Monate ${eur0(R.lh.schnitt)}`, vis: monatVis,
       tip: `Gehalt ${eur0(R.gehalt)} + Sonstiges ${eur0(R.sonst)} − Fixkosten ${eur0(R.fix)} (${R.vertraege.length} Verträge) − Lebenshaltung ${eur0(R.leben)} (${lebenName()})` }),
     cvKarte({ titel: 'Vermögen', wert: vm ? `${vm.ungefaehr ? '≈ ' : ''}${vm.c < 0 ? '−' : ''}${eur0(Math.abs(vm.c))}${vm.ks && !vm.voll ? ' + ?' : ''}` : '–', cls_: vm?.c < 0 ? 'neg' : '', ziel: { tab: 'vermoegen' },
       unter: 'ohne gesetzliche Rente', vis: vmVis, tip: 'Konten, Depot, Vorsorge – jeder Teil mit eigenem Stichtag' }),
     cvKarte({ titel: lauf ? `${monatJ} bisher` : 'Dieser Monat', wert: lauf ? eur0(lauf.x.aus) : '–', ziel: zuBuchungen({ konto: '', ...monatZiel(V.jetzt), art: 'aus' }),
-      unter: lauf ? `von ≈ ${eur0(lauf.aus)}: ${eur0(lauf.x.aus - lauf.x.var + lauf.offenFest)} fest + ${eur0(lauf.x.var + lauf.varKommt)} Lebenshaltung` : 'Der Monat ist abgeschlossen.', vis: laufVis,
+      unter: lauf ? `ausgegeben von ≈ ${eur0(lauf.aus)}, die im ${monatJ} erwartet sind. Miete und Unterhalt gehen am Monatsanfang ab – deshalb ist früh schon viel weg.` : 'Der Monat ist abgeschlossen.', vis: laufVis,
       tip: lauf ? `Ausgegeben ${eur0(lauf.x.aus)} von erwarteten ${eur0(lauf.aus)}: feste Abbuchungen im ${monatJ} ${eur0(lauf.x.aus - lauf.x.var + lauf.offenFest)} und Lebenshaltung ${eur0(lauf.x.var + lauf.varKommt)} (${lebenName()})` : '' }),
     (() => {
       const W = sicher(() => vorschau30(R)) || null;
       if (!W) return cvKarte({ titel: 'Nächste 30 Tage', wert: '–', ziel: { tab: 'fix', fixtab: 'kalender', konto: '' }, unter: 'Der Stand heute ist nicht vollständig berechenbar.' });
       const ti = W.tage.indexOf(W.tief);
-      return cvKarte({ titel: 'Nächste 30 Tage', marke: 'Prognose', wert: `≈ ${eur0(W.tief.s)}`, cls_: W.tief.s < 0 ? 'neg' : '', ziel: { tab: 'fix', fixtab: 'kalender', konto: '' },
-        unter: `tiefster freier Stand ${ti === 0 ? 'heute' : `am ${tagKurz(W.tief.am)}`}${W.g && W.g.am > W.tief.am ? ', vor dem Gehalt' : ''}`,
+      return cvKarte({ titel: 'Tiefster Stand in 30 Tagen', marke: 'Prognose', wert: `≈ ${eur0(W.tief.s)}`, cls_: W.tief.s < 0 ? 'neg' : '', ziel: { tab: 'fix', fixtab: 'kalender', konto: '' },
+        unter: `Mindestens so viel Geld bleibt frei – ${ti === 0 ? 'heute' : `am ${tagKurz(W.tief.am)}`}${W.g && W.g.am > W.tief.am ? ', kurz vor dem Gehalt' : ''}. Heute frei minus feste Abbuchungen und Lebenshaltung (≈ ${eur0(W.leben / 30)} am Tag).`,
         tip: `Heute frei verfügbar ${eur0(W.start)} (ohne Mietkaution, gemeinsame und Kinderkonten) · ${W.n} feste Abbuchungen ${eur0(W.fest)}${W.g ? ` · Gehalt ${eur0(W.g.c)} am ${tagKurz(W.g.am)}` : ''} · Lebenshaltung ${eur0(W.leben)} gleichmäßig verteilt`,
-        vis: `<span class="st30-box">${stufenSvg(W.tage.map((t) => t.s), ti)}<span class="st30-ax"><span>heute</span><span>+30 Tage · ≈ ${eur0(W.ende.s)}</span></span></span>` });
+        vis: `<span class="st30-box">${stufenSvg(W.tage.map((t) => t.s), ti)}<span class="st30-ax"><span>heute<b>${eur0(W.start)}</b></span><span class="st30-tief">${tagKurz(W.tief.am).slice(3)}<b>≈ ${eur0(W.tief.s)}</b></span><span>${tagKurz(W.ende.am).slice(3)}<b>≈ ${eur0(W.ende.s)}</b></span></span></span>` });
     })(),
   ].join('');
 
@@ -972,6 +977,12 @@ function cockpitSeite() {
     ...(kRest.length ? [{ n: `${kRest.length} übrige Kategorien`, sub: kRest.slice(0, 3).map((x) => esc(schoen(x.k))).join(', ') + (kRest.length > 3 ? ' …' : ''), c: kR.c, marke: kR.o, p: `Ø ${eur0(kR.o)}`, farbe: 'var(--variabel)', ziel: katZielVm('', K.vm) }] : []),
     { n: '<b>Summe</b>', c: 0, w: `<b>${eur0(K.sum.c)}</b>`, p: `<b>Ø ${eur0(K.sum.o)}</b>`, cls: 'bl-summe' }], { max: Math.max(1, ...K.l.map((x) => Math.max(x.c, x.o)), kR.c, kR.o), kopf: ['Kategorie', K.kurz, 'Ø 12 Mon.'] })}</div>`
     : '<p class="leer klein">Keine Ausgaben in den letzten 12 Monaten.</p>';
+
+  // Auffällig im Vormonat: die größten Abweichungen zum Ø 12 Monate (ab 50 €), bei Mehrausgaben die größte Buchung dazu
+  const abw = K.l.map((x) => ({ ...x, d: x.c - x.o })).filter((x) => Math.abs(x.d) >= 5000).sort((a1, b1) => Math.abs(b1.d) - Math.abs(a1.d)).slice(0, 4);
+  const groesste = (k) => (K.m.g.get(k)?.rows || []).filter((r) => r.c < 0).sort((a1, b1) => a1.c - b1.c)[0];
+  const auffaellig = abw.length ? `<div class="cp-auff"><p class="cp-auff-t">Auffällig im ${esc(K.kurz)} – Abweichung zum Ø 12 Monate</p>${abw.map((x) => { const g1 = x.d > 0 ? groesste(x.k) : null;
+      return `<button class="cp-auff-z"${geh(katZielVm(x.k, K.vm))}><span>${esc(schoen(x.k))}<small>${x.d > 0 ? (g1 ? `größte Buchung: ${esc(g1.g || g1.z || '–')} ${eur0(-g1.c)}` : '') : 'weniger als üblich'}</small></span>${bxDelta(x.d)}</button>`; }).join('')}</div>` : '';
 
   const hb = handlungsbedarf(), hbRot = hb.some((x) => x.ampel === 'rot');
 
@@ -1014,7 +1025,7 @@ function cockpitSeite() {
     <div class="cp-reihe-a">
       ${hero}
       <section class="card cp-karte cp-kat"><div class="cp-kt"><h2>Ausgaben im ${esc(K.kurz)}</h2><span class="klein muted">nach Kategorie</span></div>${kats}
-        <p class="cp-fuss" title="Durchschnitt ${esc(monatsText(K.ms))} · ohne Kinder- und gemeinsame Konten · Beträge gerundet, Summen aus den genauen Werten">Strich: Ø 12 Monate · ${zl('alle Kategorien', katAlle)}</p></section>
+        ${auffaellig}<p class="cp-fuss" title="Durchschnitt ${esc(monatsText(K.ms))} · ohne Kinder- und gemeinsame Konten · Beträge gerundet, Summen aus den genauen Werten">Balken: ${esc(K.kurz)} · Strich: Ø 12 Monate · ${zl('alle Kategorien', katAlle)}</p></section>
     </div>
     <div class="cp-drei cp-vier">${kacheln}</div>
     <section class="card cp-karte cp-td-karte"><div class="cp-kt"><h2>Zu tun ${hb.length ? `<span class="cp-zahl${hbRot ? ' neg' : ''}">${hb.length}</span>` : ''}</h2>${hb.length > 4 ? `<span class="klein muted">+ ${hb.length - 4} weitere · ${zl('alle Fristen', { tab: 'fix', fixtab: 'kalender', _springe: '#fr-liste' })}</span>` : ''}</div>${handlungHtml(hb)}
@@ -1128,7 +1139,7 @@ function katVormonat() {
   const l = [...new Set([...m.g.keys(), ...j.g.keys()])].map((k) => ({ k, c: Math.max(0, m.g.get(k)?.c || 0), o: Math.max(0, (j.g.get(k)?.c || 0) / j.n), mon: j.g.get(k)?.mon || new Map() }))
     .filter((x) => x.c > 0 || x.o > 0).sort((x, y) => y.c - x.c || y.o - x.o);
   const teil = (xs) => ({ c: xs.reduce((t, x) => t + x.c, 0), o: xs.reduce((t, x) => t + x.o, 0) });
-  return { vm, ms, l, teil, sum: teil(l), name: monLang(vm), kurz: MONAT[+vm.slice(5) - 1] };
+  return { vm, ms, l, teil, sum: teil(l), name: monLang(vm), kurz: MONAT[+vm.slice(5) - 1], m };
 }
 // Klick: die Buchungen dieser Kategorie im Vormonat (dort steht dieselbe Summe); die Kategorien-Seite kennt nur ganze Jahre
 const katZielVm = (k, vm) => zuBuchungen({ konto: '', art: 'aus', kat: k, ...monatZiel(vm) });

@@ -675,3 +675,34 @@ main:has(#seite-start:not([hidden])) { max-width: 1900px; }
   .cp-td-karte { padding: 8px 16px 10px; }
   .cp-td { padding: 6px 12px; }
 }
+
+/* 05: volle Breite für alle Reiter; Überblicke füllen die Höhe (Grafiken wachsen mit) */
+main, main:has(#seite-start:not([hidden])) { max-width: 1900px; }
+@media (min-width: 1301px) {
+  .bx:has(.bx-sechs) { min-height: calc(100vh - 150px); grid-template-rows: auto auto minmax(0, 1fr); }
+  .bx-raster.bx-sechs { grid-template-rows: minmax(min-content, 1fr) minmax(min-content, 1fr); }
+  .bx:has(.ek-reihe2) { min-height: calc(100vh - 150px); grid-template-rows: auto auto auto minmax(0, 1fr); }
+  .ek-reihe2 > .card { min-height: 0; }
+}
+/* Kacheln mit Erklärung */
+.cp-vier .cv-u { font-size: var(--fs-xs); line-height: 1.4; }
+i.cv-offen { background: var(--surface-2); border: 1px solid var(--border-strong); }
+.cv-rleg { gap: 3px; }
+.st30-ax { display: grid; grid-template-columns: 1fr 1fr 1fr; }
+.st30-ax > span { display: flex; flex-direction: column; }
+.st30-ax > span:nth-child(2) { text-align: center; color: var(--aus-text); }
+.st30-ax > span:last-child { text-align: right; }
+.st30-ax b { font-weight: 650; color: var(--text); font-size: var(--fs-s); }
+.st30-ax .st30-tief b { color: var(--aus-text); }
+/* Ausgaben im Oktober: Auffälliges unten */
+.cp-kat { display: flex; flex-direction: column; }
+.cp-auff { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border); display: grid; gap: 2px; }
+.cp-auff-t { margin: 0 0 2px; font-size: var(--fs-xs); font-weight: 650; color: var(--muted); }
+.cp-auff-z { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; padding: 4px 2px; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; border-radius: 6px; }
+.cp-auff-z:hover { background: var(--accent-soft); }
+.cp-auff-z span { display: flex; flex-direction: column; min-width: 0; font-size: var(--fs-s); font-weight: 600; }
+.cp-auff-z small { font-weight: 400; font-size: var(--fs-xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (min-width: 1301px) { .bx-raster.bx-sechs { grid-template-rows: auto auto; align-content: stretch; } }
+@media (min-width: 901px) { .cp:not(.bx) { grid-template-rows: minmax(310px, 1.45fr) auto auto minmax(268px, 1fr); } }
+@media (min-width: 901px) { .cp:not(.bx) { grid-template-rows: minmax(345px, 1.45fr) auto auto minmax(268px, 1fr); } }
+@media (min-width: 901px) { .cp:not(.bx) { height: calc(100vh - 98px); } }
