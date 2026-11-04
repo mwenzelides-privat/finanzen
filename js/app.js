@@ -740,7 +740,7 @@ function termineHtml(l, n = 99) {
 // Jeder Bereich öffnet mit seinem Überblick (S.tab = Name des Bereichs); die Einzelheiten sind die bisherigen Seiten
 // (S.tab bleibt dort gleich, damit alle Verweise weiter gelten). Familie › Unterhalt ist intern fix/unterhalt.
 const SEGMENTE = {
-  geldfluss: [['geldfluss', 'Überblick'], ['uebersicht', 'Kategorien'], ['kennzahlen', 'Kennzahlen'], ['fix', 'Verträge']],
+  geldfluss: [['geldfluss', 'Überblick'], ['uebersicht', 'Kategorien'], ['fix', 'Verträge']],
   vermoegen: [['vermoegen', 'Überblick'], ['konten', 'Konten & Depot']],
   einkommen: [['einkommen', 'Überblick'], ['gehalt', 'Gehalt'], ['steuer', 'Steuer']],
   familie: [['familie', 'Überblick'], ['unterhalt', 'Unterhalt & Rechner']],
@@ -752,12 +752,12 @@ function bereichVon(x = S) {
   if (x.tab === 'uebersicht' || x.tab === 'kennzahlen') return 'geldfluss';
   if (x.tab === 'konten') return 'vermoegen';
   if (x.tab === 'gehalt' || x.tab === 'steuer') return 'einkommen';
-  return '';   // Buchungen: über die Lupe
+  return x.tab === 'buchungen' ? 'buchungen' : '';
 }
 const segVon = () => (S.tab === 'fix' && S.fixtab === 'unterhalt' ? 'unterhalt' : S.tab);
 const segZiel = (t) => (t === 'fix' ? { tab: 'fix', fixtab: 'vertraege' } : t === 'unterhalt' ? { tab: 'fix', fixtab: 'unterhalt' } : { tab: t });
 function bereichOeffnen(b) {
-  setze(b === 'cockpit' ? { tab: 'start' } : { tab: b });
+  setze(b === 'cockpit' ? { tab: 'start' } : b === 'buchungen' ? { tab: 'buchungen' } : { tab: b });
 }
 function navZeigen() {
   const b = bereichVon(), lupe = S.tab === 'buchungen';
@@ -1202,9 +1202,9 @@ function geldflussSeite() {
   const katZeile = (x) => `<button class="bx-kz"${geh(katZiel(x.k))} title="${esc(schoen(x.k))}: ${K.kurz} ${eur0(x.c)} · Ø 12 Monate ${eur0(x.o)} – anklicken: Einzelheiten">
       <span class="bx-kz-n">${esc(schoen(x.k))}</span><span class="bx-kz-sp">${sparkline(ms.map((k) => x.mon.get(k) || 0))}</span>
       <b class="bx-kz-w">${wert(x.c)}</b><span class="bx-kz-o">${wert(x.o)}</span></button>`;
-  const rest = K.l.slice(6), kR = K.teil(rest);
+  const rest = K.l.slice(5), kR = K.teil(rest);
   const kats = !K.l.length ? '<p class="leer klein">Keine Ausgaben in den letzten 12 Monaten.</p>'
-    : `<div class="bx-kl"><div class="bx-kz bx-kopfz"><span>Kategorie</span><span>Verlauf</span><span>${K.kurz}</span><span>Ø 12 Mon.</span></div>${K.l.slice(0, 6).map(katZeile).join('')}
+    : `<div class="bx-kl"><div class="bx-kz bx-kopfz"><span>Kategorie</span><span>Verlauf</span><span>${K.kurz}</span><span>Ø 12 Mon.</span></div>${K.l.slice(0, 5).map(katZeile).join('')}
       ${rest.length ? `<button class="bx-kz bx-rest"${geh(katZiel(''))}><span class="bx-kz-n">${rest.length} weitere</span><span></span><b class="bx-kz-w">${wert(kR.c)}</b><span class="bx-kz-o">${wert(kR.o)}</span></button>` : ''}
       <div class="bx-kz bx-summe"><span class="bx-kz-n">Summe</span><span></span><b class="bx-kz-w">${eur0(K.sum.c)}</b><span class="bx-kz-o"><b>${eur0(K.sum.o)}</b></span></div></div>`;
 
@@ -1212,7 +1212,7 @@ function geldflussSeite() {
   const arten = new Map();
   for (const f of R.vertraege) { const art = fixArt(f), x = arten.get(art) || arten.set(art, { art, c: 0, n: 0 }).get(art); x.c += f.proMonat; x.n++; }
   const al = [...arten.values()].sort((x, y) => y.c - x.c), termine = naechsteTermine(R.vertraege), tSumme = termine.reduce((t, x) => t + x.f.betrag, 0);
-  const vertraege = balkenListe(al.slice(0, 6).map((x) => ({ n: FIX_KURZ[x.art] || esc(x.art), sub: `${x.n} ${x.n === 1 ? 'Vertrag' : 'Verträge'}`, c: x.c, p: pzG(x.c), ziel: zuFix, farbe: 'var(--fest)', tip: `${x.art}: ${eur0(x.c)} im Monat` }))
+  const vertraege = balkenListe(al.slice(0, 6).map((x) => ({ n: FIX_KURZ[x.art] || esc(x.art), c: x.c, p: pzG(x.c), ziel: zuFix, farbe: 'var(--fest)', tip: `${x.art}: ${eur0(x.c)} im Monat · ${x.n} ${x.n === 1 ? 'Vertrag' : 'Verträge'}` }))
     .concat(al.length > 6 ? [{ n: `${al.length - 6} weitere Arten`, c: al.slice(6).reduce((t, x) => t + x.c, 0), p: pzG(al.slice(6).reduce((t, x) => t + x.c, 0)), ziel: zuFix, farbe: 'var(--fest)' }] : []));
 
   // Ausgabenrahmen des laufenden Monats
@@ -1224,30 +1224,39 @@ function geldflussSeite() {
     rahmen = sum.n ? `<p class="bx-gross ${sum.rahmen - sum.aus < 0 ? 'neg' : ''}">${eur0(sum.rahmen - sum.aus)}<small>noch frei</small></p>
       <span class="bx-tempo${sum.aus > sum.rahmen ? ' ueber' : ''}" title="${Math.round((sum.aus / sum.rahmen) * 100)} % des Rahmens ausgegeben · Tag ${RR.tag} von ${RR.tage}"><i style="width:${Math.min(100, (sum.aus / sum.rahmen) * 100).toFixed(1)}%"></i><b style="left:${heuteP.toFixed(1)}%"></b></span>
       <p class="bx-u">${eur0(sum.aus)} von ${eur0(sum.rahmen)} ausgegeben · Tag ${RR.tag} von ${RR.tage} · ${sum.n} ${sum.n === 1 ? 'Kategorie' : 'Kategorien'}</p>`
-      : `<p class="bx-u">Noch kein Rahmen festgelegt. Die Vorschläge aus deinem Ø der letzten 12 Monate ergeben zusammen <b>${eur0(RR.frei.reduce((t, x) => t + x.vorschlag, 0))}</b> im Monat für ${RR.frei.length} frei gestaltbare Kategorien.</p>`;
+      : '';
+    const zr = rs.z.filter((x) => x.frei).slice(0, 4), zrS = zr.reduce((t, x) => t + x.aus, 0), zrG = zr.reduce((t, x) => t + (x.rahmen || x.vorschlag), 0);
+    if (zr.length) rahmen += `<p class="cp-auff-t">${sum.n ? 'Je Kategorie – Strich: dein Rahmen' : `Noch kein Rahmen festgelegt · bisher im ${MONAT[+RR.k.slice(5) - 1]} je Kategorie, Strich: Vorschlag (Ø ohne Verträge)`}</p>`
+      + balkenListe([...zr.map((x) => ({ n: esc(schoen(x.kat)), c: Math.max(0, x.aus), marke: x.rahmen || x.vorschlag || null, w: eur0(x.aus), p: `von ${eur0(x.rahmen || x.vorschlag)}`, farbe: x.aus > (x.rahmen || x.vorschlag) ? 'var(--aus)' : 'var(--variabel)',
+          ziel: zuBuchungen({ konto: '', art: 'aus', kat: x.kat, nf: '1', ...monatZiel(RR.k) }) })),
+        { n: '<b>Summe</b>', c: 0, w: `<b>${eur0(zrS)}</b>`, p: `von ${eur0(zrG)}`, cls: 'bl-summe' }], { max: Math.max(1, ...zr.map((x) => Math.max(x.aus, x.rahmen || x.vorschlag))) });
     rahmen += bxLink(sum.n ? 'Rahmen je Kategorie' : 'Rahmen festlegen', { tab: 'uebersicht', kart: 'aus', wahl: '', _springe: '#pl-rahmen' });
   }
 
   // Reisen aus den Finanzguru-Tags: die letzten vier
   const RS = sicher(() => reisen(H)) || null, zuReisen = { tab: 'uebersicht', kart: 'tags' };
+  const rSort = (() => { try { return localStorage.getItem('fd.reisensort') || 'groesse'; } catch { return 'groesse'; } })();
+  const rListe = (RS?.karten || []).slice().sort((a1, b1) => (rSort === 'datum' ? (a1.erste < b1.erste ? 1 : -1) : b1.c - a1.c)).slice(0, 4);
   const reiseInhalt = !RS?.karten?.length ? '<p class="bx-u">Vergib in Finanzguru Tags, dann erscheinen hier deine Reisen.</p>'
-    : balkenListe(RS.karten.slice(0, 4).map((x) => ({ n: esc(x.tag), sub: `${dde(x.erste)} · ${x.tage} ${x.tage === 1 ? 'Tag' : 'Tage'}`, c: x.c, ziel: zuReisen, farbe: 'var(--variabel)' }))) + bxLink(`Alle ${RS.gesamt} Reisen und Projekte`, zuReisen);
+    : `<div class="seg bx-mini" role="group" aria-label="Sortierung"><button data-rsort="groesse" class="${rSort !== 'datum' ? 'an' : ''}">nach Betrag</button><button data-rsort="datum" class="${rSort === 'datum' ? 'an' : ''}">neueste zuerst</button></div>`
+      + balkenListe(rListe.map((x) => ({ n: esc(x.tag), sub: `ab ${MONAT[+x.erste.slice(5, 7) - 1]} ${x.erste.slice(0, 4)} · ${x.n} ${x.n === 1 ? 'Buchung' : 'Buchungen'}`, c: x.c, ziel: zuReisen, farbe: 'var(--accent-2)' }))) + bxLink(`Alle ${RS.gesamt} Reisen und Projekte`, zuReisen);
 
   box.innerHTML = `<div class="cp bx">
     ${bxKopf('Geldfluss', kern, unter)}
     <div class="cp-kz">${kacheln}</div>
     <div class="bx-raster bx-sechs">
       ${bxKarte('Vom Gehalt zum Ergebnis', wf, { rechts: '<span class="klein muted">ein normaler Monat</span>', cls_: 'bx-wf', fuss: 'Säule anklicken: Einzelheiten · mehr unter Kennzahlen' })}
-      ${bxKarte('Wofür das Geld ausgeht', kats, { rechts: `<span class="klein muted">${esc(K.name)} · daneben Ø 12 Monate</span>`, fuss: `Sortiert nach ${esc(K.name)} · Ø ${esc(monatsText(ms))} · ohne Kinder- und gemeinsame Konten · Linie: je Monat · ${zl('alle Kategorien (12 Monate)', katAlle)}` })}
+      ${bxKarte('Wofür das Geld ausgeht', kats, { rechts: `<span class="klein muted">${esc(K.name)} · daneben Ø 12 Monate</span>`, fuss: `${zl('alle Kategorien (12 Monate)', katAlle)} · sortiert nach ${esc(K.name)} · Ø ${esc(monatsText(ms))} · ohne Kinder- und gemeinsame Konten · Linie: je Monat` })}
       ${bxKarte('Verträge', vertraege, { rechts: zl(`<b class="bx-wert">${eur0(R.fix)}</b>`, zuFix), fuss: `Nächste 30 Tage: ${termine.length} feste Abbuchungen · ${zl(eur0(tSumme), { tab: 'fix', fixtab: 'kalender', konto: '' })}` })}
       ${bxKarte(rahmenTitel, rahmen, { fuss: 'Ausgaben ohne Verträge in den frei gestaltbaren Kategorien · Strich = heute' })}
-      ${bxKarte('Reisen', reiseInhalt, { fuss: RS?.karten?.length ? 'Ausgaben von deinen Konten je Reise (Finanzguru-Tags)' : '' })}
+      ${bxKarte('Reisen', reiseInhalt)}
       ${L.monate.length ? bxKarte('Lebenshaltung je Monat', `<div class="cp-chart bx-chart"><canvas id="c-gf-leben" aria-label="Lebenshaltung je Monat"></canvas></div>`, { cls_: 'bx-flex',
         rechts: `<b class="bx-wert">${eur0(L.werte.at(-1))}</b>`, fuss: `Alle Ausgaben ohne Verträge, ohne gemeinsame und Kinderkonten · dunkel: ${esc(monLang(L.monate.at(-1)))} · gestrichelt: Ø ${eur0(L.schnitt)} · Säule anklicken: Buchungen` }) : ''}
     </div>
     ${RUNDUNG}
   </div>`;
   gehBinden(box);
+  box.querySelectorAll('[data-rsort]').forEach((b) => b.onclick = () => { try { localStorage.setItem('fd.reisensort', b.dataset.rsort); } catch {} geldflussSeite(); });
   sicher(() => gfLebenZeichnen(L));
 }
 
@@ -1305,13 +1314,16 @@ function vermoegenSeite() {
   const gruppen = KONTO_GRUPPEN.map((g) => { const l = amTag.filter((x) => g.test(x.k)); return { g, n: l.length, c: l.filter((x) => x.c != null && x.status !== 'unbekannt').reduce((t, x) => t + x.c, 0) }; }).filter((x) => x.n);
   const wo = `<div class="bx-wo">${gruppen.map(({ g, n, c }) => `<button class="bx-wo-z${g.fremd ? ' fremd' : ''}"${geh(zuKonten)} title="${esc(g.erkl)}"><span>${esc(g.titel)}<small>${n} ${n === 1 ? 'Konto' : 'Konten'}${g.fremd ? ' · zählt nicht mit' : ''}</small></span><b>${eur0(c)}</b></button>`).join('')}</div>`;
 
+  const dpTop = dp ? [...dp.papiere.map((p) => ({ n: p.name, isin: p.isin, w: p.kurs ? p.kurs.kurswert : p.basis })), ...dp.nurKurs.map((w) => ({ n: w.isin, isin: w.isin, w: w.kurswert }))].filter((x) => x.w > 0).sort((a1, b1) => b1.w - a1.w) : [];
+  const dpRest = dpTop.slice(5).reduce((t, x) => t + x.w, 0);
   const depotInhalt = !dp ? '<p class="bx-u">Depot-Daten kommen mit dem nächsten Aufbau am PC.</p>'
-    : `<dl class="bx-dl"><div><dt>eingezahlt (gebucht)</dt><dd>${eur0(dp.eingezahlt)}</dd></div><div><dt>entnommen (Verkäufe)</dt><dd>${eur0(dp.entnommen)}</dd></div>
-      <div><dt>netto eingezahlt</dt><dd><span class="${dp.eingezahlt - dp.entnommen < 0 ? 'neg' : ''}">${eur0(dp.eingezahlt - dp.entnommen)}</span><small>eingezahlt − entnommen</small></dd></div>
-      <div><dt>${dp.kurse ? 'Kurswert' : 'Wert im Vermögen'}</dt><dd>${eur0(dp.wert)}<small>${dp.kurse ? `laut Depot-Datei vom ${dde(dp.kurse.stichtag)}` : 'Einstand, berechnet'}</small></dd></div></dl>
-      ${dp.kurse ? '' : `<p class="bx-u">Der Wert im Vermögen ist der Einstand der Papiere, die noch im Depot liegen (Durchschnittsmethode; wo kein Einstand berechenbar ist, netto eingezahlt${dp.berechnet ? ` · ${dp.berechnet} Papiere` : ''}). Er weicht von „netto eingezahlt“ ab, weil die Verkäufe nicht genau so viel eingebracht haben, wie die verkauften Anteile gekostet hatten.</p>`}
-      ${dp.spar ? `<p class="bx-u">Seit ${monKurz(dp.spar.seit)} gehen nur noch <b>${eur0(dp.spar.jetzt)}</b> im Monat in Sparpläne (vorher Ø ${eur0(dp.spar.vorher)}).</p>` : ''}
-      ${dp.verkauf12 > 0 ? `<p class="bx-u">In den letzten 12 Monaten verkauft: <b>${eur0(dp.verkauf12)}</b>.</p>` : ''}${bxLink('Depot und Sparpläne', { ...zuKonten, _springe: '#dp-karte' })}`;
+    : `<dl class="bx-dl"><div><dt>eingezahlt</dt><dd>${eur0(dp.eingezahlt)}</dd></div><div><dt>entnommen</dt><dd>${eur0(dp.entnommen)}</dd></div>
+      <div><dt>${dp.kurse ? 'Kurswert' : 'Wert (Einstand)'}</dt><dd>${eur0(dp.wert)}</dd></div></dl>
+      <p class="cp-auff-t">Größte Positionen · ${dpTop.length} Papiere</p>
+      ${balkenListe([...dpTop.slice(0, 5).map((x) => ({ n: esc(x.n), c: x.w, p: `${Math.round((x.w / dp.wert) * 100)} %`, farbe: 'var(--accent-2)', ziel: zuBuchungen({ q: x.isin, konto: '' }) })),
+        ...(dpRest ? [{ n: `${dpTop.length - 5} weitere`, c: dpRest, p: `${Math.round((dpRest / dp.wert) * 100)} %`, farbe: 'var(--variabel)', ziel: { ...zuKonten, _springe: '#dp-karte' } }] : []),
+        { n: '<b>Summe</b>', c: 0, w: `<b>${eur0(dp.wert)}</b>`, p: '100 %', cls: 'bl-summe' }], { max: Math.max(1, ...dpTop.map((x) => x.w)) })}
+      ${dp.spar ? `<p class="bx-u">Seit ${monKurz(dp.spar.seit)} nur noch <b>${eur0(dp.spar.jetzt)}</b> im Monat in Sparplänen (vorher Ø ${eur0(dp.spar.vorher)}).</p>` : ''}${bxLink('Depot und Sparpläne', { ...zuKonten, _springe: '#dp-karte' })}`;
   const vorsorgeInhalt = vm.vertraege.length ? balkenListe(vm.vertraege.slice(0, 5).map((x) => ({ n: esc(x.name), sub: `Stand ${dde(x.am)}${x.alt ? ' · alter Stand' : ''}`, c: x.c, ziel: { ...zuKonten, _springe: '#vm-karte' }, farbe: 'var(--accent-2)' })))
     : '<p class="bx-u">Kein Vorsorgevertrag mit belegtem Wert in den Unterlagen.</p>';
 
@@ -1326,7 +1338,7 @@ function vermoegenSeite() {
     <div class="bx-raster bx-sechs">
       ${bxKarte('Zusammensetzung', anteil + wo, { fuss: 'Oben: woraus das Vermögen besteht · unten: Kontostände heute nach Zweck' })}
       ${bxKarte('Konten im Verlauf', `<div class="cp-chart"><canvas id="c-vm-stand" aria-label="Kontostand der letzten 24 Monate"></canvas></div>`, { rechts: '<span class="klein muted">24 Monatsenden</span>', fuss: `Summe deiner Konten am Monatsende, ohne Depot, gemeinsame und Kinderkonten.${lueckenText(ks24.map((m) => m.summe))} Punkt anklicken: Kontostände an diesem Tag.` })}
-      ${bxKarte('Depot', depotInhalt, { fuss: dp ? `Aus deinen Buchungen bis ${dde(dp.stand)}${dp.kurse ? '' : ' · ohne Kurswerte: dafür einen Depot-Export in den Eingang legen'}` : '' })}
+      ${bxKarte('Depot', depotInhalt, { fuss: dp ? `Aus deinen Buchungen bis ${dde(dp.stand)}${dp.kurse ? '' : ' · ohne Kurswerte: Wert = Einstand der Papiere im Bestand (Durchschnittsmethode, berechnet); er weicht von „eingezahlt − entnommen“ ab, weil Verkäufe nicht genau so viel einbrachten, wie die Anteile gekostet hatten'}` : '' })}
       ${bxKarte('Vorsorge', vorsorgeInhalt, { rechts: vm.vertraege.length ? `<b class="bx-wert">${eur0(vm.vorsorge)}</b>` : '', fuss: `Gesetzliche Rente nicht enthalten.${vm.ohneWert ? ` ${vm.ohneWert} ${vm.ohneWert === 1 ? 'Vertrag hat' : 'Verträge haben'} keinen Wert in den Unterlagen.` : ''}` })}
       ${dpMon.length ? bxKarte('Depot: Käufe und Verkäufe', `<p class="cp-leg"><i class="cp-leg-a"></i>Käufe <i class="cp-leg-e"></i>Verkäufe <span>· je Monat, ${dpMon.length} Monate</span></p><div class="cp-chart bx-chart"><canvas id="c-vm-depot" aria-label="Depot: Käufe und Verkäufe je Monat"></canvas></div>`,
         { cls_: 'bx-flex', fuss: `Laut Buchungen bis ${dde(dp.stand)} · Verkäufe nach unten · Sparplan-Überträge zählen nicht` }) : ''}
@@ -1429,7 +1441,7 @@ function einkommenSeite() {
     : '<p class="bx-u">Noch kein Steuerbescheid in den Daten.</p>';
 
   const reihe2 = z ? `<div class="bx-raster ek-reihe2">
-      ${bxKarte('Brutto und Auszahlung je Abrechnung', `<p class="cp-leg"><i class="cp-leg-e"></i>Brutto <i class="cp-leg-a"></i>aufs Konto <span>· ${g.verlauf.length} Abrechnungen</span></p><div class="cp-chart ek-chart"><canvas id="c-ek-verlauf" aria-label="Brutto und Auszahlung je Abrechnung"></canvas></div>`, { cls_: 'ek-verlauf' })}
+      ${bxKarte('Grundgehalt und Erhöhungen', `<p class="cp-leg"><i class="cp-leg-a"></i>Grundgehalt brutto im Monat <span>· Punkte: Erhöhungen mit Prozent</span></p><div class="cp-chart ek-chart"><canvas id="c-ek-verlauf" aria-label="Grundgehalt und Erhöhungen"></canvas></div>`, { cls_: 'ek-verlauf', fuss: `Von ${eurE0(g.erste.gehalt)} (${monKurz(g.erste.m)}) auf ${eurE0(g.stufe)} – laut Abrechnungen` })}
       ${bxKarte(`Vom Brutto zur Auszahlung · ${MON[+z.m.slice(5) - 1]}`, brutto)}
       ${bxKarte('Steuer laut Bescheid', bescheide)}
     </div>` : '';
@@ -1445,31 +1457,23 @@ function einkommenSeite() {
     ${reihe2}
   </div>`;
   gehBinden(box);
-  if (g?.verlauf?.length) sicher(() => ekVerlaufZeichnen(g.verlauf));
+  if (g?.alle?.length) sicher(() => ekVerlaufZeichnen(g));
 }
 
-// Brutto und Auszahlung je Abrechnung (Euro aus gehalt.js)
-function ekVerlaufZeichnen(v) {
+// Grundgehalt je Abrechnung als Stufenlinie, Erhöhungen als Punkte mit Prozent (Euro aus gehalt.js)
+function ekVerlaufZeichnen(g) {
   if (!$('#c-ek-verlauf')) return;
-  const ms = matchMedia('(max-width: 640px)').matches ? v.slice(-8) : v;
+  const ms = g.alle, erh = new Map(g.erh.map((x) => [x.m, x])), c = css('--accent');
   const o = basis();
-  o.interaction = { mode: 'index', intersect: false };
-  o.layout = { padding: { top: 6 } };
-  o.scales = {
-    x: { ...achsenStil(), grid: { display: false }, ticks: { ...achsenStil().ticks, font: { size: 10.5 }, maxRotation: 0, autoSkip: true, autoSkipPadding: 8 } },
-    y: { ...achsenStil(), beginAtZero: true, ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 4 } },
-  };
-  o.plugins.tooltip.callbacks = { title: (it) => `Abrechnung ${monLang(ms[it[0].dataIndex].m)}`, label: (it) => ` ${it.dataset.label}: ${EUR0.format(it.raw)}` };
+  o.layout = { padding: { top: 22, right: 8 } };
+  o.scales = { x: { ...achsenStil(), grid: { display: false }, ticks: { ...achsenStil().ticks, font: { size: 10.5 }, maxRotation: 0, autoSkip: true, autoSkipPadding: 12 } },
+    y: { ...achsenStil(), ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 5 } } };
+  o.plugins.tooltip.callbacks = { title: (it) => `Abrechnung ${monLang(ms[it[0].dataIndex].m)}`, label: (it) => { const e = erh.get(ms[it.dataIndex].m); return ` Grundgehalt: ${EUR0.format(it.raw)}${e ? ` (+${Math.round(e.p * 1000) / 10} %)` : ''}`; } };
   o.onClick = (_, el) => { if (el.length) setze({ tab: 'gehalt', gmonat: ms[el[0].index].m }); };
-  o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
-  zeichne('c-ek-verlauf', {
-    type: 'bar',
-    data: { labels: ms.map((x) => monKurz(x.m)), datasets: [
-      { label: 'Brutto', data: ms.map((x) => Math.round(x.brutto || 0)), backgroundColor: css('--akzent'), borderRadius: 3, maxBarThickness: 16, categoryPercentage: 0.74, barPercentage: 0.92 },
-      { label: 'aufs Konto', data: ms.map((x) => Math.round(x.netto || 0)), backgroundColor: css('--fest'), borderRadius: 3, maxBarThickness: 16, categoryPercentage: 0.74, barPercentage: 0.92 },
-    ] },
-    options: o,
-  });
+  zeichne('c-ek-verlauf', { type: 'line',
+    data: { labels: ms.map((x) => monKurz(x.m)), datasets: [{ data: ms.map((x) => Math.round(x.gehalt || 0)), borderColor: c, backgroundColor: alpha(c, 0.08), fill: 'origin', stepped: true, borderWidth: 2,
+      pointRadius: ms.map((x) => (erh.has(x.m) ? 4 : 0)), pointBackgroundColor: c }] },
+    options: o, plugins: [punktWerteMit(ms.map((x, i) => (erh.has(x.m) ? i : -1)).filter((i) => i >= 0), (v, i) => `+${Math.round(erh.get(ms[i].m).p * 100)} %`)] });
 }
 
 // ---------------------------------------------------------------- Familie
@@ -1493,6 +1497,10 @@ function familieSeite() {
   ].join('');
 
   // Monat für Monat: die letzten 6 abgeschlossenen Monate mit Abweichung zum Soll
+  // Warum weicht die Zahlung ab? Letzter abgeschlossener Monat je Art gegen die verbindliche Berechnung
+  const mL = ms.at(-1), grund = !mL || !l || mL.abw == null || Math.abs(mL.abw) < 100 ? ''
+    : [Math.round(mL.tu) !== Math.round(l.tu * 100) ? `Trennungsunterhalt: überwiesen ${eur0(mL.tu)}, laut Berechnung ${eurE0(l.tu)}` : '',
+      ...(l.ku || []).map((k, i) => (mL.kind[i] != null && Math.round(mL.kind[i]) !== Math.round(k * 100) ? `${esc(U.kinder[i]?.name || `Kind ${i + 1}`)}: überwiesen ${eur0(mL.kind[i])}, laut Berechnung ${eurE0(k)}` : ''))].filter(Boolean).join(' · ');
   const monate = ms.slice(-6).reverse().map((m) => `<button class="bx-mz"${geh(zuBuchungen({ konto: '', q: 'unterhalt', ...monatZiel(m.k) }))} title="Anklicken: Buchungen des Monats">
       <span>${monLang(m.k)}</span><b>${eur0(m.sum)}</b>${m.abw == null ? '<span class="muted">kein Soll</span>' : Math.abs(m.abw) < 100 ? '<span class="bx-ok">passt</span>' : `<span class="bx-d neg">${m.abw < 0 ? 'fehlt' : 'mehr'} ${eur0(Math.abs(m.abw))}</span>`}</button>`).join('');
 
@@ -1539,7 +1547,7 @@ function familieSeite() {
     ${kacheln ? `<div class="cp-kz">${kacheln}</div>` : ''}
     <div class="bx-raster bx-sechs">
       ${bxKarte('Risiko bei Neuberechnung', risikoInhalt, { rechts: '<span class="marke">berechnet</span>', fuss: 'Nichts selbst anstoßen – neu gerechnet wird erst, wenn die Gegenseite Auskunft verlangt. Mit RA Vitti abstimmen.' })}
-      ${bxKarte('Monat für Monat', `<div class="bx-ml">${monate || '<p class="bx-u">Keine Unterhaltszahlungen auf deinen Konten.</p>'}</div>${bxLink('Alle Monate', { ...zuU, _springe: '#uh-a' })}`, { rechts: '<span class="klein muted">gezahlt · Abweichung zum Soll</span>' })}
+      ${bxKarte('Monat für Monat', `<div class="bx-ml">${monate || '<p class="bx-u">Keine Unterhaltszahlungen auf deinen Konten.</p>'}</div>${grund ? `<p class="bx-hinw-z">Warum: ${grund}. Der Dauerauftrag liegt also unter der verbindlichen Berechnung.</p>` : ''}${bxLink('Alle Monate', { ...zuU, _springe: '#uh-a' })}`, { rechts: '<span class="klein muted">gezahlt · Abweichung zum Soll</span>' })}
       ${bxKarte(U?.A?.name ? `Ausgleich mit ${esc(U.A.name)}` : 'Ausgleich', ausgleich, { rechts: U ? `<b class="bx-wert ${U.saldo < 0 ? 'neg' : ''}">${U.saldo > 0 ? '+' : U.saldo < 0 ? '−' : ''}${eur0(Math.abs(U.saldo))}</b>` : '', fuss: 'Plus = an dich, minus = von dir · ohne die Unterhaltsraten' })}
       ${bxKarte('Kinder und Fristen', kinderInhalt, { fuss: 'Kinderkonten zählen nicht zu deinen Finanzen' })}
       ${uhM.length ? bxKarte('Unterhalt je Monat', `<p class="cp-leg">${uhArten.map((a1, i) => `<i style="background:${a1.f}"></i>${esc(a1.n)}`).join(' ')} <span>· Linie: Soll</span></p><div class="cp-chart bx-chart"><canvas id="c-fam-uh" aria-label="Unterhalt je Monat nach Art"></canvas></div>`,

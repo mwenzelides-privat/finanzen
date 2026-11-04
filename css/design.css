@@ -706,3 +706,15 @@ i.cv-offen { background: var(--surface-2); border: 1px solid var(--border-strong
 @media (min-width: 901px) { .cp:not(.bx) { grid-template-rows: minmax(310px, 1.45fr) auto auto minmax(268px, 1fr); } }
 @media (min-width: 901px) { .cp:not(.bx) { grid-template-rows: minmax(345px, 1.45fr) auto auto minmax(268px, 1fr); } }
 @media (min-width: 901px) { .cp:not(.bx) { height: calc(100vh - 98px); } }
+
+/* 06: Cockpit-Kopf bleibt in seiner Reihe (keine Überlagerung) */
+@media (min-width: 901px) {
+  .cp-reihe-a { grid-template-rows: minmax(0, 1fr); }
+  .cp-reihe-a > .card { min-height: 0; overflow: hidden; }
+  .cp-hero-g { overflow: hidden; }
+  .cp-hero-chart { min-height: 120px; }
+}
+.bx-mini { align-self: flex-start; }
+.bx-mini button { padding: 3px 10px; font-size: var(--fs-xs); }
+.bx-hinw-z { margin: 4px 0 0; padding: 6px 8px; border-radius: var(--radius-s); background: var(--gelb-soft); font-size: var(--fs-xs); color: var(--text-2); }
+#btn-lupe { display: none !important; }
