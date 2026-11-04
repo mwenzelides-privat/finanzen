@@ -136,8 +136,11 @@ function ausgleichDaten(H, R = rasterDaten(H)) {
     const z = H.norm(r.z);
     if (!gegen(r)) return 'auslagen';
     if (r.ukat === 'Steuern' || /steuer|finanzamt|bescheid/.test(z)) return 'steuer';
-    if (r.kat === 'Kinder' || kRe.some((re) => re && re.test(z))) return 'kinder';
-    if (hatTag(r) || /auslage|erstatt|rueckzahl/.test(z)) return 'auslagen';
+    if (r.kat === 'Kinder') return 'kinder';
+    // Erstattungen vor dem Kindernamen: „Auslagenerstattung … abzgl. Geschenk <Kind>“ bleibt eine Erstattung
+    if (/auslage|erstatt|rueckzahl/.test(z)) return 'auslagen';
+    if (kRe.some((re) => re && re.test(z))) return 'kinder';
+    if (hatTag(r)) return 'auslagen';
     return 'sonst';
   };
   const g = new Map(rows.map((r) => [r.i, gruppe(r)]));
@@ -253,7 +256,7 @@ function karteMonate(H, R) {
   ];
   const sumZiel = (m) => zb({ q: R.name ? `"${R.name}"` : '', ...H.monatZiel(m.k) });
   const S = { tu: 0, kind: E.kinder.map(() => 0), na: 0, sum: 0, soll: 0, abw: 0 };
-  for (const m of R.monate) { S.tu += m.tu; m.kind.forEach((c, i) => (S.kind[i] += c)); S.na += m.na; S.sum += m.sum; if (m.soll != null) { S.soll += m.soll; S.abw += m.abw; } }
+  for (const m of R.monate) { S.tu += m.tu; m.kind.forEach((c, i) => (S.kind[i] += c)); S.na += m.na; S.sum += m.sum; if (m.soll != null && !(m.k === R.bisM && R.laeuft && m.abw < 0)) { S.soll += m.soll; S.abw += m.abw; } }   // laufender Monat, Zahlung offen: zählt noch nicht als Abweichung
   const kopfKind = (k, i) => { const v = volljaehrig(k.geb); return `<th class="r">${H.esc(kindName(i))}${v ? `<small>18 ab ${H.monKurz(v)}</small>` : ''}</th>`; };
   const tabelle = `<table class="t uh-tab"><thead><tr><th>Monat</th><th class="r">Trennungs&shy;unterhalt</th>${E.kinder.map(kopfKind).join('')}<th class="r">nicht aufgeteilt</th><th class="r">Summe</th>${mitSoll ? '<th class="r" title="laut deinen Angaben (Vereinbarung/Titel)">Soll</th><th class="r">Abweichung</th>' : ''}</tr></thead>
     <tbody>${R.monate.map((m) => `<tr><td>${H.monLang(m.k)}${warn(m)}</td><td class="r">${zelle(m.tu, teile(m)[0][2])}</td>${m.kind.map((c, i) => `<td class="r">${zelle(c, teile(m)[i + 1][2])}</td>`).join('')}<td class="r">${zelle(m.na, teile(m)[kz + 1][2])}</td><td class="r"><b>${zelle(m.sum, sumZiel(m))}</b></td>${mitSoll ? `<td class="r">${m.soll == null ? strich : H.eur(m.soll)}</td><td class="r">${abwZelle(m)}</td>` : ''}</tr>`).join('')}</tbody>

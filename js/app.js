@@ -12,7 +12,7 @@ import { prognoseLaden, prognoseKarte, prognoseBinden, prognoseFristen, prognose
 import { unterhaltLaden, unterhaltSeite, unterhaltBinden, unterhaltFristen, kinder, ausgleichTags, unterhaltKurz } from './unterhalt.js';
 import { fristenLaden, fristenKarte, fristenListe, fristenBinden, fristenAlle, icsText } from './fristen.js';
 import { waechterLaden, istNeu, waechterKarte, neuLeiste, chip, waechterBinden, treffer } from './waechter.js';
-import { planGehalt, saison, prognoseText, rahmenKarte, freiZeile, rahmenBinden, rahmenStand } from './planung.js';
+import { planGehalt, prognoseText, rahmenKarte, freiZeile, rahmenBinden, rahmenStand } from './planung.js';
 import { vermoegenLaden, depotKarte, vermoegenKarte, vermoegenBinden, reisenSeite, reisenBinden, vermoegen, reisen } from './vermoegen.js';
 
 const $ = (s) => document.querySelector(s);
@@ -39,7 +39,7 @@ let H = null;          // Helfer für die Zusatzmodule (modulHelfer), gebaut bei
 // Zusatzmodule: ein Fehler darin soll die Seite nicht leeren – dann fehlt nur dieser Teil ('' = nichts anzeigen)
 const sicher = (f) => { try { return f() ?? ''; } catch (e) { console.error(e); return ''; } };
 let quelle = null;     // gespeicherte Fassung (Text + Herkunft)
-const S0 = { q: '', jahr: '', monat: '', konto: '', kat: '', ukat: '', art: 'alle', umb: false, tab: 'start', sort: 'datum', dir: -1, stichtag: '', wahl: '', kart: 'aus', fixtab: 'vertraege', zr: '', nf: '', neu: '',
+const S0 = { q: '', jahr: '', monat: '', konto: '', kat: '', ukat: '', art: 'alle', umb: false, tab: 'start', sort: 'datum', dir: -1, stichtag: '', wahl: '', kart: 'aus', fixtab: 'vertraege', zr: '', nf: '', neu: '', vertrag: '',
   // Auswahl in Steuer (Jahr, Filter, Abschnitt) und Gehalt (Monat, Vergleich, Tabellenjahr); leer = Grundeinstellung des Reiters
   sjahr: '', sfilter: '', sabf: '', gmonat: '', gbasis: '', gtjahr: '' };
 let S = { ...S0 };
@@ -96,11 +96,19 @@ function pruefer(conds, mitJahr = true, mitArt = true) {
   const ks = kontoSet(), zr = mitJahr && S.zr ? S.zr.split('_') : null;
   const fremdGewaehlt = !!ks && [...ks].some((i) => fremd(D.konten[i]));
   return (r) => (S.umb || r.art !== 'Umbuchung') && (!FREMD_ART.has(r.art) || fremdGewaehlt)
-    && (!jahre.length || jahre.includes(r.y)) && (!monate.length || monate.includes(r.m)) && (!zr || (r.d.slice(0, 7) >= zr[0] && r.d.slice(0, 7) <= zr[1])) && (!S.nf || !fixIds().has(r.i)) && (!ks || ks.has(r.k))
+    && (!jahre.length || jahre.includes(r.y)) && (!monate.length || monate.includes(r.m)) && (!zr || (r.d.slice(0, 7) >= zr[0] && r.d.slice(0, 7) <= zr[1])) && (!S.nf || !fixIds().has(r.i)) && (!S.vertrag || vertragIds(S.vertrag).has(r.i)) && (!ks || ks.has(r.k))
     && (!S.kat || r.kat === S.kat) && (!S.ukat || r.ukat === S.ukat)
     && (!mitArt || S.art === 'alle' || (S.art === 'aus' ? r.art === 'Ausgabe' : r.art === 'Einnahme'))
     && test(r);
 }
+
+// Buchungen genau eines erkannten Vertrags (Schlüssel aus vertragsKey) – dieselben Zahlungen, die der Vertrag zählt
+function vertragIds(key) {
+  if (!D.vIds) D.vIds = new Map();
+  if (!D.vIds.has(key)) D.vIds.set(key, new Set(fixkostenErkennen().find((f) => vertragsKey(f) === key)?.rows.map((r) => r.i) || []));
+  return D.vIds.get(key);
+}
+const vertragText = (key) => { const f = fixkostenErkennen().find((x) => vertragsKey(x) === key); return f ? vertragName(f) : key.split('|')[0]; };
 
 // Kontenauswahl: S.konto = Kontonamen, getrennt durch „|“; leer = alle eigenen Konten
 function kontoSet() {
@@ -211,6 +219,7 @@ function filterZeigen(conds) {
   if (!filterMehr) for (const [k, t] of mehrAktiv) chips.push(`<button class="chip" data-mehr="${k}" title="Filter entfernen">${t}<span class="x">×</span></button>`);
   if (S.neu) chips.push('<button class="chip" data-neu="1" title="Wieder alle Buchungen zeigen">nur neue<span class="x">×</span></button>');
   if (S.nf) chips.push(`<button class="chip" data-nf="1" title="Auch feste Verträge zeigen">ohne feste Verträge<span class="x">×</span></button>`);
+  if (S.vertrag) chips.push(`<button class="chip" data-vertrag="1" title="Vertragsfilter entfernen">Vertrag <b>${esc(vertragText(S.vertrag))}</b><span class="x">×</span></button>`);
   if (S.zr) chips.push(`<button class="chip" data-zr="1" title="Zeitraum entfernen">Zeitraum <b>${esc(zrText())}</b><span class="x">×</span></button>`);
   if (S.ukat) chips.push(`<button class="chip" data-ukat="1" title="Unterkategorie-Filter entfernen">Unterkategorie <b>${esc(S.ukat)}</b><span class="x">×</span></button>`);
   $('#chips').innerHTML = chips.join('');
@@ -221,9 +230,10 @@ function filterZeigen(conds) {
   $('#chips').querySelector('[data-ukat]')?.addEventListener('click', () => setze({ ukat: '' }));
   $('#chips').querySelector('[data-zr]')?.addEventListener('click', () => setze({ zr: '' }));
   $('#chips').querySelector('[data-nf]')?.addEventListener('click', () => setze({ nf: '' }));
+  $('#chips').querySelector('[data-vertrag]')?.addEventListener('click', () => setze({ vertrag: '' }));
   $('#chips').querySelector('[data-neu]')?.addEventListener('click', () => setze({ neu: '' }));
   $('#chips').querySelectorAll('[data-mehr]').forEach((b) => b.onclick = () => setze(({ konto: { konto: '' }, kat: { kat: '', ukat: '' }, art: { art: 'alle' }, umb: { umb: false } })[b.dataset.mehr]));
-  const aktiv = S.q || S.jahr || S.monat || S.zr || S.nf || S.neu || S.konto || S.kat || S.ukat || S.art !== 'alle' || S.umb;
+  const aktiv = S.q || S.jahr || S.monat || S.zr || S.nf || S.neu || S.vertrag || S.konto || S.kat || S.ukat || S.art !== 'alle' || S.umb;
   $('#btn-reset').hidden = !abweichend();
   $('#btn-zurueck').hidden = stufe <= 0;
 }
@@ -515,7 +525,8 @@ function gehBinden(el) {
     setze(z);
     if (sp) setTimeout(() => springe(sp, false), 60);   // nach dem Seitenwechsel direkt hinspringen
   });
-  el.querySelectorAll('[data-fix]').forEach((b) => b.onclick = () => setze({ q: `"${b.dataset.fix}"${b.dataset.sig ? ' ' + b.dataset.sig : ''}`, tab: 'buchungen', jahr: '', monat: '', zr: '', konto: '', kat: '', ukat: '', art: 'alle' }));
+  // data-fix = Schlüssel des Vertrags: genau seine Zahlungen, alle anderen Filter (auch „ohne feste Verträge“) zurückgesetzt
+  el.querySelectorAll('[data-fix]').forEach((b) => b.onclick = () => setze(zuBuchungen({ vertrag: b.dataset.fix, konto: '' })));
   el.querySelectorAll('[data-springe]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); springe(b.dataset.springe); });  el.querySelectorAll('.zl[role="button"]').forEach((b) => b.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); b.click(); } });
 }
 function springe(sel, sanft = true) {
@@ -526,7 +537,7 @@ function springe(sel, sanft = true) {
   z.classList.remove('blink'); void z.offsetWidth; z.classList.add('blink');
 }
 // Ziele für Klicks: Buchungen mit genau dem passenden Zeitraum (die gewählten Konten bleiben), das Gehalt, einzelne Monate
-const zuBuchungen = (x = {}) => ({ tab: 'buchungen', q: '', jahr: '', monat: '', zr: '', nf: '', neu: '', kat: '', ukat: '', art: 'alle', ...x });
+const zuBuchungen = (x = {}) => ({ tab: 'buchungen', q: '', jahr: '', monat: '', zr: '', nf: '', neu: '', vertrag: '', kat: '', ukat: '', art: 'alle', ...x });
 function zeitZiel(ms) {
   if (!ms.length) return {};
   const jahre = [...new Set(ms.map((k) => k.slice(0, 4)))];
@@ -565,7 +576,7 @@ const linieMit = (id, wert, text, farbe, oben = true) => ({
   },
 });
 // Prognosebereich ab Index: grau hinterlegt, oben beschriftet
-const PROGNOSE = 'Prognose (berechnet: Plan-Gehalt + Saisonprofil)';
+const PROGNOSE = 'Prognose (berechnet: Plan-Gehalt, Lebenshaltung wie im normalen Monat)';
 const prognoseMit = (ab, text = 'Prognose') => ({
   id: 'prognose',
   beforeDatasetsDraw(ch) {
@@ -623,18 +634,16 @@ function monatsRechnung() {
 }
 const lebenName = () => (lebenWahl === 'eigen' && lebenEigen ? 'dein eigener Wert' : lebenWahl === 'typisch' ? 'typischer Monat' : lebenWahl === 'vormonat' && lebenshaltung().monate.length ? `Vormonat ${MONAT[+lebenshaltung().monate.at(-1).slice(5) - 1]}` : 'Ø 12 Monate');
 
-// Prognose ehrlicher (planung.js): Plan-Gehalt eines Monats aus den Abrechnungen (null = aktuelles Gehalt) und
-// Saisonfaktor der Lebenshaltung je Kalendermonat (Σ = 12; ohne Profil überall 1)
+// Prognose ehrlicher (planung.js): Plan-Gehalt eines Monats aus den Abrechnungen (null = aktuelles Gehalt).
+// Die Lebenshaltung bleibt ohne Saisonfaktor: normaler Monat, laufender Monat und Prognose rechnen mit demselben Wert.
 const planG = (k) => { try { return planGehalt(H, k); } catch (e) { console.error(e); return null; } };
-const saisonF = (k) => { try { return saison(H).f[+k.slice(5) - 1] ?? 1; } catch (e) { console.error(e); return 1; } };
 // Die letzten 12 abgeschlossenen Monate, der laufende Monat (bisher + erwartet) und 3 Monate Prognose,
 // je mit Ergebnis und Kontostand am Monatsende. Prognose: normaler Monat, feste Abbuchungen im jeweiligen Monat.
-// alt = true: dieselbe Rechnung mit Ø 12 Monate und Saisonprofil (zum Vergleich, wenn der Vormonat die Grundlage ist)
+// alt = true: dieselbe Rechnung mit Ø 12 Monate (zum Vergleich, wenn der Vormonat die Grundlage ist)
 function verlauf5(alt = false) {
   const key = alt ? 'v5s' : 'v5';
   if (D[key]) return D[key];
   const R0 = monatsRechnung(), R = alt ? { ...R0, lebenProg: R0.lh.schnitt } : R0;
-  const sfx = (k) => (alt || lebenWahl !== 'vormonat' ? saisonF(k) : 1);   // Saisonprofil nur auf Durchschnitte, nicht auf den Vormonat
   const heute = D.bis, jetzt = heute.slice(0, 7), laeuft = heute !== monatsletzter(heute);
   const fx = fixIds(), leer = () => ({ ein: 0, lohn: 0, aus: 0, var: 0, spar: 0 });
   const ist = new Map();
@@ -657,7 +666,7 @@ function verlauf5(alt = false) {
   if (laeuft) {
     const x = w(jetzt), ende = monatsletzter(`${jetzt}-01`);
     const offenFest = R.vertraege.reduce((t, f) => t + faellig(f, plusTage(heute, 1), ende), 0);
-    const gehaltKommt = x.lohn > 0 ? 0 : (planG(jetzt) ?? R.gehalt), sonstKommt = Math.max(0, R.sonst - (x.ein - x.lohn)), varKommt = Math.max(0, Math.round(R.lebenProg * sfx(jetzt)) - x.var);
+    const gehaltKommt = x.lohn > 0 ? 0 : (planG(jetzt) ?? R.gehalt), sonstKommt = Math.max(0, R.sonst - (x.ein - x.lohn)), varKommt = Math.max(0, Math.round(R.lebenProg) - x.var);
     const ein = x.ein + gehaltKommt + sonstKommt, aus = x.aus + offenFest + varKommt;
     weiter(gehaltKommt + sonstKommt - offenFest - varKommt + Math.min(0, spar - x.spar));
     lauf = { k: jetzt, art: 'laeuft', ein, aus, erg: ein - aus, x, offenFest, gehaltKommt, varKommt, tag: +heute.slice(8), tage: +ende.slice(8), stand };
@@ -666,10 +675,10 @@ function verlauf5(alt = false) {
   for (let i = 1; i <= 3; i++) {
     const k = mVor(jetzt, i), ende = monatsletzter(`${k}-01`);
     const fest = R.vertraege.reduce((t, f) => t + faellig(f, `${k}-01`, ende), 0);
-    const pg = planG(k), sf = sfx(k);
-    const ein = (pg ?? R.gehalt) + R.sonst, aus = Math.round(R.lebenProg * sf) + fest;
+    const pg = planG(k);
+    const ein = (pg ?? R.gehalt) + R.sonst, aus = Math.round(R.lebenProg) + fest;
     weiter(ein - aus + spar);
-    monate.push({ k, art: 'prognose', ein, aus, erg: ein - aus, fest, stand, plan: pg != null, sf });
+    monate.push({ k, art: 'prognose', ein, aus, erg: ein - aus, fest, stand, plan: pg != null });
   }
   const n = R.ref.length || 1, summe = (f) => monate.filter((m) => m.art === 'ist').reduce((t, m) => t + f(m), 0);
   const schnitt = { ein: summe((m) => m.ein) / n, aus: summe((m) => m.aus) / n, erg: summe((m) => m.erg) / n, lohn: summe((m) => m.lohn) / n };
@@ -711,7 +720,9 @@ function naechstesGehalt() {
   if (!R.gt || !R.gehalt) return null;
   let k = D.bis.slice(0, 7);
   if (!(V.lauf && V.lauf.gehaltKommt)) k = mVor(k, 1);
-  const am = `${k}-${String(Math.min(R.gt, tageImMonat(k))).padStart(2, '0')}`;
+  let am = `${k}-${String(Math.min(R.gt, tageImMonat(k))).padStart(2, '0')}`;
+  // üblicher Gehaltstag vorbei, Gehalt aber noch nicht gebucht: überfällig, zum nächsten Tag erwartet (wie in der Prognose)
+  if (V.lauf?.gehaltKommt > 0 && am <= D.bis) return { am: plusTage(D.bis, 1), c: V.lauf.gehaltKommt, ueberfaellig: true };
   return am > D.bis && am <= plusTage(D.bis, 30) ? { am, c: planG(k) ?? R.gehalt } : null;
 }
 // Abbuchungen je Tag: Tag mit Summe als Kopf, die Verträge eingerückt darunter; n = höchstens so viele Verträge
@@ -730,7 +741,7 @@ function termineHtml(l, n = 99) {
     const offen = am <= D.bis;   // ausstehend: fällig, aber bis zum Datenstand nicht gebucht
     h += `<div class="nt-tag"><div class="nt-k"${offen ? ' title="Fällig, aber bis zum Datenstand nicht gebucht – zählt als „kommt noch“"' : ''}><span class="nt-d">${offen ? 'seit ' : ''}${tagKurz(am)}</span><span class="nt-a">${fs.length ? `${fs.length} ${fs.length === 1 ? 'Abbuchung' : 'Abbuchungen'}${offen ? ' · noch nicht gebucht' : ''}` : ''}</span><b class="${fs.length ? 'neg' : ''}">${fs.length ? `−${eur0(summe)}` : ''}</b></div>
       ${lohn ? `<button class="nt-z nt-lohn"${geh(zuGehalt())} title="Anklicken: alle Gehälter"><span class="nt-n">Gehalt erwartet</span><b>+${eur0(g.c)}</b></button>` : ''}
-      ${zeig.map((f) => `<button class="nt-z" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="${esc(vertragName(f))} · ${esc(f.rh.name)} – alle Zahlungen anzeigen"><span class="nt-n">${esc(vertragName(f))}${f.rh.proJahr < 12 ? ` <small>${esc(f.rh.name)}</small>` : ''}</span><b>${eur0(f.betrag)}</b></button>`).join('')}</div>`;
+      ${zeig.map((f) => `<button class="nt-z" data-fix="${esc(vertragsKey(f))}" title="${esc(vertragName(f))} · ${esc(f.rh.name)} – alle Zahlungen anzeigen"><span class="nt-n">${esc(vertragName(f))}${f.rh.proJahr < 12 ? ` <small>${esc(f.rh.name)}</small>` : ''}</span><b>${eur0(f.betrag)}</b></button>`).join('')}</div>`;
   }
   if (weg.length) h += `<div class="nt-mehr">+ ${weg.length} weitere Abbuchungen · ${eur0(weg.reduce((t, f) => t + f.betrag, 0))}</div>`;
   return `<div class="nt">${h}</div>`;
@@ -917,7 +928,7 @@ function cockpitSeite() {
   const seitText = anfang ? `${seitAnfang == null ? '–' : pmHtml(dGezeigt(anfang.c, hs.c))} seit 1. ${monatJ}` : '';
   // Vergleich: dieselbe Prognose mit Ø 12 Monate (nur wenn die Grundlage der Vormonat ist)
   const progAlt = lebenWahl === 'vormonat' ? sicher(() => verlauf5(true).monate.at(-1).stand) : '';
-  const progGrund = lebenWahl === 'vormonat' ? `Plan-Gehalt, feste Abbuchungen je Monat, Lebenshaltung wie im ${MONAT[+R.lh.monate.at(-1).slice(5) - 1]} (${eur0(R.leben)})` : esc(sicher(() => prognoseText(H)) || 'berechnet');
+  const progGrund = `Plan-Gehalt, feste Abbuchungen je Monat, Lebenshaltung wie im normalen Monat: ${esc(lebenName())} (${eur0(R.leben)})`;
 
   const hero = `<section class="card cp-hero">
     <div class="cp-hero-k">
@@ -936,9 +947,11 @@ function cockpitSeite() {
 
   // Drei Kacheln mit Bild: normaler Monat (Einkommen gegen Ausgaben), Vermögen (Ring), laufender Monat (Ring mit Tag)
   const maxB = Math.max(R.ein, R.aus, 1), bw = (c) => ((Math.max(0, c) / maxB) * 100).toFixed(1);
-  const monatVis = `<span class="cv-bal"><span class="cv-bz"><span>Einkommen</span><span class="cv-b"><i class="cv-ein" style="width:${bw(R.ein)}%"></i></span><b>${eur0(R.ein)}</b></span>
-    <span class="cv-bz"><span>Ausgaben</span><span class="cv-b"><i class="cv-fest" style="width:${bw(R.fix)}%"></i><i class="cv-leben" style="width:${bw(R.leben)}%"></i>${R.erg > 0 ? `<i class="cv-bleibt" style="width:${bw(R.erg)}%"></i>` : ''}</span><b>${eur0(R.aus)}</b></span>
-    <span class="cv-leg"><span><i class="cv-ein"></i>Einkommen</span><span><i class="cv-fest"></i>Fixkosten</span><span><i class="cv-leben"></i>Lebenshaltung</span>${R.erg > 0 ? `<span><i class="cv-bleibt"></i>bleibt ${eur0(R.erg)}</span>` : R.erg < 0 ? `<span><i class="cv-fehlt"></i>fehlt ${eur0(-R.erg)}</span>` : ''}</span></span>`;
+  // gezeigte Euro-Teile: Einkommen, Ausgaben und Ergebnis aus den gerundeten Teilen, damit die Zahlen aufgehen
+  const gZ = r0(R.gehalt), soZ = r0(R.sonst), fZ = r0(R.fix), lZ = r0(R.leben), einZ = gZ + soZ, ausZ = fZ + lZ, ergZ = einZ - ausZ;
+  const monatVis = `<span class="cv-bal"><span class="cv-bz"><span>Einkommen</span><span class="cv-b"><i class="cv-ein" style="width:${bw(R.ein)}%"></i></span><b>${eur0(einZ)}</b></span>
+    <span class="cv-bz"><span>Ausgaben</span><span class="cv-b"><i class="cv-fest" style="width:${bw(R.fix)}%"></i><i class="cv-leben" style="width:${bw(R.leben)}%"></i>${R.erg > 0 ? `<i class="cv-bleibt" style="width:${bw(R.erg)}%"></i>` : ''}</span><b>${eur0(ausZ)}</b></span>
+    <span class="cv-leg"><span><i class="cv-ein"></i>Einkommen</span><span><i class="cv-fest"></i>Fixkosten</span><span><i class="cv-leben"></i>Lebenshaltung</span>${ergZ > 0 ? `<span><i class="cv-bleibt"></i>bleibt ${eur0(ergZ)}</span>` : ergZ < 0 ? `<span><i class="cv-fehlt"></i>fehlt ${eur0(-ergZ)}</span>` : ''}</span></span>`;
   const vm = sicher(() => vermoegen(H)) || null;
   const vmTeile = vm ? [['Konten', vm.ks?.c || 0], ['Depot', vm.dp?.wert || 0], ['Kaution', vm.kaution?.c || 0], ['Vorsorge', vm.vorsorge]].filter(([, c]) => c > 0) : [];
   const vmSum = vmTeile.reduce((t, [, c]) => t + c, 0) || 1;
@@ -951,10 +964,10 @@ function cockpitSeite() {
       <span><i class="cv-offen"></i>kommt noch<b>≈ ${eur0(dGezeigt(lauf.x.aus, lauf.aus))}</b></span>
       <span><i class="cv-strich"></i>heute<b>Tag ${lauf.tag} von ${lauf.tage}</b></span></span></span>` : '';
   const kacheln = [
-    cvKarte({ titel: 'Normaler Monat', wert: plusMinus(R.erg), cls_: R.erg < 0 ? 'neg' : 'pos', ziel: { tab: 'geldfluss' }, unter: `Lebenshaltung ${esc(lebenName())} · Ø 12 Monate ${eur0(R.lh.schnitt)}`, vis: monatVis,
-      tip: `Gehalt ${eur0(R.gehalt)} + Sonstiges ${eur0(R.sonst)} − Fixkosten ${eur0(R.fix)} (${R.vertraege.length} Verträge) − Lebenshaltung ${eur0(R.leben)} (${lebenName()})` }),
-    cvKarte({ titel: 'Vermögen', wert: vm ? `${vm.ungefaehr ? '≈ ' : ''}${vm.c < 0 ? '−' : ''}${eur0(Math.abs(vm.c))}${vm.ks && !vm.voll ? ' + ?' : ''}` : '–', cls_: vm?.c < 0 ? 'neg' : '', ziel: { tab: 'vermoegen' },
-      unter: 'ohne gesetzliche Rente', vis: vmVis, tip: 'Konten, Depot, Vorsorge – jeder Teil mit eigenem Stichtag' }),
+    cvKarte({ titel: 'Normaler Monat', wert: plusMinus(ergZ), cls_: ergZ < 0 ? 'neg' : 'pos', ziel: { tab: 'geldfluss' }, unter: `Lebenshaltung ${esc(lebenName())} · Ø 12 Monate ${eur0(R.lh.schnitt)}`, vis: monatVis,
+      tip: `Gehalt ${eur0(gZ)} + Sonstiges ${eur0(soZ)} − Fixkosten ${eur0(fZ)} (${R.vertraege.length} Verträge) − Lebenshaltung ${eur0(lZ)} (${lebenName()})` }),
+    cvKarte({ titel: 'Vermögen', wert: vm ? vmText(vm) : '–', cls_: vm?.c < 0 ? 'neg' : '', ziel: { tab: 'vermoegen' },
+      unter: `ohne gesetzliche Rente${vm?.depotBerechnet ? ` · ${VM_DEPOT_BERECHNET}` : ''}`, vis: vmVis, tip: 'Konten, Depot, Vorsorge – jeder Teil mit eigenem Stichtag' }),
     cvKarte({ titel: lauf ? `${monatJ} bisher` : 'Dieser Monat', wert: lauf ? eur0(lauf.x.aus) : '–', ziel: zuBuchungen({ konto: '', ...monatZiel(V.jetzt), art: 'aus' }),
       unter: lauf ? `ausgegeben von ≈ ${eur0(lauf.aus)}, die im ${monatJ} erwartet sind. Miete und Unterhalt gehen am Monatsanfang ab – deshalb ist früh schon viel weg.` : 'Der Monat ist abgeschlossen.', vis: laufVis,
       tip: lauf ? `Ausgegeben ${eur0(lauf.x.aus)} von erwarteten ${eur0(lauf.aus)}: feste Abbuchungen im ${monatJ} ${eur0(lauf.x.aus - lauf.x.var + lauf.offenFest)} und Lebenshaltung ${eur0(lauf.x.var + lauf.varKommt)} (${lebenName()})` : '' }),
@@ -964,8 +977,8 @@ function cockpitSeite() {
       const ti = W.tage.indexOf(W.tief);
       return cvKarte({ titel: 'Tiefster Stand in 30 Tagen', marke: 'Prognose', wert: `≈ ${eur0(W.tief.s)}`, cls_: W.tief.s < 0 ? 'neg' : '', ziel: { tab: 'fix', fixtab: 'kalender', konto: '' },
         unter: `Mindestens so viel Geld bleibt frei – ${ti === 0 ? 'heute' : `am ${tagKurz(W.tief.am)}`}${W.g && W.g.am > W.tief.am ? ', kurz vor dem Gehalt' : ''}. Heute frei minus feste Abbuchungen und Lebenshaltung (≈ ${eur0(W.leben / 30)} am Tag).`,
-        tip: `Heute frei verfügbar ${eur0(W.start)} (ohne Mietkaution, gemeinsame und Kinderkonten) · ${W.n} feste Abbuchungen ${eur0(W.fest)}${W.g ? ` · Gehalt ${eur0(W.g.c)} am ${tagKurz(W.g.am)}` : ''} · Lebenshaltung ${eur0(W.leben)} gleichmäßig verteilt`,
-        vis: `<span class="st30-box">${stufenSvg(W.tage.map((t) => t.s), ti)}<span class="st30-ax"><span>heute<b>${eur0(W.start)}</b></span><span class="st30-tief">${tagKurz(W.tief.am).slice(3)}<b>≈ ${eur0(W.tief.s)}</b></span><span>${tagKurz(W.ende.am).slice(3)}<b>≈ ${eur0(W.ende.s)}</b></span></span></span>` });
+        tip: `Heute frei verfügbar ${eur0(W.start)} (ohne Mietkaution, gemeinsame und Kinderkonten) · ${W.n} feste Abbuchungen ${eur0(W.fest)}${W.g ? ` · Gehalt ${eur0(W.g.c)} am ${tagKurz(W.g.am)}${W.g.ueberfaellig ? ' (überfällig, noch nicht gebucht)' : ''}` : ''} · Lebenshaltung ${eur0(W.leben)} gleichmäßig verteilt`,
+        vis: `<span class="st30-box">${stufenSvg(W.tage.map((t) => t.s), ti)}<span class="st30-ax"><span${W.tage[0].s !== W.start ? ' title="nach fälligen, noch nicht gebuchten Abbuchungen"' : ''}>heute<b>${eur0(W.tage[0].s)}</b></span><span class="st30-tief">${tagKurz(W.tief.am).slice(3)}<b>≈ ${eur0(W.tief.s)}</b></span><span>${tagKurz(W.ende.am).slice(3)}<b>≈ ${eur0(W.ende.s)}</b></span></span></span>` });
     })(),
   ].join('');
 
@@ -982,7 +995,7 @@ function cockpitSeite() {
   const abw = K.l.map((x) => ({ ...x, d: x.c - x.o })).filter((x) => Math.abs(x.d) >= 5000).sort((a1, b1) => Math.abs(b1.d) - Math.abs(a1.d)).slice(0, 4);
   const groesste = (k) => (K.m.g.get(k)?.rows || []).filter((r) => r.c < 0).sort((a1, b1) => a1.c - b1.c)[0];
   const auffaellig = abw.length ? `<div class="cp-auff"><p class="cp-auff-t">Auffällig im ${esc(K.kurz)} – Abweichung zum Ø 12 Monate</p>${abw.map((x) => { const g1 = x.d > 0 ? groesste(x.k) : null;
-      return `<button class="cp-auff-z"${geh(katZielVm(x.k, K.vm))}><span>${esc(schoen(x.k))}<small>${x.d > 0 ? (g1 ? `größte Buchung: ${esc(g1.g || g1.z || '–')} ${eur0(-g1.c)}` : '') : 'weniger als üblich'}</small></span>${bxDelta(x.d)}</button>`; }).join('')}</div>` : '';
+      return `<button class="cp-auff-z"${geh(katZielVm(x.k, K.vm))}><span>${esc(schoen(x.k))}<small>${x.d > 0 ? (g1 ? `größte Buchung: ${esc(g1.g || g1.z || '–')} ${eur0(-g1.c)}` : '') : 'weniger als üblich'}</small></span>${bxDelta(dGezeigt(x.o, x.c))}</button>`; }).join('')}</div>` : '';
 
   const hb = handlungsbedarf(), hbRot = hb.some((x) => x.ampel === 'rot');
 
@@ -998,13 +1011,13 @@ function cockpitSeite() {
     { n: '<b>Summe</b>', c: 0, w: `<b>${eur0(R.fix)}</b>`, p: `<b>${pzG(R.fix)}</b>`, cls: 'bl-summe' }], { max: Math.max(1, ...al.map((x) => x.c), alRc), kopf: ['Art', 'im Monat', 'vom Gehalt'] });
   const ber = [];
   const gU = sicher(() => gehaltUeberblick(gehaltHelfer())) || null;
-  if (gU?.z) ber.push({ t: `Gehalt netto ${MONAT[+gU.z.m.slice(5) - 1]}`, sub: `Grundgehalt ${eurE0(gU.stufe)} brutto${gU.auto ? ` · Dienstwagen kostet ${eurE0(gU.auto.netto)} netto` : ''}`, w: eurE0(gU.z.auszahlung), ziel: { tab: 'einkommen' } });
+  if (gU?.z) ber.push({ t: `Gehalt aufs Konto ${MONAT[+gU.z.m.slice(5) - 1]}`, sub: `Grundgehalt ${eurE0(gU.stufe)} brutto${gU.auto ? ` · Dienstwagen kostet ${eurE0(gU.auto.netto)} netto` : ''}`, w: eurE0(gU.z.auszahlung), ziel: { tab: 'einkommen' } });
   const sP = sicher(() => prognoseRechnen(H, +D.bis.slice(0, 4))) || null;
   if (sP) ber.push({ t: `Steuer ${sP.jahr}`, sub: `${sP.ohne.erg >= 0 ? 'Erstattung' : 'Nachzahlung'} ohne Anlage U · berechnet${sP.mit ? ` · mit Anlage U ${plusMinus(sP.mit.erg)}` : ''}`, w: plusMinus(sP.ohne.erg), cls_: sP.ohne.erg >= 0 ? 'pos' : 'neg', ziel: { tab: 'einkommen' } });
   const uK = sicher(() => unterhaltKurz(H)) || null, uL = uK?.K?.letzte;
-  if (uL) { const ri = Math.round((uK.K.X.summe - uL.summe) * 100); ber.push({ t: 'Unterhalt verbindlich', sub: `Berechnung vom ${dde(uL.datum)} · Risiko bei Neuberechnung ${ri >= 0 ? '+' : '−'}${eur0(Math.abs(ri))}`, w: eurE0(uL.summe), ziel: { tab: 'familie' } }); }
+  if (uL) { const ri = dGezeigt(Math.round(uL.summe * 100), Math.round(uK.K.X.summe * 100)); /* Differenz der gezeigten Euro-Beträge */ ber.push({ t: 'Unterhalt verbindlich', sub: `Berechnung vom ${dde(uL.datum)} · Risiko bei Neuberechnung ${ri >= 0 ? '+' : '−'}${eur0(Math.abs(ri))}`, w: eurE0(uL.summe), ziel: { tab: 'familie' } }); }
   const vm0 = sicher(() => vermoegen(H)) || null;
-  if (vm0) ber.push({ t: 'Vermögen', sub: 'Konten, Depot, Vorsorge · ohne gesetzliche Rente', w: `${vm0.ungefaehr ? '≈ ' : ''}${eur0(vm0.c)}`, ziel: { tab: 'vermoegen' } });
+  if (vm0) ber.push({ t: 'Vermögen', sub: `Konten, Depot, Vorsorge · ohne gesetzliche Rente${vm0.depotBerechnet ? ` · ${VM_DEPOT_BERECHNET}` : ''}`, w: vmText(vm0), cls_: vm0.c < 0 ? 'neg' : '', ziel: { tab: 'vermoegen' } });
   if (uK && uK.A?.rows?.length) ber.push({ t: `Ausgleich mit ${esc(uK.A.name || 'der Gegenseite')}`, sub: uK.offen.length ? `${uK.offen.length} Posten offen` : 'keine offenen Steueranteile · plus = an dich', w: `${uK.saldo > 0 ? '+' : uK.saldo < 0 ? '−' : ''}${eur0(Math.abs(uK.saldo))}`, cls_: uK.saldo < 0 ? 'neg' : uK.saldo > 0 ? 'pos' : '', ziel: { tab: 'familie' } });
   const st0 = steuerStand();
   if (st0?.offen) ber.push({ t: `Belege ${st0.jahr}`, sub: st0.offen ? 'Steuer-Entscheidungen offen' : 'alle Steuer-Entscheidungen getroffen', w: st0.offen ? `${st0.offen} offen` : 'erledigt', ziel: { tab: 'steuer' } });
@@ -1013,7 +1026,7 @@ function cockpitSeite() {
       <section class="card cp-karte cp-ab"><div class="cp-kt"><h2>Die nächsten 30 Tage</h2>${zl('ganzer Kalender', zuKal)}</div>
         <div class="cp-ab-k">
           <div><span>vor dem Gehalt</span><b>${eur0(abVor)}</b><small>${nVor} Abbuchungen</small></div>
-          ${gK ? `<div class="cp-ab-g"><span>Gehalt ${tagKurz(gK.am)}</span><b>+${eur0(gK.c)}</b><small>erwartet</small></div>` : ''}
+          ${gK ? `<div class="cp-ab-g"><span>Gehalt ${tagKurz(gK.am)}</span><b>+${eur0(gK.c)}</b><small>${gK.ueberfaellig ? 'überfällig, noch nicht gebucht' : 'erwartet'}</small></div>` : ''}
           <div><span>${gK ? 'nach dem Gehalt' : 'danach'}</span><b>${eur0(dGezeigt(abVor, T30s))}</b><small>${T30.length - nVor} Abbuchungen</small></div>
           <div class="cp-ab-s"><span>zusammen</span><b>${eur0(T30s)}</b><small>${T30.length} feste Abbuchungen</small></div>
         </div>
@@ -1145,13 +1158,25 @@ function katVormonat() {
 const katZielVm = (k, vm) => zuBuchungen({ konto: '', art: 'aus', kat: k, ...monatZiel(vm) });
 const katAlle = { tab: 'uebersicht', kart: 'aus', wahl: '', jahr: '', monat: '', zr: '', konto: '' };
 const dGezeigt = (von, bis) => Math.round(bis / 100) * 100 - Math.round(von / 100) * 100;
+// Auf volle Euro gerundet (in Cent): Summen aus solchen Teilen passen zu den gezeigten Teilen
+const r0 = (c) => Math.round(c / 100) * 100;
+// Vermögenssumme überall gleich geschrieben: ≈ bei ungefähren Konten, − bei Minus, „+ ?“ wenn ein Kontostand fehlt
+const vmText = (vm) => `${vm.ungefaehr ? '≈ ' : ''}${vm.c < 0 ? '−' : ''}${eur0(Math.abs(vm.c))}${vm.ks && !vm.voll ? ' + ?' : ''}`;
+const VM_DEPOT_BERECHNET = 'Depot zum Einstand, kein Kurswert (berechnet)';
+// Teile auf volle Euro runden, sodass sie zusammen die gerundete Summe ergeben (Methode des größten Rests); Cent rein, Cent raus
+function rundeTeile(cs) {
+  const e = cs.map((c) => c / 100), ab = e.map(Math.floor);
+  let fehlt = Math.round(e.reduce((t, x) => t + x, 0)) - ab.reduce((t, x) => t + x, 0);
+  for (const i of e.map((x, i) => i).sort((a, b) => (e[b] - ab[b]) - (e[a] - ab[a]))) { if (fehlt <= 0) break; ab[i]++; fehlt--; }
+  return ab.map((x) => x * 100);
+}
 const RUNDUNG = '<p class="cp-fuss bx-rundung">Beträge auf volle Euro gerundet. Summen und Anteile sind aus den genauen Cent-Beträgen gerechnet – addierst du die gerundeten Teile selbst, kann die letzte Stelle um 1 € abweichen.</p>';
 const bxKopf = (ueber, kern, unter = '') => `<header class="cp-kopf"><p class="cp-ueber">${ueber} · Daten bis ${dde(D.bis)}</p><h1 class="cp-kern">${kern}</h1>${unter ? `<p class="cp-kern-u">${unter}${/gerundet/.test(unter) ? '' : '<span class="bx-rund-k"> · Beträge gerundet, Summen aus den genauen Werten</span>'}</p>` : ''}</header>`;
 const bxKarte = (titel, inhalt, { rechts = '', cls_ = '', fuss = '', id = '' } = {}) => `<section${id ? ` id="${id}"` : ''} class="card cp-karte bx-karte ${cls_}"><div class="cp-kt"><h2>${titel}</h2>${rechts}</div>${inhalt}${fuss ? `<p class="cp-fuss" title="${esc(fuss.replace(/<[^>]+>/g, ''))}">${fuss}</p>` : ''}</section>`;
 const bxLink = (text, ziel) => `<button class="bx-link"${geh(ziel)}>${text}<span aria-hidden="true"> ›</span></button>`;
 // Veränderung als Abweichung: ▲/▼ und Farbe (schlecht = rot); ohne Minuszeichen vorn, damit minusRot() nicht eingreift
-const bxDelta = (c, schlechtWennMehr = true) => (Math.abs(c) < 100 ? '<span class="bx-d">±0 €</span>'
-  : `<span class="bx-d ${(c > 0) === schlechtWennMehr ? 'neg' : 'pos'}" title="${c > 0 ? 'mehr' : 'weniger'} als im Vorjahr">${c > 0 ? '▲' : '▼'} ${eur0(Math.abs(c))}</span>`);
+const bxDelta = (c, schlechtWennMehr = true, als = 'als im Ø 12 Monate') => (Math.abs(c) < 100 ? '<span class="bx-d">±0 €</span>'
+  : `<span class="bx-d ${(c > 0) === schlechtWennMehr ? 'neg' : 'pos'}" title="${c > 0 ? 'mehr' : 'weniger'} ${als}">${c > 0 ? '▲' : '▼'} ${eur0(Math.abs(c))}</span>`);
 // Rechnungen über alle eigenen Konten – unabhängig von der Kontoauswahl auf den Detailseiten
 function alleKonten(f) { const k = S.konto; S.konto = ''; try { return f(); } finally { S.konto = k; } }
 const eurE = (v) => eur0(Math.round(v * 100)), eurE0 = (v) => eur0(Math.round(v * 100));   // Beträge in Euro (Gehalt, Unterhalt)
@@ -1176,12 +1201,14 @@ function wasserfall(teile) {
 function geldflussSeite() {
   const box = $('#s5'), V = verlauf5(), R = V.R, ist = V.monate.filter((m) => m.art === 'ist'), s = V.schnitt, L = lebenshaltung();
   const zuFix = { tab: 'fix', fixtab: 'vertraege', konto: '' }, zuLeben = { ...zuFix, _springe: '#fix-leben' }, zuKz = { tab: 'kennzahlen', jahr: '', monat: '', zr: '', konto: '' };
-  const pzG = (c) => (R.gehalt ? `${((c / R.gehalt) * 100).toLocaleString('de-DE', { maximumFractionDigits: 1 })} %` : '');
-  const kern = R.erg < 0 ? `Ein normaler Monat endet bei <b class="neg">${plusMinus(R.erg)}</b> – die Ausgaben liegen über dem Einkommen.`
-    : `Ein normaler Monat lässt <b class="pos">${plusMinus(R.erg)}</b> übrig.`;
+  const pzG = (c) => (R.gehalt ? `${((c / R.gehalt) * 100).toLocaleString('de-DE', { maximumFractionDigits: 0 })} %` : '');
+  // nur für die Anzeige: gerundete Euro-Teile, Einkommen und Ergebnis daraus (R selbst bleibt genau)
+  const gA = r0(R.gehalt), sA = r0(R.sonst), fA = r0(R.fix), lA = r0(R.leben), einA = gA + sA, ergA = einA - fA - lA;
+  const kern = ergA < 0 ? `Ein normaler Monat endet bei <b class="neg">${plusMinus(ergA)}</b> – die Ausgaben liegen über dem Einkommen.`
+    : `Ein normaler Monat lässt <b class="pos">${plusMinus(ergA)}</b> übrig.`;
   const unter = `Gehalt ${eur0(R.gehalt)} + Sonstiges ${eur0(R.sonst)} − Fixkosten ${eur0(R.fix)} − Lebenshaltung ${eur0(R.leben)} (${lebenName()})<span class="cp-nur-breit"> · in den letzten 12 Monaten im Schnitt ${pmHtml(Math.round(s.erg))}</span>`;
   const kacheln = [
-    kachel({ titel: 'Einkommen', wert: eur0(R.ein), ziel: zuGehalt(), aend: `Gehalt ${eur0(R.gehalt)} + Sonstiges ${eur0(R.sonst)}`, spark: sparkline(ist.map((m) => m.ein)), unter: 'normaler Monat · Linie: Einnahmen je Monat' }),
+    kachel({ titel: 'Einkommen', wert: eur0(einA), ziel: zuGehalt(), aend: `Gehalt ${eur0(R.gehalt)} + Sonstiges ${eur0(R.sonst)}`, spark: sparkline(ist.map((m) => m.ein)), unter: 'normaler Monat · Linie: Einnahmen je Monat' }),
     kachel({ titel: 'Fixkosten', wert: eur0(R.fix), ziel: zuFix, aend: `${R.vertraege.length} laufende Verträge · ${pzG(R.fix)} vom Gehalt`, spark: sparkline(ist.map((m) => m.fest)), unter: 'jährliche anteilig · Linie: feste Abbuchungen je Monat' }),
     kachel({ titel: 'Lebenshaltung', wert: eur0(R.leben), ziel: zuLeben, aend: `${lebenName()} · Ø 12 Monate ${eur0(L.schnitt)}`, spark: sparkline(L.werte), unter: 'alles außer Verträgen · Linie: je Monat' }),
     ...(() => { const v = ist.at(-1); return v ? [kachel({ titel: `Ergebnis ${MONAT[+v.k.slice(5) - 1]}`, wert: plusMinus(v.erg), cls_: v.erg < 0 ? 'neg' : 'pos', ziel: zuBuchungen({ konto: '', ...monatZiel(v.k) }),
@@ -1189,11 +1216,11 @@ function geldflussSeite() {
   ].join('');
 
   const wf = wasserfall([
-    { n: 'Gehalt', c: R.gehalt, w: eur0(R.gehalt), cls_: 'wf-ein', ziel: zuGehalt(), tip: `Gehalt netto (${monLang(R.gehaltMonat)})` },
+    { n: 'Gehalt', c: R.gehalt, w: eur0(R.gehalt), cls_: 'wf-ein', ziel: zuGehalt(), tip: `Gehaltseingang aufs Konto (${monLang(R.gehaltMonat)})` },
     { n: 'Sonstiges', c: R.sonst, w: eur0(R.sonst), cls_: 'wf-ein2', ziel: { tab: 'uebersicht', kart: 'ein', wahl: '', jahr: '', monat: '', zr: '', konto: '' }, tip: 'Typische sonstige Einnahmen: Erstattungen, Zinsen …' },
     { n: 'Fixkosten', c: -R.fix, w: eur0(R.fix), cls_: 'wf-fest', ziel: zuFix, tip: `${R.vertraege.length} laufende Verträge` },
     { n: 'Lebens&shy;haltung', c: -R.leben, w: eur0(R.leben), cls_: 'wf-leben', ziel: zuLeben, tip: `Lebenshaltung (${lebenName()})` },
-    { n: R.erg < 0 ? 'fehlt' : 'bleibt', summe: true, w: plusMinus(R.erg), cls_: R.erg < 0 ? 'wf-neg' : 'wf-pos', ziel: zuFix, tip: R.erg < 0 ? 'Was im Monat fehlt' : 'Was im Monat übrig bleibt' },
+    { n: ergA < 0 ? 'fehlt' : 'bleibt', summe: true, w: plusMinus(ergA), cls_: ergA < 0 ? 'wf-neg' : 'wf-pos', ziel: zuFix, tip: ergA < 0 ? 'Was im Monat fehlt' : 'Was im Monat übrig bleibt' },
   ]);
 
   // Ausgaben nach Kategorie: der Vormonat als Grundlage, daneben der Ø der letzten 12 Monate (wie Kategorien › Monat bzw. › 12 Monate)
@@ -1221,15 +1248,20 @@ function geldflussSeite() {
   if (rs) {
     const { R: RR, sum } = rs, heuteP = (RR.tag / RR.tage) * 100;
     rahmenTitel = `Ausgabenrahmen · ${MONAT[+RR.k.slice(5) - 1]}`;
-    rahmen = sum.n ? `<p class="bx-gross ${sum.rahmen - sum.aus < 0 ? 'neg' : ''}">${eur0(sum.rahmen - sum.aus)}<small>noch frei</small></p>
+    rahmen = sum.n ? `<p class="bx-gross ${sum.rahmen - sum.aus < 0 ? 'neg' : ''}">${eur0(dGezeigt(sum.aus, sum.rahmen))}<small>noch frei</small></p>
       <span class="bx-tempo${sum.aus > sum.rahmen ? ' ueber' : ''}" title="${Math.round((sum.aus / sum.rahmen) * 100)} % des Rahmens ausgegeben · Tag ${RR.tag} von ${RR.tage}"><i style="width:${Math.min(100, (sum.aus / sum.rahmen) * 100).toFixed(1)}%"></i><b style="left:${heuteP.toFixed(1)}%"></b></span>
       <p class="bx-u">${eur0(sum.aus)} von ${eur0(sum.rahmen)} ausgegeben · Tag ${RR.tag} von ${RR.tage} · ${sum.n} ${sum.n === 1 ? 'Kategorie' : 'Kategorien'}</p>`
       : '';
-    const zr = rs.z.filter((x) => x.frei).slice(0, 4), zrS = zr.reduce((t, x) => t + x.aus, 0), zrG = zr.reduce((t, x) => t + (x.rahmen || x.vorschlag), 0);
-    if (zr.length) rahmen += `<p class="cp-auff-t">${sum.n ? 'Je Kategorie – Strich: dein Rahmen' : `Noch kein Rahmen festgelegt · bisher im ${MONAT[+RR.k.slice(5) - 1]} je Kategorie, Strich: Vorschlag (Ø ohne Verträge)`}</p>`
+    // mit Rahmen: nur die Kategorien mit Rahmen (dieselben wie in der Zahl oben), Rest in einer Zeile, Summe = Kopfzahl;
+    // ohne Rahmen: die ersten 4 frei gestaltbaren Kategorien mit Vorschlag
+    const mitR = sum.n ? rs.z.filter((x) => x.frei && x.rahmen) : [], zr = sum.n ? mitR.slice(0, 4) : rs.z.filter((x) => x.frei).slice(0, 4), zrRest = mitR.slice(4);
+    const zrRS = zrRest.reduce((t, x) => t + x.aus, 0), zrRG = zrRest.reduce((t, x) => t + x.rahmen, 0);
+    const zrS = sum.n ? sum.aus : zr.reduce((t, x) => t + x.aus, 0), zrG = sum.n ? sum.rahmen : zr.reduce((t, x) => t + (x.rahmen || x.vorschlag), 0);
+    if (zr.length) rahmen += `<p class="cp-auff-t">${sum.n ? 'Je Kategorie mit Rahmen – Strich: dein Rahmen' : `Noch kein Rahmen festgelegt · bisher im ${MONAT[+RR.k.slice(5) - 1]} je Kategorie, Strich: Vorschlag (Ø ohne Verträge)`}</p>`
       + balkenListe([...zr.map((x) => ({ n: esc(schoen(x.kat)), c: Math.max(0, x.aus), marke: x.rahmen || x.vorschlag || null, w: eur0(x.aus), p: `von ${eur0(x.rahmen || x.vorschlag)}`, farbe: x.aus > (x.rahmen || x.vorschlag) ? 'var(--aus)' : 'var(--variabel)',
           ziel: zuBuchungen({ konto: '', art: 'aus', kat: x.kat, nf: '1', ...monatZiel(RR.k) }) })),
-        { n: '<b>Summe</b>', c: 0, w: `<b>${eur0(zrS)}</b>`, p: `von ${eur0(zrG)}`, cls: 'bl-summe' }], { max: Math.max(1, ...zr.map((x) => Math.max(x.aus, x.rahmen || x.vorschlag))) });
+        ...(zrRest.length ? [{ n: `${zrRest.length} weitere mit Rahmen`, c: Math.max(0, zrRS), marke: zrRG || null, w: eur0(zrRS), p: `von ${eur0(zrRG)}`, farbe: zrRS > zrRG ? 'var(--aus)' : 'var(--variabel)', ziel: { tab: 'uebersicht', kart: 'aus', wahl: '', _springe: '#pl-rahmen' } }] : []),
+        { n: '<b>Summe</b>', c: 0, w: `<b>${eur0(zrS)}</b>`, p: `von ${eur0(zrG)}`, cls: 'bl-summe' }], { max: Math.max(1, ...zr.map((x) => Math.max(x.aus, x.rahmen || x.vorschlag)), zrRS, zrRG) });
     rahmen += bxLink(sum.n ? 'Rahmen je Kategorie' : 'Rahmen festlegen', { tab: 'uebersicht', kart: 'aus', wahl: '', _springe: '#pl-rahmen' });
   }
 
@@ -1248,7 +1280,7 @@ function geldflussSeite() {
       ${bxKarte('Vom Gehalt zum Ergebnis', wf, { rechts: '<span class="klein muted">ein normaler Monat</span>', cls_: 'bx-wf', fuss: 'Säule anklicken: Einzelheiten · mehr unter Kennzahlen' })}
       ${bxKarte('Wofür das Geld ausgeht', kats, { rechts: `<span class="klein muted">${esc(K.name)} · daneben Ø 12 Monate</span>`, fuss: `${zl('alle Kategorien (12 Monate)', katAlle)} · sortiert nach ${esc(K.name)} · Ø ${esc(monatsText(ms))} · ohne Kinder- und gemeinsame Konten · Linie: je Monat` })}
       ${bxKarte('Verträge', vertraege, { rechts: zl(`<b class="bx-wert">${eur0(R.fix)}</b>`, zuFix), fuss: `Nächste 30 Tage: ${termine.length} feste Abbuchungen · ${zl(eur0(tSumme), { tab: 'fix', fixtab: 'kalender', konto: '' })}` })}
-      ${bxKarte(rahmenTitel, rahmen, { fuss: 'Ausgaben ohne Verträge in den frei gestaltbaren Kategorien · Strich = heute' })}
+      ${bxKarte(rahmenTitel, rahmen, { fuss: `Ausgaben ohne Verträge in den frei gestaltbaren Kategorien${rs ? (rs.sum.n ? ' · Strich im oberen Balken = heute' : ' · Strich = Vorschlag') : ''}` })}
       ${bxKarte('Reisen', reiseInhalt)}
       ${L.monate.length ? bxKarte('Lebenshaltung je Monat', `<div class="cp-chart bx-chart"><canvas id="c-gf-leben" aria-label="Lebenshaltung je Monat"></canvas></div>`, { cls_: 'bx-flex',
         rechts: `<b class="bx-wert">${eur0(L.werte.at(-1))}</b>`, fuss: `Alle Ausgaben ohne Verträge, ohne gemeinsame und Kinderkonten · dunkel: ${esc(monLang(L.monate.at(-1)))} · gestrichelt: Ø ${eur0(L.schnitt)} · Säule anklicken: Buchungen` }) : ''}
@@ -1280,12 +1312,11 @@ function vermoegenSeite() {
   const box = $('#s5'), vm = sicher(() => vermoegen(H)) || null, zuKonten = { tab: 'konten', stichtag: '', konto: '' };
   if (!vm) { box.innerHTML = `<div class="cp bx">${bxKopf('Vermögen', 'Das Vermögen konnte nicht berechnet werden.')}</div>`; return; }
   const dp = vm.dp, kautionC = vm.kautionKonto ? null : vm.kaution?.c || 0;
-  const vmText = `${vm.ungefaehr ? '≈ ' : ''}${vm.c < 0 ? '−' : ''}${eur0(Math.abs(vm.c))}${vm.ks && !vm.voll ? ' + ?' : ''}`;
   // dieselben Teile wie die Kachel im Cockpit
   const teile = [['Konten', vm.ks?.c || 0, 'auf deinen Konten'], ['Depot', dp?.wert || 0, 'im Depot'], ['Kaution', kautionC, 'in der Mietkaution'], ['Vorsorge', vm.vorsorge, 'in der Vorsorge']].filter(([, c]) => c > 0);
   const tsum = teile.reduce((t, [, c]) => t + c, 0) || 1, groesst = [...teile].sort((x, y) => y[1] - x[1])[0];
-  const kern = `Dein Vermögen: <b class="${vm.c < 0 ? 'neg' : ''}">${vmText}</b>${groesst ? ` – ${Math.round((groesst[1] / tsum) * 100)} % davon ${groesst[2]}` : ''}`;
-  const unter = 'Jeder Teil mit eigenem Stichtag · ohne gesetzliche Rente (Anwartschaft) · Kinder- und gemeinsame Konten zählen nicht mit';
+  const kern = `Dein Vermögen: <b class="${vm.c < 0 ? 'neg' : ''}">${vmText(vm)}</b>${groesst ? ` – ${Math.round((groesst[1] / tsum) * 100)} % davon ${groesst[2]}` : ''}`;
+  const unter = `Jeder Teil mit eigenem Stichtag · ohne gesetzliche Rente (Anwartschaft) · Kinder- und gemeinsame Konten zählen nicht mit${vm.depotBerechnet ? ` · ${VM_DEPOT_BERECHNET}` : ''}`;
 
   // Konten: 24 Monatsenden (nur vollständige Summen) und heute
   const ks24 = abgeschlosseneMonate().slice(-24).map((k) => { const s = kontenSumme(monatsletzter(`${k}-01`)); return { k, art: 'ist', stand: vollSumme(s), summe: s }; });
@@ -1296,8 +1327,8 @@ function vermoegenSeite() {
   const daten = vm.vertraege.map((x) => x.am).sort();
   const kacheln = [
     kachel({ titel: 'Konten', wert: summeText(vm.ks), cls_: vm.ks?.c < 0 ? 'neg' : '', ziel: zuKonten, aend: `${seitJahr == null ? '' : `${pmHtml(seitJahr)} seit 1. Januar`}`, spark: sparkline([...ks24.map((m) => m.stand), vollSumme(vm.ks)]), unter: 'heute · Linie: 24 Monatsenden' }),
-    kachel({ titel: 'Depot', marke: dp && !dp.kurse ? 'berechnet' : '', wert: dp ? eur0(dp.wert) : '–', ziel: { ...zuKonten, _springe: '#dp-karte' },
-      aend: !dp ? 'Depot-Daten kommen mit dem nächsten Aufbau' : dp.kurse ? `Kurswert laut Depot-Datei vom ${dde(dp.kurse.stichtag)}` : `Einstand der Papiere im Bestand, kein Kurswert · Stand ${dde(dp.stand)}`,
+    kachel({ titel: 'Depot', marke: dp && (!dp.kurse || dp.berechnet) ? 'berechnet' : '', wert: dp ? eur0(dp.wert) : '–', ziel: { ...zuKonten, _springe: '#dp-karte' },
+      aend: !dp ? 'Depot-Daten kommen mit dem nächsten Aufbau' : dp.kurse ? (dp.berechnet ? `teils Kurswert laut Depot-Datei vom ${dde(dp.kurse.stichtag)}, ${dp.berechnet} ${dp.berechnet === 1 ? 'Papier' : 'Papiere'} berechnet (Einstand)` : `Kurswert laut Depot-Datei vom ${dde(dp.kurse.stichtag)}`) : `Einstand der Papiere im Bestand, kein Kurswert · Stand ${dde(dp.stand)}`,
       spark: sparkline(dpKum.slice(-36)), unter: 'Linie: netto eingezahlt, aufsummiert (36 Monate)' }),
     kachel({ titel: 'Vorsorge', wert: vm.vertraege.length ? eur0(vm.vorsorge) : '–', ziel: { ...zuKonten, _springe: '#vm-karte' }, marke: vm.vertraege.some((x) => x.alt) ? 'alter Stand' : '',
       aend: vm.vertraege.length ? `${vm.vertraege.length} ${vm.vertraege.length === 1 ? 'Vertrag' : 'Verträge'} · Stand ${daten[0] === daten.at(-1) ? dde(daten[0]) : `${dde(daten[0])} – ${dde(daten.at(-1))}`}` : 'kein Vertrag mit belegtem Wert',
@@ -1318,7 +1349,7 @@ function vermoegenSeite() {
   const dpRest = dpTop.slice(5).reduce((t, x) => t + x.w, 0);
   const depotInhalt = !dp ? '<p class="bx-u">Depot-Daten kommen mit dem nächsten Aufbau am PC.</p>'
     : `<dl class="bx-dl"><div><dt>eingezahlt</dt><dd>${eur0(dp.eingezahlt)}</dd></div><div><dt>entnommen</dt><dd>${eur0(dp.entnommen)}</dd></div>
-      <div><dt>${dp.kurse ? 'Kurswert' : 'Wert (Einstand)'}</dt><dd>${eur0(dp.wert)}</dd></div></dl>
+      <div><dt>${dp.kurse ? (dp.berechnet ? 'Kurswert / berechnet' : 'Kurswert') : 'Wert (Einstand)'}</dt><dd>${eur0(dp.wert)}</dd></div></dl>
       <p class="cp-auff-t">Größte Positionen · ${dpTop.length} Papiere</p>
       ${balkenListe([...dpTop.slice(0, 5).map((x) => ({ n: esc(x.n), c: x.w, p: `${Math.round((x.w / dp.wert) * 100)} %`, farbe: 'var(--accent-2)', ziel: zuBuchungen({ q: x.isin, konto: '' }) })),
         ...(dpRest ? [{ n: `${dpTop.length - 5} weitere`, c: dpRest, p: `${Math.round((dpRest / dp.wert) * 100)} %`, farbe: 'var(--variabel)', ziel: { ...zuKonten, _springe: '#dp-karte' } }] : []),
@@ -1330,7 +1361,7 @@ function vermoegenSeite() {
   // Depot je Monat (letzte 24) und die eigenen Konten einzeln (Summe = Konten oben)
   const dpMon = (dp?.monate || []).slice(-24);
   const kl0 = kontostaende(D, D.bis).filter((x) => !fremd(x.k) && !['nicht_eroeffnet', 'geschlossen'].includes(x.status) && x.c != null).sort((a1, b1) => b1.c - a1.c);
-  const kontenL = balkenListe([...kl0.filter((x) => x.c !== 0).map((x) => ({ n: esc(x.k.name), sub: x.status === 'unbekannt' ? 'ohne gesicherten Stand' : '', c: x.c, w: `<span class="${x.c < 0 ? 'neg' : ''}">${x.c < 0 ? '−' : ''}${eur0(Math.abs(x.c))}</span>`, farbe: 'var(--accent-2)', ziel: { tab: 'buchungen', konto: x.k.name, q: '', jahr: '', monat: '', zr: '', kat: '', ukat: '', art: 'alle' } })),
+  const kontenL = balkenListe([...kl0.filter((x) => x.c !== 0).map((x) => ({ n: esc(x.k.name), sub: x.status === 'unbekannt' ? 'ohne gesicherten Stand' : x.status === 'ruhend' ? `ruht · Stand ${dde(x.seit)}` : '', c: x.c, w: `<span class="${x.c < 0 ? 'neg' : ''}">${x.c < 0 ? '−' : ''}${eur0(Math.abs(x.c))}</span>`, farbe: 'var(--accent-2)', ziel: { tab: 'buchungen', konto: x.k.name, q: '', jahr: '', monat: '', zr: '', kat: '', ukat: '', art: 'alle' } })),
     { n: '<b>Summe</b>', c: 0, w: `<b>${summeText(vm.ks)}</b>`, cls: 'bl-summe' }], { max: Math.max(1, ...kl0.map((x) => Math.abs(x.c))) });
   box.innerHTML = `<div class="cp bx">
     ${bxKopf('Vermögen', kern, unter)}
@@ -1375,16 +1406,16 @@ function einkommenSeite() {
   const z = g?.z;
   const pm = (c) => `${c >= 0 ? '+' : '−'}${eur0(Math.abs(c))}`;
   const kern = !z ? 'Noch keine Gehaltsdaten in der Datei.'
-    : `${MONAT[+z.m.slice(5) - 1]}: <b>${eurE0(z.auszahlung)}</b> netto aufs Konto${P ? ` · Steuer ${P.jahr}: voraussichtlich <b class="${P.ohne.erg >= 0 ? 'pos' : 'neg'}">${P.ohne.erg >= 0 ? '+' : '−'}${eur0(Math.abs(P.ohne.erg))} ${P.ohne.erg >= 0 ? 'Erstattung' : 'Nachzahlung'}</b>` : ''}`;
+    : `${MONAT[+z.m.slice(5) - 1]}: <b>${eurE0(z.auszahlung)}</b> aufs Konto${P ? ` · Steuer ${P.jahr}: voraussichtlich <b class="${P.ohne.erg >= 0 ? 'pos' : 'neg'}">${P.ohne.erg >= 0 ? '+' : '−'}${eur0(Math.abs(P.ohne.erg))} ${P.ohne.erg >= 0 ? 'Erstattung' : 'Nachzahlung'}</b>` : ''}`;
   const unter = z ? `Abrechnung ${monLang(z.m)}: brutto ${eurE0(z.brutto)}, Grundgehalt ${eurE0(g.stufe)}${g.auto ? `, Dienstwagen ${eurE0(g.auto.vorteil)} geldwerter Vorteil` : ''}${P ? ' · Steuer: Einzelveranlagung, ohne Anlage U, Orientierung' : ''} · Beträge gerundet` : '';
   const kacheln = !z ? '' : [
-    kachel({ titel: `Netto ${MON[+z.m.slice(5) - 1]}`, wert: eurE0(z.auszahlung), ziel: zuG, aend: g.vm ? `${pmHtml(Math.round((z.auszahlung - g.vm.auszahlung) * 100))} ggü. ${MON[+g.vm.m.slice(5) - 1]}` : 'erste Abrechnung',
+    kachel({ titel: `Auszahlung ${MON[+z.m.slice(5) - 1]}`, wert: eurE0(z.auszahlung), ziel: zuG, aend: g.vm ? `${pmHtml(Math.round((z.auszahlung - g.vm.auszahlung) * 100))} ggü. ${MON[+g.vm.m.slice(5) - 1]}` : 'erste Abrechnung',
       spark: sparkline(g.verlauf.map((x) => Math.round((x.netto || 0) * 100))), unter: 'aufs Konto · Linie: 24 Abrechnungen' }),
     kachel({ titel: 'Grundgehalt', wert: eurE0(g.stufe), ziel: { ...zuG, _springe: '#ge-verlauf' }, aend: g.seit > 0 ? `<span class="pos">+${Math.round(g.seit * 100)} %</span> seit ${monKurz(g.erste.m)} (${eurE0(g.erste.gehalt)})` : 'monatlich, ohne Zulagen',
       spark: sparkline(g.verlauf.map((x) => Math.round((x.gehalt || 0) * 100))), unter: 'brutto im Monat · Linie: 24 Abrechnungen' }),
     kachel({ titel: 'Dienstwagen', marke: g.auto ? 'berechnet' : '', wert: g.auto ? eurE0(g.auto.netto) : '–', ziel: { ...zuG, _springe: '.ge-autok' },
-      aend: g.auto ? `kostet dich netto im Monat · ${eurE0(g.auto.netto * 12)} im Jahr` : 'in dieser Abrechnung kein Dienstwagen',
-      unter: g.auto ? `${eurE0(g.auto.vorteil)} geldwerter Vorteil × ${(g.auto.gs * 100).toLocaleString('de-DE', { maximumFractionDigits: 1 })} % Grenzsteuersatz` : '' }),
+      aend: g.auto ? `kostet dich netto im Monat · ${eurE0(Math.round(g.auto.netto) * 12)} im Jahr` : 'in dieser Abrechnung kein Dienstwagen',
+      unter: g.auto ? `laut Abrechnung ${MON[+g.auto.m.slice(5) - 1]}: ${eurE0(g.auto.vorteil)} geldwerter Vorteil × ${Math.round(g.auto.gs * 100)} % Grenzsteuersatz${(() => { const w = (D.j.gehalt?.dienstwagen?.wagen || []).filter((x) => x.ab > g.auto.m && x.ab <= D.bis.slice(0, 7)).at(-1); return w ? ` · seit ${monKurz(w.ab)} ${esc(w.modell || 'neuer Wagen')}, Abrechnung folgt` : ''; })()}` : '' }),
     kachel({ titel: `Steuer ${P?.jahr || jetztJ}`, marke: 'Prognose', wert: P ? pm(P.ohne.erg) : '–', cls_: P ? (P.ohne.erg >= 0 ? 'pos' : 'neg') : '', ziel: zuSt,
       aend: P ? `${P.ohne.erg >= 0 ? 'Erstattung' : 'Nachzahlung'} ohne Anlage U${P.mit ? ` · mit Anlage U ${pm(P.mit.erg)}` : ''}` : 'nicht berechenbar', unter: 'Einzelveranlagung · berechnet aus Abrechnungen und Buchungen' }),
   ].join('');
@@ -1393,7 +1424,7 @@ function einkommenSeite() {
   const jahrInhalt = !z ? '' : `<dl class="bx-dl">
       <div><dt>aufs Konto ${g.jahr}</dt><dd>${g.jahrPlan ? '≈ ' : ''}${eurE0(g.jahrNetto)}</dd></div>
       <div><dt>brutto ${g.jahr}</dt><dd>${g.jahrPlan ? '≈ ' : ''}${eurE0(g.jahrBrutto)}</dd></div>
-      ${g.abgaben != null ? `<div><dt>Abgaben ${MON[+z.m.slice(5) - 1]}</dt><dd>${((g.abgaben / z.brutto) * 100).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} %<small>${eurE0(g.abgaben)} Steuern und Sozialabgaben</small></dd></div>` : ''}</dl>
+      ${g.abgaben != null ? `<div><dt>Abgaben ${MON[+z.m.slice(5) - 1]}</dt><dd>${((g.abgaben / z.brutto) * 100).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} %<small>${eurE0(g.abgaben)} Steuern und Sozialabgaben</small></dd></div>` : ''}</dl>
     <p class="bx-u">${g.jahrPlan ? `${g.nIst} von 12 Monaten abgerechnet, der Rest laut Gehaltsplan` : 'alle Monate abgerechnet'}${g.fehlt.length ? ` · <b class="neg">Abrechnung fehlt:</b> ${g.fehlt.map(monKurz).join(', ')}` : ''}.</p>${bxLink('Gehaltsentwicklung', zuG)}`;
 
   // Steuer-Prognose kompakt: ohne / mit Anlage U, möglicher Freibetrag
@@ -1427,7 +1458,7 @@ function einkommenSeite() {
       ${z1('Brutto', `Abrechnung ${monLang(z.m)}`, B, '', true)}
       ${z1('Steuern', 'Lohnsteuer, Soli, Kirche', St)}
       ${z1('Sozialversicherung', 'Rente, Arbeitslosen-, Kranken-, Pflege-', So)}
-      ${z1('= Netto', 'Brutto minus Abgaben', N, '', true)}
+      ${z1('= nach Abgaben', 'Brutto minus Steuern und Sozialversicherung, berechnet', N, '', true)}
       ${Au ? z1('Dienstwagen', 'versteuert, nicht ausgezahlt', Au) : ''}
       ${Bv ? z1('Betriebsrente', 'Entgeltumwandlung', Bv) : ''}
       ${Math.abs(Ue) >= 100 ? z1(Ue > 0 ? 'übrige Abzüge' : 'übrige Zuschläge', 'Differenz, berechnet', Ue) : ''}
@@ -1468,10 +1499,11 @@ function ekVerlaufZeichnen(g) {
   o.layout = { padding: { top: 22, right: 8 } };
   o.scales = { x: { ...achsenStil(), grid: { display: false }, ticks: { ...achsenStil().ticks, font: { size: 10.5 }, maxRotation: 0, autoSkip: true, autoSkipPadding: 12 } },
     y: { ...achsenStil(), ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 5 } } };
-  o.plugins.tooltip.callbacks = { title: (it) => `Abrechnung ${monLang(ms[it[0].dataIndex].m)}`, label: (it) => { const e = erh.get(ms[it.dataIndex].m); return ` Grundgehalt: ${EUR0.format(it.raw)}${e ? ` (+${Math.round(e.p * 1000) / 10} %)` : ''}`; } };
+  o.plugins.tooltip.callbacks = { title: (it) => `Abrechnung ${monLang(ms[it[0].dataIndex].m)}`, label: (it) => { const x = ms[it.dataIndex], e = erh.get(x.m), roh = x.gehalt || 0;
+    return ` Grundgehalt: ${EUR0.format(it.raw)}${e ? ` (+${Math.round(e.p * 100)} %)` : ''}${x.stufe != null && Math.abs(roh - x.stufe) > 0.5 ? ` · Monat mit Nachzahlung: ${EUR0.format(Math.round(roh))}` : ''}`; } };
   o.onClick = (_, el) => { if (el.length) setze({ tab: 'gehalt', gmonat: ms[el[0].index].m }); };
   zeichne('c-ek-verlauf', { type: 'line',
-    data: { labels: ms.map((x) => monKurz(x.m)), datasets: [{ data: ms.map((x) => Math.round(x.gehalt || 0)), borderColor: c, backgroundColor: alpha(c, 0.08), fill: 'origin', stepped: true, borderWidth: 2,
+    data: { labels: ms.map((x) => monKurz(x.m)), datasets: [{ data: ms.map((x) => Math.round(x.stufe ?? x.gehalt ?? 0)), borderColor: c, backgroundColor: alpha(c, 0.08), fill: 'origin', stepped: true, borderWidth: 2,
       pointRadius: ms.map((x) => (erh.has(x.m) ? 4 : 0)), pointBackgroundColor: c }] },
     options: o, plugins: [punktWerteMit(ms.map((x, i) => (erh.has(x.m) ? i : -1)).filter((i) => i >= 0), (v, i) => `+${Math.round(erh.get(ms[i].m).p * 100)} %`)] });
 }
@@ -1480,10 +1512,13 @@ function ekVerlaufZeichnen(g) {
 function familieSeite() {
   const box = $('#s5'), U = sicher(() => unterhaltKurz(H)) || null, K = U?.K, l = K?.letzte, zuU = { tab: 'fix', fixtab: 'unterhalt' };
   const gez = K?.gez, abw = gez != null && l ? Math.round((gez - l.summe) * 100) : null;
-  const risiko = K && l ? Math.round((K.X.summe - l.summe) * 100) : null, risikoN = K && l ? Math.round((K.N.summe - l.summe) * 100) : null;
+  // Differenzen aus den gezeigten (auf Euro gerundeten) Beträgen, damit „verbindlich + Risiko = Neuberechnung“ aufgeht
+  const dU = (neu, alt) => dGezeigt(Math.round(alt * 100), Math.round(neu * 100));
+  const risiko = K && l ? dU(K.X.summe, l.summe) : null, risikoN = K && l ? dU(K.N.summe, l.summe) : null;
   const kern = !l ? 'Unterhalt: keine verbindliche Berechnung in den Daten.'
     : `Verbindlich sind <b>${eurE0(l.summe)}</b> Unterhalt im Monat – laut Berechnung vom ${dde(l.datum)}.`;
-  const unter = l ? `${(l.ku || []).map(eurE).join(' + ')} Kinder + ${eurE0(l.tu)} Trennung · gilt, bis die Gegenseite Auskunft verlangt<span class="cp-nur-breit"> (§ 1605 BGB) · mehr erst ab Aufforderung (§ 1613 BGB) · Orientierung, keine Rechtsberatung</span>` : '';
+  const lTeile = l ? rundeTeile([...(l.ku || []), l.tu].map((v) => Math.round(v * 100))) : [];   // gerundet so, dass die Teile die Summe ergeben
+  const unter = l ? `${lTeile.slice(0, -1).map(eur0).join(' + ')} Kinder + ${eur0(lTeile.at(-1))} Trennung · gilt, bis die Gegenseite Auskunft verlangt<span class="cp-nur-breit"> (§ 1605 BGB) · mehr erst ab Aufforderung (§ 1613 BGB) · Orientierung, keine Rechtsberatung</span>` : '';
   const ms = (U?.R?.monate || []).filter((m) => !U.R.laeuft || m.k < U.R.bisM).slice(-12);
   const kacheln = !U ? '' : [
     kachel({ titel: 'Verbindlich', wert: l ? eurE0(l.summe) : '–', ziel: { ...zuU, _springe: '#uh-rechner' }, aend: l ? `Berechnung vom ${dde(l.datum)}` : '', spark: sparkline(ms.map((m) => m.soll)), unter: 'im Monat · Linie: Soll je Monat' }),
@@ -1506,18 +1541,20 @@ function familieSeite() {
 
   // Risiko bei Neuberechnung: verbindlich gegen die Rechnungen des Rechners
   const rz = (t, c, sub, cls_ = '') => `<div class="bx-rz ${cls_}"><span>${t}<small>${sub}</small></span><b>${eurE0(c)}</b></div>`;
-  const dz = (c) => (c == null ? '' : `${c >= 0 ? '+' : '−'}${eurE0(Math.abs(c))} ggü. verbindlich`);
+  const dz = (neu) => { const c = dU(neu, l.summe); return `${c >= 0 ? '+' : '−'}${eur0(Math.abs(c))} ggü. verbindlich`; };
   const risikoInhalt = !K || !l ? '<p class="bx-u">Der Unterhaltsrechner braucht Abrechnungen und die Angaben zu den Kindern.</p>'
     : `${rz('verbindlich', l.summe, `Berechnung vom ${dde(l.datum)}`, 'bx-gilt')}
-      ${rz('bei Neuberechnung, für dich gerechnet', K.P.summe, dz(K.P.summe - l.summe), K.P.summe > l.summe ? 'bx-r' : '')}
-      ${rz('bei Neuberechnung, neutral', K.N.summe, `${dz(K.N.summe - l.summe)} · so könnte die Gegenseite rechnen`, K.N.summe > l.summe ? 'bx-r' : '')}
-      ${K.nurLeo ? rz('nur Leo volljährig, Rest wie bisher', K.nurLeo.summe, `${dz(K.nurLeo.summe - l.summe)} – öffnet aber die Neuberechnung`) : ''}
+      ${rz('bei Neuberechnung, für dich gerechnet', K.P.summe, dz(K.P.summe), K.P.summe > l.summe ? 'bx-r' : '')}
+      ${rz('bei Neuberechnung, neutral', K.N.summe, `${dz(K.N.summe)} · so könnte die Gegenseite rechnen`, K.N.summe > l.summe ? 'bx-r' : '')}
+      ${K.nurLeo ? rz('nur Leo volljährig, Rest wie bisher', K.nurLeo.summe, `${dz(K.nurLeo.summe)} – öffnet aber die Neuberechnung`) : ''}
       <p class="bx-u">Eine Gehaltserhöhung musst du nicht von dir aus melden. Gefragt wahr antworten (§ 235 FamFG); ein volljähriges Kind kann selbst Auskunft verlangen.</p>
       ${bxLink('Rechenweg und Argumente für dich', { ...zuU, _springe: '#uh-rechner' })}`;
 
   // Ausgleich: Gruppen mit Saldo
   const GR = [['steuer', 'Steueranteile'], ['kinder', 'Sonderbedarf Kinder'], ['auslagen', 'Auslagen/Erstattungen'], ['sonst', 'Sonstiges']];
-  const ausgleich = !U ? '' : `${GR.map(([k, t]) => { const r = U.A.rows.filter((x) => U.A.gruppe(x) === k); if (!r.length) return ''; const c = r.reduce((s, x) => s + x.c, 0);
+  const grL = !U ? [] : GR.map(([k, t]) => { const r = U.A.rows.filter((x) => U.A.gruppe(x) === k); return { t, r, c: r.reduce((s, x) => s + x.c, 0) }; }).filter((x) => x.r.length);
+  const grZ = rundeTeile(grL.map((x) => x.c));   // gezeigte Gruppen ergeben den gezeigten Saldo
+  const ausgleich = !U ? '' : `${grL.map(({ t, r }, i) => { const c = grZ[i];
       return `<div class="bx-rz"><span>${t}<small>${r.length} ${r.length === 1 ? 'Buchung' : 'Buchungen'}</small></span><b class="${c < 0 ? 'neg' : c > 0 ? 'pos' : ''}">${c > 0 ? '+' : c < 0 ? '−' : ''}${eur0(Math.abs(c))}</b></div>`; }).join('')}
     ${U.offen.map((p) => `<p class="bx-zeile"><i class="ampel gelb" aria-hidden="true"></i>offen: Anteil an der Steuererstattung ${p.J}</p>`).join('')}
     ${bxLink('Alle Buchungen und offenen Posten', { ...zuU, _springe: '#uh-b' })}`;
@@ -1538,16 +1575,21 @@ function familieSeite() {
   const farbenK = ['var(--accent)', 'var(--accent-2)', 'var(--akzent)', 'var(--variabel)'];
   const uhArten = [{ n: 'Trennungsunterhalt', f: 'var(--fest)', w: (m) => m.tu }, ...uhKi.map((k, i) => ({ n: k.name || `Kind ${i + 1}`, f: farbenK[(i + 1) % farbenK.length], w: (m) => m.kind[i] || 0 })),
     { n: 'nicht aufgeteilt', f: 'var(--surface-3)', w: (m) => m.na }].filter((a1) => uhM.some((m) => a1.w(m)));
-  const uhSum = uhM.reduce((t, m) => t + m.sum, 0), uhSoll = uhM.every((m) => m.soll != null) ? uhM.reduce((t, m) => t + m.soll, 0) : null;
-  const gezahlt = `${uhArten.map((a1) => { const c = uhM.reduce((t, m) => t + a1.w(m), 0); return `<div class="bx-rz"><span>${esc(a1.n)}</span><b>${eur0(c)}</b></div>`; }).join('')}
+  const uhSum = uhM.reduce((t, m) => t + m.sum, 0);
+  // Soll und Abweichung nur über abgeschlossene Monate und den laufenden, wenn seine Zahlung schon da ist
+  const fertig = (m) => !U.R.laeuft || m.k < U.R.bisM || (m.sum > 0 && !K?.laeuftNoch), uhF = uhM.filter(fertig), ohneLfd = uhF.length < uhM.length;
+  const uhSoll = uhF.every((m) => m.soll != null) ? uhF.reduce((t, m) => t + m.soll, 0) : null, uhSumF = uhF.reduce((t, m) => t + m.sum, 0);
+  const uhAbw = uhSoll == null ? null : dGezeigt(uhSoll, uhSumF);
+  const uhTeile = rundeTeile(uhArten.map((a1) => uhM.reduce((t, m) => t + a1.w(m), 0)));   // gezeigte Teile ergeben die gezeigte Summe
+  const gezahlt = `${uhArten.map((a1, i) => `<div class="bx-rz"><span>${esc(a1.n)}</span><b>${eur0(uhTeile[i])}</b></div>`).join('')}
     <div class="bx-rz bx-gilt"><span>Summe gezahlt</span><b>${eur0(uhSum)}</b></div>
-    ${uhSoll != null ? `<div class="bx-rz"><span>Soll laut deinen Angaben<small>Abweichung ${uhSum - uhSoll >= 0 ? '+' : '−'}${eur0(Math.abs(uhSum - uhSoll))}</small></span><b>${eur0(uhSoll)}</b></div>` : ''}`;
+    ${uhSoll != null ? `<div class="bx-rz"><span>Soll laut deinen Angaben${ohneLfd ? ` bis ${esc(monLang(uhF.at(-1)?.k || uhM[0].k))}` : ''}<small>Abweichung ${uhAbw >= 0 ? '+' : '−'}${eur0(Math.abs(uhAbw))}${ohneLfd ? ' · laufender Monat noch nicht enthalten' : ''}</small></span><b>${eur0(uhSoll)}</b></div>` : ''}`;
   box.innerHTML = `<div class="cp bx">
     ${bxKopf('Familie', kern, unter)}
     ${kacheln ? `<div class="cp-kz">${kacheln}</div>` : ''}
     <div class="bx-raster bx-sechs">
       ${bxKarte('Risiko bei Neuberechnung', risikoInhalt, { rechts: '<span class="marke">berechnet</span>', fuss: 'Nichts selbst anstoßen – neu gerechnet wird erst, wenn die Gegenseite Auskunft verlangt. Mit RA Vitti abstimmen.' })}
-      ${bxKarte('Monat für Monat', `<div class="bx-ml">${monate || '<p class="bx-u">Keine Unterhaltszahlungen auf deinen Konten.</p>'}</div>${grund ? `<p class="bx-hinw-z">Warum: ${grund}. Der Dauerauftrag liegt also unter der verbindlichen Berechnung.</p>` : ''}${bxLink('Alle Monate', { ...zuU, _springe: '#uh-a' })}`, { rechts: '<span class="klein muted">gezahlt · Abweichung zum Soll</span>' })}
+      ${bxKarte('Monat für Monat', `<div class="bx-ml">${monate || '<p class="bx-u">Keine Unterhaltszahlungen auf deinen Konten.</p>'}</div>${grund ? `<p class="bx-hinw-z">Warum: ${grund}. Die Zahlung liegt also ${mL.abw < 0 ? 'unter' : 'über'} der verbindlichen Berechnung.</p>` : ''}${bxLink('Alle Monate', { ...zuU, _springe: '#uh-a' })}`, { rechts: '<span class="klein muted">gezahlt · Abweichung zum Soll</span>' })}
       ${bxKarte(U?.A?.name ? `Ausgleich mit ${esc(U.A.name)}` : 'Ausgleich', ausgleich, { rechts: U ? `<b class="bx-wert ${U.saldo < 0 ? 'neg' : ''}">${U.saldo > 0 ? '+' : U.saldo < 0 ? '−' : ''}${eur0(Math.abs(U.saldo))}</b>` : '', fuss: 'Plus = an dich, minus = von dir · ohne die Unterhaltsraten' })}
       ${bxKarte('Kinder und Fristen', kinderInhalt, { fuss: 'Kinderkonten zählen nicht zu deinen Finanzen' })}
       ${uhM.length ? bxKarte('Unterhalt je Monat', `<p class="cp-leg">${uhArten.map((a1, i) => `<i style="background:${a1.f}"></i>${esc(a1.n)}`).join(' ')} <span>· Linie: Soll</span></p><div class="cp-chart bx-chart"><canvas id="c-fam-uh" aria-label="Unterhalt je Monat nach Art"></canvas></div>`,
@@ -1670,7 +1712,7 @@ function s5ErgebnisZeichnen(V) {
     y: { ...achsenStil(), ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 5 } },
   };
   o.plugins.tooltip.callbacks = {
-    title: (it) => { const m = ms[it[0].dataIndex]; return `${monLang(m.k)}${m.art === 'prognose' ? ` – Prognose (berechnet: ${m.plan ? 'Plan-Gehalt' : 'aktuelles Gehalt'} + Saisonprofil)` : m.art === 'laeuft' ? ' – erwartet bis Monatsende' : ''}`; },
+    title: (it) => { const m = ms[it[0].dataIndex]; return `${monLang(m.k)}${m.art === 'prognose' ? ` – Prognose (berechnet: ${m.plan ? 'Plan-Gehalt' : 'aktuelles Gehalt'} + Lebenshaltung wie im normalen Monat)` : m.art === 'laeuft' ? ' – erwartet bis Monatsende' : ''}`; },
     label: (it) => { const m = ms[it.dataIndex]; return ` ${m.erg >= 0 ? 'Überschuss' : 'Fehlbetrag'}: ${EUR0.format(m.erg / 100)}`; },
     afterBody: (it) => { const m = ms[it[0].dataIndex]; return [`Einnahmen ${eur0(m.ein)}`, `Ausgaben ${eur0(m.aus)}`, m.art === 'ist' ? 'Klick: Buchungen des Monats' : '']; },
   };
@@ -1760,7 +1802,7 @@ function k5Seite() {
   const top = quellen.slice(0, 3), rest = quellen.slice(3), restC = rest.reduce((t, x) => t + x.c, 0);
   const restV = einV ? rest.reduce((t, x) => t + (einV.g.get(x.k)?.c || 0), 0) : 0;
   const einZeilen = [
-    zeile('Gehalt', 'netto', a.lohn / a.n, vm(v, v?.lohn), true, zuBuchungen({ kat: 'Einnahmen', ukat: 'Lohn / Gehalt', art: 'ein', ...zeit })),
+    zeile('Gehalt', 'aufs Konto', a.lohn / a.n, vm(v, v?.lohn), true, zuBuchungen({ kat: 'Einnahmen', ukat: 'Lohn / Gehalt', art: 'ein', ...zeit })),
     ...top.map((x) => zeile(esc(schoen(x.k)), '', x.c / a.n, einV ? (einV.g.get(x.k)?.c || 0) / v.n : null, true, { tab: 'uebersicht', kart: 'ein', wahl: x.k })),
     ...(restC > 0 ? [zeile(`Übrige (${rest.length})`, rest.slice(0, 3).map((x) => esc(schoen(x.k))).join(', '), restC / a.n, einV ? restV / v.n : null, true, { tab: 'uebersicht', kart: 'ein', wahl: '' })] : []),
   ].join('');
@@ -1770,7 +1812,7 @@ function k5Seite() {
     <section class="vg" style="--vg:var(--ein)">${zeile('Einnahmen', '', a.ein / a.n, vm(v, v?.ein), true, { tab: 'uebersicht', kart: 'ein', wahl: '' }, true)}<div class="vg-l">${einZeilen}</div></section>
     <section class="vg" style="--vg:var(--aus)">${zeile('Ausgaben', '', a.aus / a.n, vm(v, v?.aus), false, { tab: 'uebersicht', kart: 'aus', wahl: '' }, true)}<div class="vg-l">
       ${zeile('Fixkosten', 'Verträge, Miete, Unterhalt', a.fix / a.n, vm(v, v?.fix), false, { tab: 'fix', fixtab: 'vertraege' })}
-      ${zeile('Lebenshaltung', 'alle übrigen Ausgaben', (a.aus - a.fix) / a.n, v ? (v.aus - v.fix) / v.n : null, false, zuBuchungen({ art: 'aus', nf: '1', ...zeit }))}</div></section>
+      ${zeile('Lebenshaltung', 'alle übrigen Ausgaben', dGezeigt(a.fix / a.n, a.aus / a.n), v ? dGezeigt(v.fix / v.n, v.aus / v.n) : null, false, zuBuchungen({ art: 'aus', nf: '1', ...zeit }))}</div></section>
     <section class="vg" style="--vg:${a.erg >= 0 ? 'var(--ein-text)' : 'var(--aus-text)'}">${zeile(a.erg >= 0 ? '= übrig' : '= Fehlbetrag', `Sparquote ${quote(a) ?? '–'} %${v ? ` · Vorjahr ${quote(v)} %` : ''}`, a.erg / a.n, ergV, true, { springe: '#k5-tab' }, true).replace(`<b class="dm-w">${eur0(a.erg / a.n)}</b>`, `<b class="dm-w ${a.erg >= 0 ? 'pos' : 'neg'}">${plusMinus(a.erg / a.n)}</b>`)}
       ${a.spar || v?.spar ? `<div class="vg-l">${zeile('Spar- und Depotkonto', a.spar >= 0 ? 'zusätzlich gespart, nicht in den Ausgaben' : 'mehr entnommen als eingezahlt (minus)', a.spar / a.n, v ? v.spar / v.n : null, true, zuBuchungen({ kat: 'Sparen', ...zeit })).replace('<b class="dm-w">-', '<b class="dm-w neg">-').replace('<span class="dm-v">-', '<span class="dm-v" style="color:var(--aus-text)">-')}</div>` : ''}</section>
   </div>`;
@@ -1814,10 +1856,11 @@ function k5Seite() {
     ['Ausgaben pro Tag', `Ø ${eur0(a.aus / tage)}`, { tab: 'uebersicht', kart: 'aus', wahl: '' }],
     ['Größte Einzelausgabe', gr ? `${eur0(-gr.c)} <small>${esc((gr.g || gr.z || '').slice(0, 22))}, ${dde(gr.d)}</small>` : '–', gr ? zuBuchungen({ q: gr.g ? `"${gr.g}"` : '', ...monatZiel(gr.d.slice(0, 7)), art: 'aus' }) : null],
   ];
-  if (P.jahr && P.monate.length < 12) {
+  if (P.jahr === +D.bis.slice(0, 4) && P.monate.length < 12) {
     const restM = 12 - P.monate.length, jahrErg = a.erg + restM * R.erg;
     fakten.push([`Hochrechnung ${P.jahr}`, `<span class="${jahrErg >= 0 ? 'pos' : 'neg'}">≈ ${plusMinus(jahrErg)}</span> <small>bisher ${plusMinus(a.erg)} + ${restM} normale Monate</small>`, { tab: 'start' }]);
-  } else fakten.push(['Normaler Monat ab jetzt', `<span class="${R.erg >= 0 ? 'pos' : 'neg'}">${plusMinus(R.erg)}</span> <small>mit dem aktuellen Gehalt ${eur0(R.gehalt)}</small>`, { tab: 'start' }]);
+  } else if (P.jahr && P.monate.length < 12) fakten.push(['Datenbasis', `${P.monate.length} Monate <small>Daten ab ${monLang(P.monate[0])}</small>`, null]);
+  else fakten.push(['Normaler Monat ab jetzt', `<span class="${R.erg >= 0 ? 'pos' : 'neg'}">${plusMinus(R.erg)}</span> <small>mit dem aktuellen Gehalt ${eur0(R.gehalt)}</small>`, { tab: 'start' }]);
   const leiste = `<div class="fl">${fakten.map(([t, w, ziel]) => `<${ziel ? 'button' : 'div'} class="card fl-z"${ziel ? (ziel.springe ? ` data-springe="${ziel.springe}"` : geh(ziel)) : ''} title="Anklicken: Einzelheiten"><span>${t}</span><b>${w}</b></${ziel ? 'button' : 'div'}>`).join('')}</div>`;
 
   // Tabelle aller Monate (aufklappbar)
@@ -1828,7 +1871,7 @@ function k5Seite() {
 
   box.innerHTML = kopf5('Kennzahlen', satz, rechts) + `<div class="s5-zahlen">${zahlen}</div>
     <div class="s5-raster k5">
-      ${karte5('Dein Durchschnittsmonat', `Ø je Monat ${P.label}${v ? ', daneben dasselbe Zeitfenster ein Jahr früher' : ''} · Zeile anklicken: Einzelheiten`, durchschnitt, 's5-b2')}
+      ${karte5('Dein Durchschnittsmonat', `Ø je Monat ${P.label}${v ? ', daneben dasselbe Zeitfenster ein Jahr früher' : ''} · Zeile anklicken: Einzelheiten`, durchschnitt + RUNDUNG, 's5-b2')}
       ${karte5('Was sich verändert hat', v ? 'Ausgaben je Monat ggü. dem Vorjahr, größte Veränderungen zuerst · anklicken: Einzelheiten' : '', veraendert)}
       ${karte5('Monat für Monat', `Grün = Einnahmen, orange = Ausgaben, darunter das Ergebnis des Monats. Gestrichelt: dein aktuelles Gehalt (${eur0(R.gehalt)}). Säule anklicken: Buchungen.`, '<div class="s5-chart fuell"><canvas id="c-k5-monate"></canvas></div>', 's5-b2')}
       ${karte5('Jahr für Jahr', 'Ø je Monat · anklicken: dieses Jahr anzeigen', jahrTab)}
@@ -1909,7 +1952,7 @@ function tabKategorien() {
   const bloecke = aus
     ? [{ titel: 'Überwiegend feste Kosten', erkl: 'mindestens die Hälfte sind Verträge: Unterhalt, Miete, Versicherungen … – kurzfristig kaum veränderbar', farbe: 'var(--fest)', l: liste.filter((x) => x.fest >= x.c * 0.5) },
       { titel: 'Frei gestaltbar', erkl: 'Einkauf, Freizeit, Anschaffungen … – hier lässt sich am ehesten sparen', farbe: 'var(--variabel)', l: liste.filter((x) => x.fest < x.c * 0.5) }]
-    : [{ titel: 'Gehalt', erkl: 'netto vom Arbeitgeber', farbe: 'var(--ein)', l: liste.filter((x) => x.k === 'Lohn / Gehalt') },
+    : [{ titel: 'Gehalt', erkl: 'Auszahlung aufs Konto vom Arbeitgeber', farbe: 'var(--ein)', l: liste.filter((x) => x.k === 'Lohn / Gehalt') },
       { titel: 'Sonstige Einnahmen', erkl: 'Erstattungen, Zinsen, Kapitalerträge, Steuern …', farbe: 'color-mix(in srgb, var(--ein) 55%, var(--surface))', l: liste.filter((x) => x.k !== 'Lohn / Gehalt') }];
   const festS = aus ? bloecke[0].l.reduce((t, x) => t + x.c, 0) : 0, freiS = aus ? ges - festS : 0;
 
@@ -1968,14 +2011,14 @@ function tabKategorien() {
     <div class="kd-stats">
       ${stat('Ø im Monat', eur0(wahl.c / a.n))}
       ${stat('Anteil', `${anteil(wahl.c)} %`)}
-      ${stat(P.jahr && P.monate.length < 12 ? `Hochrechnung ${P.jahr}` : 'aufs Jahr', `≈ ${eur0(jahrWert)}`)}
+      ${stat(P.jahr === +D.bis.slice(0, 4) && P.monate.length < 12 ? `Hochrechnung ${P.jahr}` : 'aufs Jahr (Ø × 12)', `≈ ${eur0(jahrWert)}`)}
       ${stat('ggü. Vorjahr', wd == null ? '–' : Math.abs(wd) < 1000 ? '≈ gleich' : plusMinus(wd), wd == null || Math.abs(wd) < 1000 ? '' : (wd > 0) === aus ? 'neg' : 'pos')}
     </div>
     <p class="s5-erkl">${eur0(wahl.c)} ${P.label} · ${NUM.format(wahl.rows.length)} Buchungen${wv != null ? ` · Vorjahr Ø ${eur0(wv)}` : ''}${tipp ? ` · ${tipp}` : ''}</p>
     <div class="s5-chart klein fuell"><canvas id="c-kat2"></canvas></div>
     <div class="kl-d-grid">
       ${unter.length > 1 ? `<div class="s5-teil"><h3>Wofür genau</h3>${balkenListe(unter.slice(0, 6).map(([u, c]) => ({ n: esc(schoen(u)), c: c / a.n, p: `${Math.round((c / wahl.c) * 100)} %`, farbe: aus ? 'var(--variabel)' : 'var(--ein)', ziel: zuBuchungen({ art: 'aus', kat: wahl.k, ukat: u === 'ohne Unterkategorie' ? '' : u, ...zeit }) })))}</div>` : ''}
-      <div class="s5-teil"><h3>${aus ? 'An wen' : 'Von wem'}</h3>${balkenListe(empf.map(([e, x]) => ({ n: esc(e), sub: `${x.n} Buchungen`, c: x.c / a.n, p: `${Math.round((x.c / wahl.c) * 100)} %`, farbe: 'var(--muted)', ziel: zuBuchungen({ q: `"${e}"`, art: aus ? 'aus' : 'ein', ...zeit }) })))}</div>
+      <div class="s5-teil"><h3>${aus ? 'An wen' : 'Von wem'}</h3>${balkenListe(empf.map(([e, x]) => ({ n: esc(e), sub: `${x.n} Buchungen`, c: x.c / a.n, p: `${Math.round((x.c / wahl.c) * 100)} %`, farbe: 'var(--muted)', ziel: katZiel({ q: `"${e}"`, ...zeit }) })))}</div>
     </div>
   </section>`;
 
@@ -1989,7 +2032,7 @@ function tabKategorien() {
   const tabelle = `<div class="t3-rahmen"><table class="t3 t3-eng"><thead><tr><th>${aus ? 'Kategorie' : 'Einnahme'}</th>${P.monate.map((k, i) => `<th class="r${i < nM - 3 ? ' m-alt' : ''}">${monKurz(k)}</th>`).join('')}<th class="r">Ø</th></tr></thead><tbody>${reihen}</tbody>
     <tfoot><tr><td>Summe</td>${monSum.map((c, i) => `<td class="r${i < nM - 3 ? ' m-alt' : ''}">${NUM.format(Math.round(c / 100))}</td>`).join('')}<td class="r">${NUM.format(Math.round(ges / a.n / 100))}</td></tr></tfoot></table></div>`;
   return kopf5('Kategorien', satz, rechts) + `<div class="s5-zahlen">${zahlen}</div><div class="kl${aus ? '' : ' ein'}">
-    ${karte5(`${aus ? 'Ausgaben' : 'Einnahmen'} nach ${aus ? 'Kategorie' : 'Herkunft'}`, `Ø je Monat ${esc(monatsText(P.monate))} · Zeile anklicken: Einzelheiten rechts`, listeHtml, 'kl-liste')}
+    ${karte5(`${aus ? 'Ausgaben' : 'Einnahmen'} nach ${aus ? 'Kategorie' : 'Herkunft'}`, `Ø je Monat ${esc(monatsText(P.monate))} · Zeile anklicken: Einzelheiten rechts`, listeHtml + RUNDUNG, 'kl-liste')}
     ${detail}</div>
     ${aus ? sicher(() => rahmenKarte(H)) : ''}
     <details class="card s5-details"><summary>Monat für Monat je ${aus ? 'Kategorie' : 'Einnahme'} <span class="muted">· in Euro · rot: deutlich über dem eigenen Ø · Zahl anklicken: Buchungen</span></summary>${tabelle}</details>`;
@@ -2060,14 +2103,16 @@ function tabKonten() {
   const kaution = gew.filter((x) => /kaution/i.test(x.k.name)).reduce((t, x) => t + x.c, 0);
   const heute = tag === D.bis, V = heute && !ks ? verlauf5() : null, ende = V?.monate.at(-1);
   const kautionK = gew.find((x) => /kaution/i.test(x.k.name));
-  const jahrZiel = zuBuchungen({ jahr: tag.slice(0, 4), monat: '' });
+  // Buchungen zum angeklickten Zeitraum: ganzes Jahr nur bei Stichtag heute oder 31.12., sonst Januar bis zum Monat des Stichtags
+  const bisM = tag.slice(0, 7), ganzJahr = tag === D.bis || tag.slice(5) === '12-31';
+  const zeitJb = ganzJahr ? { jahr: tag.slice(0, 4), monat: '' } : { zr: `${tag.slice(0, 4)}-01_${bisM}` }, jahrZiel = zuBuchungen(zeitJb);
   let satz = `Am ${dde(tag)} liegen auf ${ks ? 'den gewählten Konten' : 'deinen Konten'} ${zs(`<b class="${saldo < 0 ? 'neg' : ''}">${summeText(sT)}</b>`, '.kon5 .ko')}${sT.voll ? '' : ` – ${esc(fehltText(sT))}`}${kaution ? ` – davon ${zl(`${eur0(kaution)} Mietkaution`, zuBuchungen({ konto: kautionK.k.name }))}, frei verfügbar also <b class="${saldo - kaution < 0 ? 'neg' : ''}">${eur0(saldo - kaution)}${offenZ}</b>` : ''}.`;
   if (tag.slice(5) !== '12-31' && seitJb != null) satz += ` Seit Jahresbeginn ${zl(`<b class="${seitJb >= 0 ? 'pos' : 'neg'}">${plusMinus(seitJb)}</b>`, jahrZiel)}.`;
   if (ende?.stand != null) satz += ` Läuft alles so weiter wie geplant, sind es Ende ${MONAT[+ende.k.slice(5) - 1]} etwa ${zl(`<b class="${ende.stand < 0 ? 'neg' : ''}">${eur0(ende.stand)}</b>`, { tab: 'start' })}.`;
   const zahlen = [
     zahl5(heute ? 'Heute auf den Konten' : `Stand ${dde(tag)}`, summeText(sT), !sT.voll ? esc(fehltText(sT)) : `${ks ? `${gew.length} gewählte Konten` : 'ohne Depot, gemeinsame und Kinderkonten · je Konto ↓'}${summeHinweis(sT) ? ` · ${summeHinweis(sT)}` : ''}`, { cls: saldo < 0 ? 'neg' : '', springe: '.kon5 .ko' }),
     zahl5('Frei verfügbar', `${eur0(saldo - kaution)}${offenZ}`, kaution ? `ohne Mietkaution (${eur0(kaution)}) · Kautionskonto →` : 'keine Kaution gebunden', { cls: saldo - kaution < 0 ? 'neg' : '', ...(kaution ? { ziel: zuBuchungen({ konto: kautionK.k.name }) } : { springe: '.kon5 .ko' }) }),
-    zahl5(`Seit 1. Januar ${tag.slice(0, 4)}`, seitJb == null ? '–' : plusMinus(seitJb), seitJb == null ? `nicht berechenbar: ${esc(fehltText(sJb && !sJb.voll ? sJb : sT))}` : `Stand 31.12.: ${summeText(sJb)} · Buchungen ${tag.slice(0, 4)} →`, { cls: seitJb == null ? '' : seitJb >= 0 ? 'pos' : 'neg', ziel: jahrZiel }),
+    zahl5(`Seit 1. Januar ${tag.slice(0, 4)}`, seitJb == null ? '–' : plusMinus(seitJb), seitJb == null ? `nicht berechenbar: ${esc(fehltText(sJb && !sJb.voll ? sJb : sT))}` : `Stand 31.12.: ${summeText(sJb)} · ${ganzJahr ? `Buchungen ${tag.slice(0, 4)}` : `Buchungen Jan–${MON[+bisM.slice(5) - 1]} ${tag.slice(0, 4)}`} →`, { cls: seitJb == null ? '' : seitJb >= 0 ? 'pos' : 'neg', ziel: jahrZiel }),
     ende ? zahl5(`Prognose Ende ${MONAT[+ende.k.slice(5) - 1]}`, ende.stand == null ? '–' : `≈ ${eur0(ende.stand)}`, ende.stand == null ? 'nicht berechenbar: der Stand heute ist unvollständig' : `wenn alles läuft wie ein normaler Monat (${pmHtml(V.R.erg)})`, { cls: ende.stand < 0 ? 'neg' : '', ziel: { tab: 'start' } })
       : zahl5('Konten', NUM.format(gew.length), unbekannt.length ? `${unbekannt.length} ohne Daten für diesen Tag` : 'mit Daten zu diesem Tag', { springe: '.kon5 .ko' }),
   ].join('');
@@ -2079,10 +2124,10 @@ function tabKonten() {
   const fragezeichen = (tip) => `<span class="muted" role="button" tabindex="0" title="${esc(tip)}" data-tipp="${esc(tip)}">?</span>`;
   const zeile = (x, g) => {
     const a0 = anfang.get(x.i), d = x.c != null && a0 != null ? x.c - a0 : null;
-    const zusatz = { geschaetzt: 'geschätzt', ungefaehr: `± ${eur0(Math.round((x.abw || 0) * 100))}` }[x.status];
-    const wert = x.status === 'unsicher' ? fragezeichen(STATUS_TEXT.unsicher) : `${zusatz ? '≈ ' : ''}${eur0(x.c)}`;
+    const zusatz = { geschaetzt: 'geschätzt', ungefaehr: `± ${eur0(Math.round((x.abw || 0) * 100))}`, ruhend: `ruht · Stand ${dde(x.seit || '')}` }[x.status];
+    const wert = x.status === 'unsicher' ? fragezeichen(STATUS_TEXT.unsicher) : `${zusatz && x.status !== 'ruhend' ? '≈ ' : ''}${eur0(x.c)}`;
     const unter = [x.k.vollstaendig ? '✓ lückenlos' : `Daten ab ${dde(x.k.von).slice(3)}`, letzte.has(x.i) ? `letzte Buchung ${dde(letzte.get(x.i)).slice(0, 6)}` : '', zusatz].filter(Boolean).join(' · ');
-    return `<button class="vg-z ko-z${g.fremd || drin(x.i) ? '' : ' aus'}${x.c < 0 ? ' minus' : ''}"${geh(zuBuchungen({ konto: x.k.name, jahr: tag.slice(0, 4) }))} title="Anklicken: Buchungen von ${esc(x.k.name)}">
+    return `<button class="vg-z ko-z${g.fremd || drin(x.i) ? '' : ' aus'}${x.c < 0 ? ' minus' : ''}"${geh(zuBuchungen({ konto: x.k.name, ...zeitJb }))} title="Anklicken: Buchungen von ${esc(x.k.name)}">
       <span class="vg-zn">${esc(x.k.name)}<small>${esc(unter)}</small></span>
       <span class="ko-b"><i style="width:${Math.max(0.5, (Math.abs(x.c || 0) / maxC) * 100)}%"></i></span>
       <b class="vg-zw ${x.c < 0 ? 'neg' : ''}">${wert}</b><span class="vg-zp ${d == null || g.fremd ? 'muted' : d >= 0 ? 'pos' : 'neg'}">${d == null ? '–' : plusMinus(d)}</span></button>`;
@@ -2204,19 +2249,19 @@ function keineTreffer(conds) {
   const zeitraum = [S.jahr ? `in ${esc(String(S.jahr).replace(/,/g, ', '))}` : '', S.monat ? `(${monateWahl().map((m) => MON[m - 1]).join(', ')})` : '', S.zr ? `von ${zrText()}` : ''].filter(Boolean).join(' ');
   // 1. dieselben Filter, nur ohne Jahr und Monat
   if (S.jahr || S.monat || S.zr) {
-    const alt = { jahr: S.jahr, monat: S.monat, zr: S.zr };
-    let l; try { S.jahr = ''; S.monat = ''; S.zr = ''; l = D.rows.filter(pruefer(conds)); } finally { Object.assign(S, alt); }
+    const alt = { jahr: S.jahr, monat: S.monat, zr: S.zr, nf: S.nf };
+    let l; try { S.jahr = ''; S.monat = ''; S.zr = ''; S.nf = ''; l = D.rows.filter(pruefer(conds)); } finally { Object.assign(S, alt); }
     if (l.length) {
       const jahre = [...new Set(l.map((r) => r.y))];
       return kasten(`${zeitraum ? `${zeitraum[0].toUpperCase()}${zeitraum.slice(1)}` : 'Im gewählten Zeitraum'} nichts gefunden – aber <b>${l.length} Treffer</b> in ${jahre.length === 1 ? jahre[0] : `${jahre.length} anderen Jahren`}:`, l,
-        jahre.length === 1 ? { jahr: String(jahre[0]), monat: '', zr: '' } : { jahr: '', monat: '', zr: '' }, jahre.length === 1 ? `${jahre[0]} anzeigen` : 'In allen Jahren anzeigen');
+        jahre.length === 1 ? { jahr: String(jahre[0]), monat: '', zr: '', nf: '', neu: '' } : { jahr: '', monat: '', zr: '', nf: '', neu: '' }, jahre.length === 1 ? `${jahre[0]} anzeigen` : 'In allen Jahren anzeigen');
     }
   }
   // 2. nur die Suche, ohne Konto, Kategorie, Art und Zeitraum
   const test = matcher(conds), l = D.rows.filter(test);
-  if (l.length && (S.konto || S.kat || S.ukat || S.art !== 'alle' || !S.umb || S.jahr || S.monat)) {
+  if (l.length && (S.konto || S.kat || S.ukat || S.art !== 'alle' || !S.umb || S.jahr || S.monat || S.nf || S.neu || S.vertrag)) {
     const konten = [...new Set(l.map((r) => r.k))], nurFremd = l.every((r) => FREMD_ART.has(r.art));
-    const ziel = { jahr: '', monat: '', zr: '', konto: nurFremd && konten.length === 1 ? D.konten[konten[0]].name : '', kat: '', ukat: '', art: 'alle', umb: l.some((r) => r.art === 'Umbuchung') || S.umb };
+    const ziel = { jahr: '', monat: '', zr: '', nf: '', neu: '', vertrag: '', konto: nurFremd && konten.length === 1 ? D.konten[konten[0]].name : '', kat: '', ukat: '', art: 'alle', umb: l.some((r) => r.art === 'Umbuchung') || S.umb };
     const warum = l.every((r) => r.art === 'Umbuchung') ? ' (es sind Umbuchungen, die sonst ausgeblendet sind)' : nurFremd ? ' (auf einem gemeinsamen bzw. Kinderkonto, das sonst nicht mitzählt)' : '';
     return kasten(`Mit den gesetzten Filtern nichts gefunden – ohne Filter gibt es <b>${l.length} Treffer</b>${warum}:`, l, ziel, 'Ohne Filter anzeigen');
   }
@@ -2422,7 +2467,7 @@ function tabelle(conds) {
   el.querySelectorAll('.kl-z[data-k2kat]').forEach((b) => b.onclick = () => { setze({ wahl: b.dataset.k2kat }); if (matchMedia('(max-width: 1180px)').matches) $('.kl-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   el.querySelectorAll('[data-k2zelle]').forEach((td) => td.onclick = () => {
     const [k, m] = td.dataset.k2zelle.split('|');
-    setze({ tab: 'buchungen', q: '', jahr: m.slice(0, 4), monat: String(+m.slice(5)), zr: '', art: S.kart, ...(S.kart === 'aus' ? { kat: k, ukat: '' } : einFilter(k)) });
+    setze(zuBuchungen({ jahr: m.slice(0, 4), monat: String(+m.slice(5)), art: S.kart, ...(S.kart === 'aus' ? { kat: k } : einFilter(k)) }));
   });
   el.querySelectorAll('[data-fixtab]').forEach((b) => b.onclick = () => setze({ fixtab: b.dataset.fixtab }));
   el.querySelectorAll('[data-sort]').forEach((th) => th.onclick = () => {
@@ -2660,8 +2705,8 @@ function einkommen() {
   const spanne = `${monTxt(m12[0])} – ${monTxt(letzter)}`;
   return (D.einkommen = {
     lohn, ein, letzter,
-    aktuell: { wert: lohn.get(letzter) || 0, knopf: 'aktuelles Gehalt', name: 'Nettogehalt', zeit: `im ${MONAT[+letzter.slice(5) - 1]} ${letzter.slice(0, 4)}`, vom: 'vom aktuellen Gehalt', am: 'am aktuellen Gehalt', spalte: 'vom Gehalt', reihe: 'lohn' },
-    schnitt: { wert: summe(lohn) / 12, knopf: 'Ø Gehalt 12 Monate', name: 'Ø Nettogehalt', zeit: `${spanne}, mit Sonderzahlungen`, vom: 'vom Ø Gehalt', am: 'am Ø Gehalt', spalte: 'vom Gehalt', reihe: 'lohn' },
+    aktuell: { wert: lohn.get(letzter) || 0, knopf: 'aktuelles Gehalt', name: 'Gehaltseingang', zeit: `im ${MONAT[+letzter.slice(5) - 1]} ${letzter.slice(0, 4)}`, vom: 'vom aktuellen Gehalt', am: 'am aktuellen Gehalt', spalte: 'vom Gehalt', reihe: 'lohn' },
+    schnitt: { wert: summe(lohn) / 12, knopf: 'Ø Gehalt 12 Monate', name: 'Ø Gehaltseingang', zeit: `${spanne}, mit Sonderzahlungen`, vom: 'vom Ø Gehalt', am: 'am Ø Gehalt', spalte: 'vom Gehalt', reihe: 'lohn' },
     einnahmen: { wert: summe(ein) / 12, knopf: 'Ø alle Einnahmen', name: 'Ø Einnahmen', zeit: `${spanne}, inkl. Zinsen und Erstattungen`, vom: 'von deinen Einnahmen', am: 'an deinen Einnahmen', spalte: 'der Einnahmen', reihe: 'ein' },
   });
 }
@@ -2718,17 +2763,19 @@ function lebenshaltung() {
   const monate = [];
   for (let i = 0; i < 12 && mkey(y, m) >= D.von.slice(0, 7); i++) { monate.unshift(mkey(y, m)); if (--m === 0) { m = 12; y--; } }
   const idx = new Map(monate.map((k, i) => [k, i])), werte = monate.map(() => 0), fx = fixIds();
-  const kat = new Map();
+  const kat = new Map(), katVm = new Map(), letzt = monate.length - 1;   // katVm: je Kategorie der letzte Monat (Vormonat)
   let spar = 0;
   for (const r of D.rows) {
     const i = idx.get(r.d.slice(0, 7));
     if (i == null || istGemeinsam(r.k)) continue;
-    if (r.art === 'Ausgabe' && !fx.has(r.i)) { werte[i] -= r.c; const k = r.kat || 'Sonstiges'; kat.set(k, (kat.get(k) || 0) - r.c); }
+    if (r.art === 'Ausgabe' && !fx.has(r.i)) { werte[i] -= r.c; const k = r.kat || 'Sonstiges'; kat.set(k, (kat.get(k) || 0) - r.c); if (i === letzt) katVm.set(k, (katVm.get(k) || 0) - r.c); }
     else if (r.art === 'Sparen') spar -= r.c;
   }
   const n = monate.length || 1;
   const kats = [...kat].map(([k, c]) => ({ kat: k, c: c / n })).filter((x) => x.c > 0).sort((a, b) => b.c - a.c);
-  return (D.leben = { monate, werte, kats, schnitt: werte.reduce((s, x) => s + x, 0) / n, typisch: werte.length ? median(werte) : 0, spar: spar / n });
+  // Vormonat je Kategorie (c), daneben der Ø 12 Monate (o) als Vergleich
+  const katsVm = [...kat].map(([k, c]) => ({ kat: k, c: katVm.get(k) || 0, o: c / n })).filter((x) => x.c > 0 || x.o > 0).sort((a, b) => b.c - a.c || b.o - a.o);
+  return (D.leben = { monate, werte, kats, katsVm, schnitt: werte.reduce((s, x) => s + x, 0) / n, typisch: werte.length ? median(werte) : 0, spar: spar / n });
 }
 let lebenWahl = (() => { try { return localStorage.getItem('fd.leben2') || 'vormonat'; } catch { return 'vormonat'; } })();
 // Lebenshaltung so, wie sie im Reiter Fixkosten gewählt ist (Ø 12 Monate, typischer Monat oder eigener Wert)
@@ -2793,7 +2840,8 @@ function tabFixkosten() {
   const liste = fixSichtbar(alle);
   // Gehalt, sonstige Einnahmen und Lebenshaltung gibt es nur für alle Konten. Die Rechnung „was bleibt“ (Satz, Balken,
   // „Was wäre wenn“) nimmt deshalb immer die Verträge aller Konten (R.fix); die Kontenauswahl wirkt auf die Vertragsliste.
-  const pm = aktiv.reduce((s, f) => s + f.proMonat, 0), G = R.gehalt, L = R.leben, E = G + R.sonst, rest = E - R.fix - L;
+  // was bleibt: aus den gezeigten, auf Euro gerundeten Teilen – wie im Cockpit und im Geldfluss
+  const pm = aktiv.reduce((s, f) => s + f.proMonat, 0), G = R.gehalt, L = R.leben, E = G + R.sonst, rest = [G, R.sonst, -R.fix, -L].reduce((t, c) => t + Math.round(c / 100) * 100, 0);
   const pct = (v) => pzVon(v, G);
   // Gruppen je Art, sortiert nach laufender Summe
   const nachArt = (vs) => {
@@ -2872,7 +2920,7 @@ function fixJahrHtml(aktiv) {
   // ohne Verträge, bei denen an denselben Empfänger weiter gezahlt wird (umgestellt, nicht beendet – z. B. Unterhalt je Kind statt gesamt)
   const laufendAn = new Set(aktiv.map((f) => empfaengerKey(f.name)));
   const weg = fixkostenErkennen().filter((f) => !f.aktiv && !f.gemeinsam && f.zuletzt >= seit && !laufendAn.has(empfaengerKey(f.name))).sort((a, b) => b.proMonat - a.proMonat);
-  const beendet = weg.length ? `<div class="s5-teil fuell-aus" data-fuell="3"><h3>In den letzten 12 Monaten beendet</h3><div class="nt">${weg.map((f, i) => `<button class="nt-z bw-z${i ? ' fuell-aus' : ''}"${i ? ` data-fuell="${3 + i}" data-stopp` : ''} data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="Anklicken: alle Zahlungen"><span class="nt-n">${esc(vertragName(f))} <small>bis ${dde(f.zuletzt).slice(3)}</small></span><b>${eur0(f.proMonat)}/Monat</b></button>`).join('')}</div></div>` : '';
+  const beendet = weg.length ? `<div class="s5-teil fuell-aus" data-fuell="3"><h3>In den letzten 12 Monaten beendet</h3><div class="nt">${weg.map((f, i) => `<button class="nt-z bw-z${i ? ' fuell-aus' : ''}"${i ? ` data-fuell="${3 + i}" data-stopp` : ''} data-fix="${esc(vertragsKey(f))}" title="Anklicken: alle Zahlungen"><span class="nt-n">${esc(vertragName(f))} <small>bis ${dde(f.zuletzt).slice(3)}</small></span><b>${eur0(f.proMonat)}/Monat</b></button>`).join('')}</div></div>` : '';
   return saeulen + fakten + beendet;
 }
 const fvId = (art) => `fv-${norm(art).replace(/[^a-z]+/g, '-')}`;
@@ -2892,7 +2940,7 @@ function fixVertraegeAnsicht(o) {
       const titel = fixTitel(f, g.art), vt = verlaufText(f), n = naechsteAbbuchung(f);
       const rhythmus = `${f.rh.name} ${e2(f.betrag)}`, wann = f.aktiv ? (n ? (n <= D.bis ? `fällig seit ${dde(n).slice(0, 6)}, noch nicht gebucht` : `nächste ${dde(n).slice(0, 6)}`) : '') : `beendet ${dde(f.zuletzt).slice(3)}`;
       const unter = [titel !== f.name ? f.name : '', vt].filter(Boolean).map(esc).join(' · ');
-      return `<button class="vg-z${f.aktiv ? '' : ' beendet'}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}" title="${esc(vertragName(f))} – alle Zahlungen anzeigen">
+      return `<button class="vg-z${f.aktiv ? '' : ' beendet'}" data-fix="${esc(vertragsKey(f))}" title="${esc(vertragName(f))} – alle Zahlungen anzeigen">
         <span class="vg-zn">${esc(titel)}${unter ? `<small>${unter}</small>` : ''}<small class="vg-mobil">${esc([rhythmus, wann].filter(Boolean).join(' · '))}</small></span>
         <span class="vg-zr">${esc(rhythmus)}${wann ? `<small>${esc(wann)}</small>` : ''}</span>
         <b class="vg-zw">${f.aktiv ? eur0(f.proMonat) : '–'}</b><span class="vg-zp">${f.aktiv ? pct(f.proMonat) : ''}</span></button>`;
@@ -2923,6 +2971,21 @@ function fixVertraegeAnsicht(o) {
 function lebenKarte(R) {
   const lh = R.lh;
   if (!lh.monate.length) return '';
+  // Grundlage Vormonat: Kopfwert und Zeilen aus dem Vormonat (derselbe Wert wie im normalen Monat), Ø 12 Monate daneben
+  if (lebenWahl === 'vormonat') {
+    const vm = lh.monate.at(-1), wert = lh.werte.at(-1), kurz = MONAT[+vm.slice(5) - 1];
+    const zielVm = (kat) => zuBuchungen({ art: 'aus', nf: '1', ...monatZiel(vm), ...(kat ? { kat } : {}) });
+    const l = lh.katsVm, top = l.slice(0, 7), rest = l.slice(7), rC = rest.reduce((t, k) => t + k.c, 0), rO = rest.reduce((t, k) => t + k.o, 0);
+    // gezeigte Euro-Werte so gerundet, dass die Zeilen die Summe ergeben (Vormonat und Ø je für sich)
+    const cs = [...top.map((k) => k.c), ...(rest.length ? [rC] : [])], os = [...top.map((k) => k.o), ...(rest.length ? [rO] : [])], cZ = rundeTeile(cs), oZ = rundeTeile(os);
+    const zeile = (i, n, c, o, ziel, sub = '') => ({ n, sub, c, w: c > 0 ? eur0(cZ[i]) : '–', marke: o > 0 ? o : null, p: o > 0 ? `Ø ${eur0(oZ[i])}` : '–', farbe: 'var(--variabel)', ziel });
+    const liste = balkenListe([...top.map((k, i) => zeile(i, esc(schoen(k.kat)), k.c, k.o, zielVm(k.kat))),
+      ...(rest.length ? [zeile(top.length, `Übrige (${rest.length})`, rC, rO, zielVm(''), rest.slice(0, 3).map((k) => esc(schoen(k.kat))).join(', '))] : []),
+      { n: '<b>Summe</b>', c: 0, w: `<b>${eur0(wert)}</b>`, p: `<b>Ø ${eur0(lh.schnitt)}</b>`, cls: 'bl-summe' }],
+      { max: Math.max(1, ...top.map((k) => Math.max(k.c, k.o)), rC, rO), kopf: ['Kategorie', kurz, 'Ø 12 Mon.'] });
+    return karte5('Lebenshaltung', `Wofür das übrige Geld geht: Vormonat ${esc(monLang(vm))}, ohne Verträge · daneben Ø 12 Monate ${esc(monatsText(lh.monate))} · anklicken: genau diese Buchungen`,
+      liste + RUNDUNG, '', zl(`<span class="s5-wert">${eur0(wert)}</span>`, zielVm('')), 'fix-leben');
+  }
   const zr = `${lh.monate[0]}_${lh.monate[lh.monate.length - 1]}`;
   const ziel = (kat) => zuBuchungen({ art: 'aus', zr, nf: '1', ...(kat ? { kat } : {}) });
   const top = lh.kats.slice(0, 7), rest = lh.kats.slice(7), restC = rest.reduce((t, k) => t + k.c, 0);
@@ -2990,7 +3053,7 @@ function zahlungskalenderHtml(lauf) {
       if (x.mon) inhalt += kreis(`mon${vorbei ? ' vorbei' : ''}`, d, x.mon, `${d}. ${MONAT[+m.k.slice(5) - 1]}: ${eur0(x.mon)}${vorbei ? (!offen ? ' (schon abgebucht)' : x.fs.every((f) => ausstehend(f)) ? ' (noch nicht gebucht)' : ' (teils noch nicht gebucht)') : ''}\n${x.fs.map((f) => `${vertragName(f)}: ${EUR.format(f.betrag / 100)}${vorbei && ausstehend(f) ? ' – noch nicht gebucht' : ''}`).join('\n')}`);
       for (const f of x.extra) {
         inhalt += kreis('extra', d, f.betrag, `${d}. ${MONAT[+m.k.slice(5) - 1]}: ${vertragName(f)} ${EUR.format(f.betrag / 100)} (${f.rh.name})`);
-        inhalt += `<span class="zk-l${d > 18 ? ' links' : ''}" role="button" tabindex="0" style="left:${pos(d)}" data-fix="${esc(f.name)}" data-sig="${esc(f.sig)}">${esc(vertragName(f))} <b>${eur0(f.betrag)}</b></span>`;
+        inhalt += `<span class="zk-l${d > 18 ? ' links' : ''}" role="button" tabindex="0" style="left:${pos(d)}" data-fix="${esc(vertragsKey(f))}">${esc(vertragName(f))} <b>${eur0(f.betrag)}</b></span>`;
       }
     }
     if (gt && lohn) inhalt += kreis('lohn', gt, lohn, `Gehalt um den ${gt}.: ≈ ${eur0(lohn)} (zuletzt ${lohnText})`);
@@ -3242,7 +3305,7 @@ function vorschlagNehmen(i) {
 // Knopf „Zurück“ führen zur vorherigen Ansicht. Beim Tippen zählt ein ganzes Suchwort als ein Schritt.
 let tippt = false;
 let stufe = 0;   // eigene Schritte im Browser-Verlauf
-const ZUSTAND = ['q', 'jahr', 'monat', 'konto', 'kat', 'ukat', 'art', 'umb', 'tab', 'stichtag', 'wahl', 'kart', 'fixtab', 'zr', 'nf', 'neu', 'sjahr', 'sfilter', 'sabf', 'gmonat', 'gbasis', 'gtjahr'];
+const ZUSTAND = ['q', 'jahr', 'monat', 'konto', 'kat', 'ukat', 'art', 'umb', 'tab', 'stichtag', 'wahl', 'kart', 'fixtab', 'zr', 'nf', 'neu', 'vertrag', 'sjahr', 'sfilter', 'sabf', 'gmonat', 'gbasis', 'gtjahr'];
 const zustand = (x) => JSON.stringify(ZUSTAND.map((k) => x[k]));
 
 function setze(p, { tippen = false } = {}) {
@@ -3295,7 +3358,7 @@ function schnellSuche() {
 
 function hashSchreiben(hist = 'ersetzen') {
   const p = new URLSearchParams();
-  for (const k of ['q', 'jahr', 'monat', 'zr', 'nf', 'neu', 'konto', 'kat', 'ukat', 'stichtag', 'wahl', 'sjahr', 'sfilter', 'sabf', 'gmonat', 'gbasis', 'gtjahr']) if (S[k]) p.set(k, S[k]);
+  for (const k of ['q', 'jahr', 'monat', 'zr', 'nf', 'neu', 'vertrag', 'konto', 'kat', 'ukat', 'stichtag', 'wahl', 'sjahr', 'sfilter', 'sabf', 'gmonat', 'gbasis', 'gtjahr']) if (S[k]) p.set(k, S[k]);
   if (S.kart !== 'aus') p.set('kart', S.kart);
   if (S.fixtab !== 'vertraege') p.set('fixtab', S.fixtab);
   if (S.art !== 'alle') p.set('art', S.art);
@@ -3335,6 +3398,7 @@ function hashLesen() {
   if (/^\d{4}-\d{2}_\d{4}-\d{2}$/.test(p.get('zr') || '')) S.zr = p.get('zr');
   if (p.get('nf') === '1') S.nf = '1';
   if (p.get('neu') === '1') S.neu = '1';
+  if (p.get('vertrag')) S.vertrag = p.get('vertrag');
   if (['aus', 'ein'].includes(p.get('art'))) S.art = p.get('art');
   S.umb = p.get('umb') === '1';
   if (/^\d{4}$/.test(p.get('sjahr') || '')) S.sjahr = p.get('sjahr');

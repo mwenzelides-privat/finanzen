@@ -175,7 +175,7 @@ export function gehaltZeigen(el, helfer) {
   const jahrDet = jahrIst.filter(detail);
   const vorsorge = detail(z) ? 2 * (z.rv || 0) + (z.bav_an || 0) + (z.bav_ag || 0) : null;
   const kacheln2 = detail(z) ? [
-    H.zahl5('Netto vom Brutto', pz((z.brutto - abgaben(z)) / z.brutto, 1), `${e0(z.brutto - abgaben(z))} von ${e0(z.brutto)} bleiben nach Steuern und Sozialabgaben`, { cls: 'pos', springe: '#ge-jahrtab' }),
+    H.zahl5('Nach Abgaben', pz((z.brutto - abgaben(z)) / z.brutto, 1), `${e0(z.brutto - abgaben(z))} von ${e0(z.brutto)} bleiben nach Steuern und Sozialabgaben`, { cls: 'pos', springe: '#ge-jahrtab' }),
     H.zahl5('Abgaben', pz(abgaben(z) / z.brutto, 1), `${e0(abgaben(z))}: Lohnsteuer und Soli ${e0(steuer(z))} · Sozialversicherung ${e0(sozial(z))}`, { cls: 'neg', springe: '#ge-quote' }),
     H.zahl5(`Lohnsteuer ${j}`, e0(sum(jahrDet, steuer)), `bis ${H.MONAT[+jahrDet.at(-1).m.slice(5) - 1]}, im Schnitt ${pz(sum(jahrDet, steuer) / Math.max(1, sum(jahrDet, (x) => x.brutto)), 1)} vom Brutto`, { springe: '#ge-quote' }),
     H.zahl5('Für die Rente im Monat', e0(vorsorge), `gesetzlich ${e0(2 * (z.rv || 0))} (mit Arbeitgeberanteil)${z.bav_an || z.bav_ag ? ` · Betriebsrente ${e0((z.bav_an || 0) + (z.bav_ag || 0))}` : ''}`, { springe: '#ge-rente' }),
@@ -339,7 +339,8 @@ function bavKarte(G, z) {
 // anteilig wie der Satz (0,5 % → Hälfte, 0,25 % → Viertel). Kosten für dich = Vorteil × Grenzsteuersatz.
 const SAETZE = [[1, '1 %', 'Verbrenner'], [0.5, '0,5 %', 'Hybrid / E-Auto über 100.000 €'], [0.25, '0,25 %', 'E-Auto bis 100.000 €']];
 function autoWerte(G, z) {
-  const satzStd = H.D.j.gehalt?.dienstwagen?.satz_prozent ?? 1;
+  // Satz des Wagens im Monat der Abrechnung: letzte bekannte Änderung bis dahin (wie in zukunftKarte), sonst der heutige Wagen
+  const Z = H.D.j.gehalt?.zukunft || [], satzStd = Z.filter((x) => x.ab <= z.m && x.satz_prozent != null).at(-1)?.satz_prozent ?? H.D.j.gehalt?.dienstwagen?.satz_prozent ?? 1;
   const preisAbr = z.privatfahrten ? z.privatfahrten / (satzStd / 100) : null;
   const kmAbr = preisAbr ? z.whg_arbeit / (0.0003 * (satzStd / 1) * preisAbr) : null;
   const a = { satz: auto_?.satz ?? satzStd, preis: auto_?.preis ?? Math.round(preisAbr || 50000), km: auto_?.km ?? Math.round(kmAbr || 0) };
@@ -1012,13 +1013,13 @@ export function gehaltUeberblick(helfer) {
   const G = daten();
   if (!G) return null;
   const z = G.pdf.at(-1) || G.ist.at(-1), vm = G.ist[G.ist.indexOf(z) - 1] || null, erste = G.ist[0];
-  const stufe = [...G.erh].reverse().find((x) => x.m <= z.m)?.auf ?? erste.gehalt;
+  const stufeAm = (m) => [...G.erh].reverse().find((x) => x.m <= m)?.auf ?? erste.gehalt, stufe = stufeAm(z.m);
   const W = auto(z) ? autoWerte(G, z) : null;
   const j = z.m.slice(0, 4), jahrAlle = G.alle.filter((x) => x.m.slice(0, 4) === j && x.quelle !== 'fehlt'), jahrIst = jahrAlle.filter((x) => x.quelle !== 'plan');
   return { z, vm, erste, stufe, seit: erste.gehalt ? stufe / erste.gehalt - 1 : 0, verlauf: G.ist.slice(-24).map((x) => ({ m: x.m, netto: x.auszahlung, gehalt: x.gehalt, brutto: x.brutto })),
-    alle: G.ist.map((x) => ({ m: x.m, gehalt: x.gehalt })), erh: G.erh.filter((x) => !x.plan),
+    alle: G.ist.map((x) => ({ m: x.m, gehalt: x.gehalt, stufe: stufeAm(x.m) })), erh: G.erh.filter((x) => !x.plan),
     teile: detail(z) ? { brutto: z.brutto, steuer: steuer(z), sozial: sozial(z), auto: auto(z), bav: z.bav_an || 0, auszahlung: z.auszahlung } : null,
-    abgaben: detail(z) ? abgaben(z) : null, auto: W ? { vorteil: W.jetzt, netto: W.jetzt * W.gs, gs: W.gs } : null,
+    abgaben: detail(z) ? abgaben(z) : null, auto: W ? { vorteil: autoTeile(z).lfd, netto: autoTeile(z).lfd * W.gs, gs: W.gs, m: z.m } : null,
     jahr: j, jahrNetto: sum(jahrAlle, (x) => x.auszahlung), jahrBrutto: sum(jahrAlle, (x) => x.brutto), jahrPlan: jahrAlle.length > jahrIst.length, nIst: jahrIst.length, fehlt: G.fehlt.map((x) => x.m) };
 }
 

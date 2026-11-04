@@ -9,12 +9,17 @@
 //   nicht_eroeffnet – Konto gab es am Stichtag noch nicht (0 €)
 //   unbekannt       – Stichtag liegt vor Beginn der Daten eines Kontos, das schon vorher Geld hatte
 //   geschlossen     – Konto hatte zum Stichtag schon keine Buchungen mehr (siehe zu())
+//   ruhend          – keine Buchungen mehr, aber der letzte Bank-Kontostand (ab der letzten Buchung) ist ≠ 0: zählt mit diesem Stand
 export function kontostaende(D, datum) {
   return D.konten.map((k, i) => {
     const rs = D.proKonto[i];
     const summe = (von, bis) => rs.reduce((s, r) => (r.d > von && r.d <= bis ? s + r.c : s), 0);
     const istZu = zu(D, i);
-    if (istZu && datum > k.bis) return { k, i, c: null, status: 'geschlossen' };
+    if (istZu && datum > k.bis) {
+      // die Bank meldete nach der letzten Buchung noch einen Stand ≠ 0: das Konto ruht nur, sein Guthaben zählt weiter
+      if (k.saldo != null && k.saldoAm >= k.bis && Math.round(k.saldo * 100) !== 0) return { k, i, c: Math.round(k.saldo * 100), status: 'ruhend', seit: k.saldoAm };
+      return { k, i, c: null, status: 'geschlossen' };
+    }
     if (datum < k.von) {
       if (k.saldo == null || k.vollstaendig) return { k, i, c: 0, status: 'nicht_eroeffnet' };
       return { k, i, c: null, status: 'unbekannt' };
@@ -86,5 +91,6 @@ export const STATUS_TEXT = {
   geschaetzt: 'geschätzt: kein Bank-Kontostand bekannt, ab 0 € aufsummiert',
   nicht_eroeffnet: 'Konto noch nicht eröffnet',
   geschlossen: 'Konto zum Stichtag nicht mehr in Gebrauch',
+  ruhend: 'ruhend: letzter Bank-Kontostand, seitdem keine Buchungen',
   unbekannt: 'unbekannt: Stichtag liegt vor Beginn der Daten dieses Kontos',
 };

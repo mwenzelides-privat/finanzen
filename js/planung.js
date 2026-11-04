@@ -1,4 +1,4 @@
-// Planung: ehrlichere Prognose (Plan-Gehalt aus den Abrechnungen, Saisonprofil der Lebenshaltung) und dein
+// Planung: ehrlichere Prognose (Plan-Gehalt aus den Abrechnungen; das Saisonprofil wird nicht eingerechnet) und dein
 // Ausgabenrahmen für die frei gestaltbaren Kategorien. Keine Imports – alle Helfer kommen über H aus app.js.
 // Geld immer in Cent. Die Rahmenwerte trägst du selbst ein; sie bleiben nur in diesem Browser (localStorage 'fd.rahmen').
 
@@ -37,14 +37,12 @@ export function saison(H) {
   return (D._saison = { f: s > 0 ? roh.map((x) => (x * 12) / s) : Array(12).fill(1), jahre, ok: s > 0 });
 }
 
-// „2021–2025“ bei lückenlosen Jahren, sonst „2019, 2021, 2022“
-const jahrText = (j) => (j.length > 1 && j.at(-1) - j[0] === j.length - 1 ? `${j[0]}–${j.at(-1)}` : j.join(', '));
-
-// Erklärung für Grafiken mit Prognose – sagt ehrlich, was davon wirklich eingeflossen ist
+// Erklärung für Grafiken mit Prognose – sagt ehrlich, was davon wirklich eingeflossen ist. Die Lebenshaltung der
+// Prognose ist dieselbe wie im normalen Monat (ohne Saisonfaktor, Regel des Nutzers).
 export function prognoseText(H) {
-  const D = H.D(), s = saison(H), jetzt = D.bis.slice(0, 7);
+  const D = H.D(), jetzt = D.bis.slice(0, 7);
   const plan = (D.j.gehalt?.monate || []).some((z) => z.m > jetzt && z.quelle === 'plan');
-  return `berechnet: ${plan ? 'Plan-Gehalt aus den Abrechnungen' : 'aktuelles Gehalt'} + ${s.ok ? `Saisonprofil (Median ${jahrText(s.jahre)})` : 'Lebenshaltung ohne Saisonprofil (dafür fehlen 3 volle Jahre)'}`;
+  return `berechnet: ${plan ? 'Plan-Gehalt aus den Abrechnungen' : 'aktuelles Gehalt'} + Lebenshaltung wie im normalen Monat`;
 }
 
 // ======================================================================= Ausgabenrahmen

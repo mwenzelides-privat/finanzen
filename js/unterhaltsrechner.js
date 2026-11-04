@@ -128,14 +128,15 @@ export function rechnerKern(H, R, eigeneKinder) {
   const sNetto = wahl.sandra ?? S.netto, eS = r2((sNetto - (wahl.sandra == null ? S.unzumutbar || 0 : 0)) * 0.95);
   const m = D.bis.slice(0, 7), berechtigte = F?.rechner?.berechtigte || kinder.length + 1;
   const rechnen = (opt, sockel, eSx = eS) => { const b = basisEinkommen(H, F || {}, opt); return { B: b, X: berechne({ m, eM: b.e, eS: eSx, kinder, berechtigte, sockel }) }; };
-  const N = rechnen({}, wahl.sockel), P = rechnen({ ohneWhg: true, vorsorgeVoll: true }, 'notw');
+  // Für dich: der Sockel, der für dich günstiger ist (der niedrigere Sockel kann zusammen mit den anderen Argumenten mehr kosten)
+  const N = rechnen({}, wahl.sockel), Pa = rechnen({ ohneWhg: true, vorsorgeVoll: true }, 'notw'), Pb = rechnen({ ohneWhg: true, vorsorgeVoll: true }, 'angem'), P = Pa.X.summe <= Pb.X.summe ? Pa : Pb;
   const pro = wahl.sicht !== 'neutral', X = pro ? P.X : N.X;
   const letzte = (F?.berechnungen || []).filter((b) => b.ab <= m).at(-1);
   const lfd = R.monate.find((x) => x.k === R.bisM);
   const jetzt = lfd && (lfd.sum > 0 || !R.laeuft) ? lfd : R.monate.filter((x) => x.k < R.bisM).at(-1) || null;
   const vormonat = R.monate.filter((x) => x.k < R.bisM).at(-1);
   const laeuftNoch = !!jetzt && jetzt === lfd && R.laeuft && !(vormonat && lfd.sum >= vormonat.sum);
-  const nurLeo = letzte?.eM && letzte?.eS ? berechne({ m, eM: letzte.eM, eS: letzte.eS, kinder, berechtigte, sockel: 'notw' }) : null;
+  const nurLeo = letzte?.eM && letzte?.eS ? [berechne({ m, eM: letzte.eM, eS: letzte.eS, kinder, berechtigte, sockel: 'notw' }), berechne({ m, eM: letzte.eM, eS: letzte.eS, kinder, berechtigte, sockel: 'angem' })].reduce((a, b) => (b.summe < a.summe ? b : a)) : null;
   return { m, kinder, letzte, X, N: N.X, P: P.X, pro, jetzt, laeuftNoch, nurLeo, gez: jetzt ? jetzt.sum / 100 : null };
 }
 
@@ -154,12 +155,14 @@ export function rechnerKarte(H, R, eigeneKinder) {
   // Neutral: wie RA Vitti (Dienstwagen ganz als Einkommen, Altersvorsorge bis zur Höchstgrenze, Sockel nach deiner Wahl)
   const N = rechnen({}, wahl.sockel);
   // Für dich: alle vertretbaren Ansätze zu deinen Gunsten
-  const P = rechnen({ ohneWhg: true, vorsorgeVoll: true }, 'notw');
+  // (mit beiden Sockeln gerechnet, es gilt der für dich günstigere)
+  const Pa = rechnen({ ohneWhg: true, vorsorgeVoll: true }, 'notw'), Pb = rechnen({ ohneWhg: true, vorsorgeVoll: true }, 'angem'), P = Pa.X.summe <= Pb.X.summe ? Pa : Pb;
   const pro = wahl.sicht !== 'neutral', B = pro ? P.B : N.B, X = pro ? P.X : N.X;
   // Maßgeblich ist die letzte Berechnung (Familie.json); neu gerechnet wird erst, wenn die Gegenseite Auskunft verlangt
   const letzte = (F?.berechnungen || []).filter((b) => b.ab <= m).at(-1);
   // Nur Leo volljährig, sonst alles wie in der letzten Berechnung – Wirkung für dich, wenn du selbst anstoßen würdest
-  const nurLeo = letzte?.eM && letzte?.eS ? berechne({ m, eM: letzte.eM, eS: letzte.eS, kinder, berechtigte, sockel: 'notw' }) : null;
+  // (die letzte Berechnung legt keinen Sockel fest: es gilt der für dich günstigere)
+  const nurLeo = letzte?.eM && letzte?.eS ? [berechne({ m, eM: letzte.eM, eS: letzte.eS, kinder, berechtigte, sockel: 'notw' }), berechne({ m, eM: letzte.eM, eS: letzte.eS, kinder, berechtigte, sockel: 'angem' })].reduce((a, b) => (b.summe < a.summe ? b : a)) : null;
   // Wirkung jedes Arguments einzeln gegenüber der neutralen Rechnung (negativ = du zahlst weniger)
   const wirk = (r) => r2(r.X.summe - N.X.summe);
   const plus100 = rechnen({}, wahl.sockel, r2(eS + 95));
