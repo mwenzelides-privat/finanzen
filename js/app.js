@@ -2281,6 +2281,33 @@ function keineTreffer(conds) {
   return leer;
 }
 
+// Kontostände in den Buchungen: Stand der (gewählten) eigenen Konten am Ende des gewählten Zeitraums – z. B. am
+// Monatsletzten, um den Rest aufs Sparkonto zu überweisen. Ohne Zeitfilter: Datenstand. Ein anderes Datum lässt sich
+// wählen (bkTag, gilt bis „Ende des Zeitraums“). Gerechnet wie auf der Seite Konten (kontostaende, Stand am Tagesende).
+let bkTag = '';
+function zeitraumEnde() {
+  let e = D.bis;
+  const j = jahreWahl(), m = monateWahl();
+  if (S.zr) e = monatsletzter(`${S.zr.split('_')[1]}-01`);
+  else if (j.length) e = m.length ? monatsletzter(`${j.at(-1)}-${String(m.at(-1)).padStart(2, '0')}-01`) : `${j.at(-1)}-12-31`;
+  return e > D.bis ? D.bis : e;
+}
+function kontenStandKarte() {
+  const ende = zeitraumEnde(), tag = bkTag && bkTag >= D.von && bkTag <= D.bis ? bkTag : ende, ks = kontoSet();
+  const ls = kontostaende(D, tag).filter((x) => (ks ? ks.has(x.i) : !fremd(x.k)) && x.status !== 'geschlossen' && x.status !== 'nicht_eroeffnet');
+  const eig = ls.filter((x) => !fremd(x.k)), sum = summeKonten(eig);
+  const zusatz = (x) => (x.status === 'ungefaehr' ? ` <small title="${esc(STATUS_TEXT.ungefaehr)}">± ${eur0(Math.round((x.abw || 0) * 100))}</small>`
+    : x.status === 'geschaetzt' ? ' <small>geschätzt</small>' : x.status === 'ruhend' ? ' <small>ruht</small>' : fremd(x.k) ? ' <small>nicht in der Summe</small>' : '');
+  const zeilen = ls.slice().sort((a, b) => (b.c ?? -Infinity) - (a.c ?? -Infinity)).map((x) => `<div class="bks-z"><span>${esc(x.k.name)}${zusatz(x)}</span>`
+    + `<b class="${x.c < 0 ? 'neg' : ''}">${x.c == null ? `<small>${x.status === 'unbekannt' ? `Daten erst ab ${dde(x.k.von)}` : 'an dem Tag nicht berechenbar'}</small>` : eur(x.c)}</b></div>`).join('');
+  const summe = eig.length > 1 ? `<div class="bks-z bks-summe"><span>Summe deiner Konten${sum.voll ? '' : ` <small>${esc(fehltText(sum))}</small>`}</span><b class="${sum.c < 0 ? 'neg' : ''}">${summeText(sum, eur)}</b></div>` : '';
+  const wahl = `<label class="bks-wahl"><span class="muted klein">Stand am Ende des Tages</span><input type="date" id="bk-tag" value="${tag}" min="${D.von}" max="${D.bis}"></label>`
+    + (tag !== ende ? `<button class="btn sm" id="bk-tag-zurueck" title="Zurück zum Ende des gewählten Zeitraums">${ende === D.bis ? 'heute' : `Ende des Zeitraums (${dde(ende)})`}</button>` : '');
+  const titel = `Kontostände am ${dde(tag)}${tag === ende && ende !== D.bis ? ' · Ende des Zeitraums' : tag === D.bis ? ' · letzter Datenstand' : ''}`;
+  return `<div class="bks"><div class="bks-kopf"><b>${titel}</b>${wahl}</div><div class="bks-liste">${zeilen || '<p class="muted klein">Für diese Konten gibt es an dem Tag keinen Stand.</p>'}${summe}</div>
+    <p class="muted klein">Stand nach allen Buchungen dieses Tages · gerechnet vom letzten Bank-Kontostand${ks ? '' : ' · ohne Kinder- und gemeinsame Konten'} · Monatsende: im Filter den Monat wählen</p></div>`;
+}
+
 // Buchungen: oben die Treffer in Zahlen und eine kleine Monatsgrafik, darunter die Liste – nach Datum je Tag gruppiert
 // (mit Tagessumme), nach Betrag oder Empfänger als einfache Liste. Zeile anklicken: Einzelheiten.
 let buchGrafik = null;
@@ -2331,6 +2358,15 @@ function tabBuchungen(conds) {
   const gruppiert = S.sort === 'datum', zeig = rows.slice(0, limit), anzahl = new Map();
   for (const r of rows) anzahl.set(r.d, (anzahl.get(r.d) || 0) + 1);
   const datum = (d) => `${WTAG[new Date(`${d}T12:00:00Z`).getUTCDay()]} ${dde(d).slice(0, 6)}${d.slice(2, 4)}`;
+  // Kontostand am Tagesende: bei der letzten angezeigten Buchung eines Kontos an diesem Tag (nur nach Datum sortiert)
+  const standTag = new Map(), standAm = (d) => { if (!standTag.has(d)) standTag.set(d, kontostaende(D, d)); return standTag.get(d); };
+  const letzteJeKonto = new Set();
+  if (gruppiert) { const gesehen = new Set(); for (const r of [...zeig].reverse()) { const key = `${r.d}|${r.k}`; if (!gesehen.has(key)) { gesehen.add(key); letzteJeKonto.add(r); } } }
+  const standHtml = (r) => {
+    if (!letzteJeKonto.has(r)) return '';
+    const x = standAm(r.d)[r.k];
+    return x?.c == null ? '' : `<small class="bz-stand" title="Kontostand von ${esc(D.konten[r.k].name)} am Ende dieses Tages">Stand ${x.status === 'ungefaehr' || x.status === 'geschaetzt' ? '≈ ' : ''}${eur(x.c)}</small>`;
+  };
   let h = '';
   zeig.forEach((r, i) => {
     const erster = !gruppiert || i === 0 || zeig[i - 1].d !== r.d, letzter = i === zeig.length - 1 || zeig[i + 1].d !== r.d;
@@ -2339,7 +2375,7 @@ function tabBuchungen(conds) {
       <span class="bz-d">${erster ? datum(r.d) : ''}</span>
       <span class="bz-n"><b>${mk(r.g || r.z || '–')}</b>${r.g && r.z ? `<small>${mk(r.z)}</small>` : ''}${sicher(() => chip(r))}</span>
       <span class="bz-k"><span>${esc(schoen(r.kat))}</span><small>${esc(schoen(r.ukat))}${r.ukat ? ' · ' : ''}${esc(kn(r))}</small></span>
-      <b class="bz-b ${cls(r.c)}">${eur(r.c)}</b></div>`;
+      <b class="bz-b ${cls(r.c)}">${eur(r.c)}${standHtml(r)}</b></div>`;
     if (auf) h += buchDetail(r);
     if (gruppiert && letzter && anzahl.get(r.d) > 1) h += `<div class="bz-tagsumme">${anzahl.get(r.d)} Buchungen am ${dde(r.d).slice(0, 6)} · zusammen <b class="${cls(tag.get(r.d))}">${eur(tag.get(r.d))}</b></div>`;
   });
@@ -2347,6 +2383,7 @@ function tabBuchungen(conds) {
   if (rows.length > limit) fuss += `<div class="mehr">${NUM.format(limit)} von ${NUM.format(rows.length)} angezeigt <button class="btn sm" id="mehr">Weitere ${NUM.format(Math.min(500, rows.length - limit))} anzeigen</button></div>`;
   return `<div class="bt cp bx bk">${bxKopf('Buchungen', bkKern, 'Suche und Filter oben · Zeile anklicken: Einzelheiten · Säule anklicken: nur dieser Zeitraum')}
     <div class="cp-kz bt-zahlen">${zahlen}</div>
+    ${sicher(kontenStandKarte) || ''}
     ${buchGrafik ? `<div class="bt-grafik"><div class="bt-g-t"><b>Je ${buchGrafik.jahre ? 'Jahr' : 'Monat'}</b><span class="muted klein">Ausgaben orange, Einnahmen grün${nExtra ? ' (ohne Sparen/Umbuchungen)' : ''} · Säule anklicken: nur ${buchGrafik.jahre ? 'dieses Jahr' : 'dieser Monat'}</span></div><div class="s5-chart bt-chart"><canvas id="c-buch"></canvas></div></div>` : ''}
     ${sicher(() => neuLeiste(H))}
     <div class="bt-leiste"><span class="muted klein">${gruppiert ? 'Nach Datum, bei mehreren Buchungen am Tag mit Tagessumme' : S.sort === 'betrag' ? 'Nach Betrag sortiert' : 'Nach Empfänger sortiert'} · Zeile anklicken: Einzelheiten</span>${sortKnoepfe}</div>
@@ -2498,6 +2535,8 @@ function tabelle(conds) {
   el.querySelectorAll('[data-weiter]').forEach((b) => b.onclick = () => setze(JSON.parse(b.dataset.weiter)));
   detailKnoepfe(el);
   $('#mehr')?.addEventListener('click', () => { limit += 500; tabelle(conds); });
+  $('#bk-tag')?.addEventListener('change', (e) => { const v = e.target.value; if (/^\d{4}-\d{2}-\d{2}$/.test(v)) { bkTag = v; tabelle(conds); } });
+  $('#bk-tag-zurueck')?.addEventListener('click', () => { bkTag = ''; tabelle(conds); });
   el.querySelectorAll('[data-fixansicht]').forEach((b) => b.onclick = () => { fixAnsicht = b.dataset.fixansicht; tabelle(conds); $('#btn-reset').hidden = !abweichend(); });
   el.querySelector('.fix-grundlage')?.addEventListener('toggle', (e) => { fixGrundlageAuf = e.target.open; });
   el.querySelectorAll('[data-leben]').forEach((b) => b.onclick = () => {
