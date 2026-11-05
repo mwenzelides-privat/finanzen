@@ -749,3 +749,6 @@ i.cv-offen { background: var(--surface-2); border: 1px solid var(--border-strong
 .bks-z > b { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .bks-summe { grid-column: 1 / -1; border-bottom: 0; font-weight: 650; }
 .bz-stand { display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
+
+/* Cockpit: Karte „Aus den anderen Bereichen“ läuft nie über ihren Rand (überzählige Zeilen blendet cpBerPassen aus) */
+.cp-reihe-d > .cp-bk { min-height: 0; overflow: hidden; }

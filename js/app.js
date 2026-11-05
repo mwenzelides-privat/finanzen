@@ -1061,7 +1061,20 @@ function cockpitSeite() {
   if (cpWaechterAuf) sicher(() => waechterBinden(box, H));
   box.querySelector('[data-cp-waechter]')?.addEventListener('click', () => { cpWaechterAuf = !cpWaechterAuf; cockpitSeite(); if (cpWaechterAuf) springe('#cp-waechter'); });
   sicher(() => cpMonateZeichnen(V.monate));
+  cpBerPassen();
 }
+// „Aus den anderen Bereichen“: Die Kartenhöhe gibt das Raster vor (Cockpit füllt den Bildschirm) – so viele Zeilen zeigen,
+// wie hineinpassen (Reihenfolge = Wichtigkeit), statt unten aus der Karte zu laufen. Bei Fenstergröße neu.
+function cpBerPassen() {
+  const k = document.querySelector('.cp-bk');
+  if (!k) return;
+  const z = [...k.querySelectorAll('.cp-ber-z')];
+  z.forEach((e) => e.classList.remove('fuell-aus'));
+  const unten = k.getBoundingClientRect().bottom - parseFloat(getComputedStyle(k).paddingBottom || 0);
+  for (let i = z.length - 1; i > 0 && z[i].getBoundingClientRect().bottom > unten + 0.5; i--) z[i].classList.add('fuell-aus');
+}
+let cpBerT;
+addEventListener('resize', () => { clearTimeout(cpBerT); cpBerT = setTimeout(cpBerPassen, 120); });
 
 // Feste Abbuchungen je Tag (30 Tage ab dem Datenstand; fällige, noch nicht gebuchte am ersten Tag) und das erwartete Gehalt
 function cpAbbZeichnen(l, g) {
