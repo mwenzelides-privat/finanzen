@@ -109,7 +109,7 @@ function vertragIds(key) {
   return D.vIds.get(key);
 }
 // Buchungen genau einer ohne Tag erkannten Reise (Schlüssel = key der Reisekarte) – dieselben, die die Karte zählt
-const reiseKarte = (key) => (sicher(() => reisen(H ??= modulHelfer()))?.karten || []).find((x) => x.key === key);
+const reiseKarte = (key) => (sicher(() => reisen(H ??= modulHelfer()))?.karten || []).find((x) => x.rk === key);
 function reiseIds(key) {
   if (!D.rIds) D.rIds = new Map();
   if (!D.rIds.has(key)) D.rIds.set(key, new Set(reiseKarte(key)?.ids || []));
