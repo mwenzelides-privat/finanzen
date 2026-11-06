@@ -1018,9 +1018,13 @@ function cockpitSeite() {
   for (const f of R.vertraege) { const art = fixArt(f), x = arten.get(art) || arten.set(art, { art, c: 0, n: 0 }).get(art); x.c += f.proMonat; x.n++; }
   const al = [...arten.values()].sort((a1, b1) => b1.c - a1.c), alR = al.length > 6 ? al.slice(5) : [], alRc = alR.reduce((t, x) => t + x.c, 0), zuFix = { tab: 'fix', fixtab: 'vertraege', konto: '' };
   const pzG = (c) => (R.gehalt ? `${((c / R.gehalt) * 100).toLocaleString('de-DE', { maximumFractionDigits: 0 })} %` : '');
-  const fixL = balkenListe([...al.slice(0, alR.length ? 5 : 6).map((x) => ({ n: FIX_KURZ[x.art] || esc(x.art), c: x.c, p: pzG(x.c), ziel: zuFix, farbe: 'var(--fest)', tip: `${x.art}: ${eur0(x.c)} im Monat · ${x.n} ${x.n === 1 ? 'Vertrag' : 'Verträge'}` })),
-    ...(alR.length ? [{ n: `${alR.length} weitere Arten`, tip: alR.map((x) => `${x.art} ${eur0(x.c)}`).join(', '), c: alRc, p: pzG(alRc), ziel: zuFix, farbe: 'var(--fest)' }] : []),
-    { n: '<b>Summe</b>', c: 0, w: `<b>${eur0(R.fix)}</b>`, p: `<b>${pzG(R.fix)}</b>`, cls: 'bl-summe' }], { max: Math.max(1, ...al.map((x) => x.c), alRc), kopf: ['Art', 'im Monat', 'vom Gehalt'] });
+  // Euro und Anteile nach dem größten Rest gerundet: die gezeigten Teile ergeben genau die gezeigte Summe (27 + 16 + … = 67 %)
+  const alZ = al.slice(0, alR.length ? 5 : 6), teile = [...alZ.map((x) => x.c), ...(alR.length ? [alRc] : [])];
+  const eurT = rundeTeile(teile), pzT = R.gehalt ? rundeTeile(teile.map((c) => (c / R.gehalt) * 10000)).map((x) => x / 100) : null;
+  const pzW = (i) => (pzT ? `${pzT[i]} %` : ''), pzSumme = pzT ? `${pzT.reduce((t, x) => t + x, 0)} %` : '';
+  const fixL = balkenListe([...alZ.map((x, i) => ({ n: FIX_KURZ[x.art] || esc(x.art), c: x.c, w: eur0(eurT[i]), p: pzW(i), ziel: zuFix, farbe: 'var(--fest)', tip: `${x.art}: ${eur0(x.c)} im Monat · ${x.n} ${x.n === 1 ? 'Vertrag' : 'Verträge'}` })),
+    ...(alR.length ? [{ n: `${alR.length} weitere Arten`, tip: alR.map((x) => `${x.art} ${eur0(x.c)}`).join(', '), c: alRc, w: eur0(eurT.at(-1)), p: pzW(teile.length - 1), ziel: zuFix, farbe: 'var(--fest)' }] : []),
+    { n: '<b>Summe</b>', c: 0, w: `<b>${eur0(eurT.reduce((t, x) => t + x, 0))}</b>`, p: `<b>${pzSumme}</b>`, cls: 'bl-summe' }], { max: Math.max(1, ...al.map((x) => x.c), alRc), kopf: ['Art', 'im Monat', 'vom Gehalt'] });
   const ber = [];
   const gU = sicher(() => gehaltUeberblick(gehaltHelfer())) || null;
   if (gU?.z) ber.push({ t: `Gehalt aufs Konto ${MONAT[+gU.z.m.slice(5) - 1]}`, sub: `Grundgehalt ${eurE0(gU.stufe)} brutto${gU.auto ? ` · Dienstwagen kostet ${eurE0(gU.auto.netto)} netto` : ''}`, w: eurE0(gU.z.auszahlung), ziel: { tab: 'einkommen' } });
