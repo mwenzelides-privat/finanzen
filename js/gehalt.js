@@ -1022,7 +1022,13 @@ export function gehaltUeberblick(helfer) {
     arbeitgeber: G.ist.reduce((l, x) => { const n = String(x.arbeitgeber || '').trim() || 'unbekannt', z = l.at(-1); if (z && z.name === n) z.bis = x.m; else l.push({ name: n, von: x.m, bis: x.m }); return l; }, []),
     teile: detail(z) ? { brutto: z.brutto, steuer: steuer(z), sozial: sozial(z), auto: auto(z), bav: z.bav_an || 0, auszahlung: z.auszahlung } : null,
     abgaben: detail(z) ? abgaben(z) : null, auto: W ? { vorteil: autoTeile(z).lfd, netto: autoTeile(z).lfd * W.gs, gs: W.gs, m: z.m } : null,
-    jahr: j, jahrNetto: sum(jahrAlle, (x) => x.auszahlung), jahrBrutto: sum(jahrAlle, (x) => x.brutto), jahrPlan: jahrAlle.length > jahrIst.length, nIst: jahrIst.length, fehlt: G.fehlt.map((x) => x.m) };
+    jahr: j, jahrNetto: sum(jahrAlle, (x) => x.auszahlung), jahrBrutto: sum(jahrAlle, (x) => x.brutto), jahrPlan: jahrAlle.length > jahrIst.length, nIst: jahrIst.length, fehlt: G.fehlt.map((x) => x.m),
+    // Jahreseinkommen je Jahr (wie „Gehalt im Jahr“): abgerechnet und laut Plan getrennt, fehlende Abrechnungen gezählt
+    jahre: [...new Set(G.alle.map((x) => x.m.slice(0, 4)))].sort().map((jj) => {
+      const ms = G.alle.filter((x) => x.m.slice(0, 4) === jj), ist = ms.filter((x) => x.quelle !== 'plan' && x.quelle !== 'fehlt'), plan = ms.filter((x) => x.quelle === 'plan');
+      return { j: jj, brutto: sum(ist, (x) => x.brutto), netto: sum(ist, (x) => x.auszahlung), bruttoPlan: sum(plan, (x) => x.brutto), nettoPlan: sum(plan, (x) => x.auszahlung),
+        nIst: ist.length, nPlan: plan.length, nFehlt: ms.filter((x) => x.quelle === 'fehlt').length, von: ms[0].m, bis: ms.at(-1).m, planAb: plan[0]?.m || '' };
+    }) };
 }
 
 // Kurzfassung für den Chat

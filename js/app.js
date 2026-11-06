@@ -649,6 +649,39 @@ const lebenName = () => (lebenWahl === 'eigen' && lebenEigen ? 'dein eigener Wer
 // Prognose ehrlicher (planung.js): Plan-Gehalt eines Monats aus den Abrechnungen (null = aktuelles Gehalt).
 // Die Lebenshaltung bleibt ohne Saisonfaktor: normaler Monat, laufender Monat und Prognose rechnen mit demselben Wert.
 const planG = (k) => { try { return planGehalt(H, k); } catch (e) { console.error(e); return null; } };
+// Einnahmen, Lohn, Ausgaben (davon nicht fest), Sparen je Monat – eigene Konten ohne gemeinsame und Kinderkonten.
+// Grundlage für verlauf5 (Ergebnis je Monat) und die Kachel „Jahr bisher“, damit beide gleich rechnen.
+const IJM_LEER = () => ({ ein: 0, lohn: 0, aus: 0, var: 0, spar: 0 });
+function istJeMonat() {
+  const fx = fixIds(), ist = new Map();
+  for (const r of D.rows) {
+    if (!['Einnahme', 'Ausgabe', 'Sparen'].includes(r.art) || istGemeinsam(r.k) || fremd(D.konten[r.k])) continue;
+    const k = r.d.slice(0, 7);
+    let x = ist.get(k); if (!x) ist.set(k, (x = IJM_LEER()));
+    if (r.art === 'Einnahme') { x.ein += r.c; if (r.ukat === 'Lohn / Gehalt') x.lohn += r.c; }
+    else if (r.art === 'Ausgabe') { x.aus -= r.c; if (!fx.has(r.i)) x.var -= r.c; }
+    else x.spar += r.c;
+  }
+  return ist;
+}
+// „Jahr bisher“: Ergebnis (Einnahmen − Ausgaben wie im Cockpit je Monat) der abgeschlossenen Monate seit Januar,
+// aufaddiert; daneben das Vorjahr bis zum selben Monat. Im Januar (noch kein Monat des Jahres fertig): das Vorjahr ganz.
+function jahrBisher() {
+  const ab = abgeschlosseneMonate();
+  if (!ab.length) return null;
+  const ist = istJeMonat(), y = +D.bis.slice(0, 4);
+  let j = y, n = ab.filter((k) => k.startsWith(`${y}-`)).length;
+  if (!n) { j = y - 1; n = 12; }
+  const reihe = (jj) => { let s = 0; return Array.from({ length: n }, (_, i) => { const x = ist.get(mkey(jj, i + 1)); s += x ? x.ein - x.aus : 0; return s; }); };
+  return { j, n, akt: reihe(j), vj: mkey(j - 1, 1) >= D.von.slice(0, 7) ? reihe(j - 1) : null };
+}
+// Zwei aufaddierte Linien (dieses Jahr, Vorjahr gestrichelt) mit Nulllinie
+function jahrSvg(akt, vj) {
+  const alle = [0, ...akt, ...(vj || [])], min = Math.min(...alle), max = Math.max(...alle), sp = max - min || 1, W = 200, HH = 80, n = akt.length;
+  const x = (i) => ((i / Math.max(1, n)) * W).toFixed(1), y = (v) => (HH - 5 - ((v - min) / sp) * (HH - 10)).toFixed(1);
+  const pfad = (l) => `M0 ${y(0)}${l.map((v, i) => `L${x(i + 1)} ${y(v)}`).join('')}`;
+  return `<svg class="jb-svg" viewBox="0 0 ${W} ${HH}" preserveAspectRatio="none" aria-hidden="true"><path class="sp-0" d="M0 ${y(0)}H${W}"/>${vj ? `<path class="jb-vj" d="${pfad(vj)}"/>` : ''}<path class="jb-akt" d="${pfad(akt)}"/></svg>`;
+}
 // Die letzten 12 abgeschlossenen Monate, der laufende Monat (bisher + erwartet) und 3 Monate Prognose,
 // je mit Ergebnis und Kontostand am Monatsende. Prognose: normaler Monat, feste Abbuchungen im jeweiligen Monat.
 // alt = true: dieselbe Rechnung mit Ø 12 Monate (zum Vergleich, wenn der Vormonat die Grundlage ist)
@@ -657,17 +690,7 @@ function verlauf5(alt = false) {
   if (D[key]) return D[key];
   const R0 = monatsRechnung(), R = alt ? { ...R0, lebenProg: R0.lh.schnitt } : R0;
   const heute = D.bis, jetzt = heute.slice(0, 7), laeuft = heute !== monatsletzter(heute);
-  const fx = fixIds(), leer = () => ({ ein: 0, lohn: 0, aus: 0, var: 0, spar: 0 });
-  const ist = new Map();
-  for (const r of D.rows) {
-    if (!['Einnahme', 'Ausgabe', 'Sparen'].includes(r.art) || istGemeinsam(r.k) || fremd(D.konten[r.k])) continue;
-    const k = r.d.slice(0, 7);
-    let x = ist.get(k); if (!x) ist.set(k, (x = leer()));
-    if (r.art === 'Einnahme') { x.ein += r.c; if (r.ukat === 'Lohn / Gehalt') x.lohn += r.c; }
-    else if (r.art === 'Ausgabe') { x.aus -= r.c; if (!fx.has(r.i)) x.var -= r.c; }
-    else x.spar += r.c;
-  }
-  const w = (k) => ist.get(k) || leer();
+  const ist = istJeMonat(), w = (k) => ist.get(k) || IJM_LEER();
   const spar = R.ref.length ? Math.min(0, median(R.ref.map((k) => w(k).spar))) : 0;   // was üblicherweise aufs Depot geht
   // Kontostand je Monatsende nur, wenn die Summe vollständig ist (sonst null: Lücke in der Grafik, Hinweis in fehlt)
   const monate = R.ref.map((k) => { const x = w(k), s = kontenSumme(monatsletzter(`${k}-01`)); return { k, art: 'ist', ein: x.ein, aus: x.aus, erg: x.ein - x.aus, fest: x.aus - x.var, lohn: x.lohn, stand: vollSumme(s), summe: s }; });
@@ -757,6 +780,40 @@ function termineHtml(l, n = 99) {
   }
   if (weg.length) h += `<div class="nt-mehr">+ ${weg.length} weitere Abbuchungen · ${eur0(weg.reduce((t, f) => t + f.betrag, 0))}</div>`;
   return `<div class="nt">${h}</div>`;
+}
+
+// Cockpit „Die nächsten 30 Tage“: oben der Ablauf (bis zum Gehalt → Gehalt → ab dem Gehalt), darunter dieselben zwei
+// Abschnitte als Liste. Euro je Abschnitt nach dem größten Rest gerundet: die Zeilen ergeben genau die Abschnittssumme,
+// die Abschnitte genau „zusammen“. Was nicht in die Karte passt, fasst t30Passen als „+ n weitere“ zusammen.
+function t30Teile(l, g) {
+  const vor = l.filter((x) => !g || x.am < g.am), nach = g ? l.filter((x) => x.am >= g.am) : [];
+  const mit = (xs) => { const e = rundeTeile(xs.map((x) => x.f.betrag)); return { xs: xs.map((x, i) => ({ ...x, e: e[i] })), s: e.reduce((t, c) => t + c, 0) }; };
+  return { vor: mit(vor), nach: mit(nach) };
+}
+function t30Html(l, g) {
+  if (!l.length && !g) return '<div class="leer klein">Keine festen Abbuchungen in den nächsten 30 Tagen.</div>';
+  const { vor, nach } = t30Teile(l, g);
+  const zeile = (x, i, xs) => {
+    const offen = x.am <= D.bis, neu = i === 0 || xs[i - 1].am !== x.am;
+    return `<button class="t30-z" data-c="${x.e}" data-fix="${esc(vertragsKey(x.f))}" title="${esc(vertragName(x.f))} · ${esc(x.f.rh.name)} · ${eur(x.f.betrag)}${offen ? ' · fällig, bis zum Datenstand nicht gebucht' : ''} – anklicken: alle Zahlungen">`
+      + `<span class="t30-d">${neu ? (offen ? 'fällig' : tagKurz(x.am)) : ''}</span><span class="t30-n">${esc(vertragName(x.f))}${offen ? ` <small class="t30-offen">seit ${+x.am.slice(8)}.${+x.am.slice(5, 7)}., noch nicht gebucht</small>` : x.f.rh.proJahr < 12 ? ` <small>${esc(x.f.rh.name)}</small>` : ''}</span><b>${eur0(x.e)}</b></button>`;
+  };
+  const kopf = (t, a) => `<div class="t30-k"><span>${t} · ${a.xs.length} ${a.xs.length === 1 ? 'Abbuchung' : 'Abbuchungen'}</span><b>${eur0(a.s)}</b></div>`;
+  const gz = g ? `<button class="t30-k t30-gk"${geh(zuGehalt())} title="Anklicken: alle Gehälter"><span>${tagKurz(g.am)} · Gehalt ${g.ueberfaellig ? 'überfällig, noch nicht gebucht' : 'erwartet'}</span><b>+${eur0(g.c)}</b></button>` : '';
+  return `<div class="t30-l">${vor.xs.length || g ? kopf(g ? 'bis zum Gehalt' : 'feste Abbuchungen', vor) : ''}${vor.xs.map(zeile).join('')}${gz}${g && nach.xs.length ? kopf('ab dem Gehalt', nach) : ''}${nach.xs.map(zeile).join('')}<div class="t30-mehr" hidden></div></div>`;
+}
+// Zeilen, die unten bzw. rechts aus der Liste laufen würden, ausblenden und als „+ n weitere · Summe“ zusammenfassen
+function t30Passen() {
+  const box = document.querySelector('.cp-ab .t30-l');
+  if (!box) return;
+  const z = [...box.querySelectorAll('.t30-z')], mehr = box.querySelector('.t30-mehr');
+  z.forEach((e) => { e.hidden = false; }); mehr.hidden = true;
+  const B = box.getBoundingClientRect(), raus = (e) => { const r = e.getBoundingClientRect(); return r.right > B.right + 1 || r.bottom > B.bottom + 1; };
+  let i = z.length, weg = 0, c = 0;
+  while (i > 0 && (raus(z[i - 1]) || (!mehr.hidden && raus(mehr)))) {
+    const e = z[--i]; e.hidden = true; weg++; c += +e.dataset.c;
+    mehr.hidden = false; mehr.textContent = `+ ${weg} weitere ${weg === 1 ? 'Abbuchung' : 'Abbuchungen'} · ${eur0(c)}`;
+  }
 }
 
 // ---------------------------------------------------------------- Navigation: 5 Bereiche
@@ -967,7 +1024,9 @@ function cockpitSeite() {
   const vm = sicher(() => vermoegen(H)) || null;
   const vmTeile = vm ? [['Konten', vm.ks?.c || 0], ['Depot', vm.dp?.wert || 0], ['Kaution', vm.kaution?.c || 0], ['Vorsorge', vm.vorsorge]].filter(([, c]) => c > 0) : [];
   const vmSum = vmTeile.reduce((t, [, c]) => t + c, 0) || 1;
-  const vmVis = vmTeile.length ? `<span class="cv-ring">${ringTeile(vmTeile)}<span class="cv-rleg">${vmTeile.map(([n, c], i) => `<span><i style="--i:${i}"></i>${n}<b>${Math.round((c / vmSum) * 100)} %</b></span>`).join('')}</span></span>` : '';
+  // Euro und Prozent nach dem größten Rest gerundet: die Teile ergeben genau die gezeigte Summe bzw. 100 %
+  const vmE = rundeTeile(vmTeile.map(([, c]) => c)), vmP = rundeTeile(vmTeile.map(([, c]) => (c / vmSum) * 10000));
+  const vmVis = vmTeile.length ? `<span class="cv-ring">${ringTeile(vmTeile)}<span class="cv-rleg cv-rleg4">${vmTeile.map(([n], i) => `<span><i style="--i:${i}"></i>${n}<b>${eur0(vmE[i])}</b><em>${vmP[i] / 100} %</em></span>`).join('')}</span></span>` : '';
   const monatTeil = lauf ? Math.min(1, lauf.x.aus / Math.max(1, lauf.aus)) : 1;
   // Ring: ausgegeben ÷ erwartet; Legende: fest gebucht + Lebenshaltung = ausgegeben, dazu noch erwartet (aus gezeigten Werten)
   const laufVis = lauf ? `<span class="cv-ring">${ring(monatTeil, lauf.tag / lauf.tage, `${Math.round(monatTeil * 100)} %`)}<span class="cv-rleg">
@@ -984,47 +1043,39 @@ function cockpitSeite() {
       unter: lauf ? `ausgegeben von ≈ ${eur0(lauf.aus)}, die im ${monatJ} erwartet sind. Miete und Unterhalt gehen am Monatsanfang ab – deshalb ist früh schon viel weg.` : 'Der Monat ist abgeschlossen.', vis: laufVis,
       tip: lauf ? `Ausgegeben ${eur0(lauf.x.aus)} von erwarteten ${eur0(lauf.aus)}: feste Abbuchungen im ${monatJ} ${eur0(lauf.x.aus - lauf.x.var + lauf.offenFest)} und Lebenshaltung ${eur0(lauf.x.var + lauf.varKommt)} (${lebenName()})` : '' }),
     (() => {
-      const W = sicher(() => vorschau30(R)) || null;
-      if (!W) return cvKarte({ titel: 'Nächste 30 Tage', wert: '–', ziel: { tab: 'fix', fixtab: 'kalender', konto: '' }, unter: 'Der Stand heute ist nicht vollständig berechenbar.' });
-      const ti = W.tage.indexOf(W.tief);
-      return cvKarte({ titel: 'Tiefster Stand in 30 Tagen', marke: 'Prognose', wert: `≈ ${eur0(W.tief.s)}`, cls_: W.tief.s < 0 ? 'neg' : '', ziel: { tab: 'fix', fixtab: 'kalender', konto: '' },
-        unter: `Mindestens so viel Geld bleibt frei – ${ti === 0 ? 'heute' : `am ${tagKurz(W.tief.am)}`}${W.g && W.g.am > W.tief.am ? ', kurz vor dem Gehalt' : ''}. Heute frei minus feste Abbuchungen und Lebenshaltung (≈ ${eur0(W.leben / 30)} am Tag).`,
-        tip: `Heute frei verfügbar ${eur0(W.start)} (ohne Mietkaution, gemeinsame und Kinderkonten) · ${W.n} feste Abbuchungen ${eur0(W.fest)}${W.g ? ` · Gehalt ${eur0(W.g.c)} am ${tagKurz(W.g.am)}${W.g.ueberfaellig ? ' (überfällig, noch nicht gebucht)' : ''}` : ''} · Lebenshaltung ${eur0(W.leben)} gleichmäßig verteilt`,
-        vis: `<span class="st30-box">${stufenSvg(W.tage.map((t) => t.s), ti)}<span class="st30-ax"><span${W.tage[0].s !== W.start ? ' title="nach fälligen, noch nicht gebuchten Abbuchungen"' : ''}>heute<b>${eur0(W.tage[0].s)}</b></span><span class="st30-tief">${tagKurz(W.tief.am).slice(3)}<b>≈ ${eur0(W.tief.s)}</b></span><span>${tagKurz(W.ende.am).slice(3)}<b>≈ ${eur0(W.ende.s)}</b></span></span></span>` });
+      // Jahr bisher: aufaddiertes Ergebnis der abgeschlossenen Monate, Vorjahr bis zum selben Monat gestrichelt
+      const J = sicher(jahrBisher) || null;
+      if (!J) return cvKarte({ titel: 'Jahr bisher', wert: '–', ziel: { tab: 'geldfluss' }, unter: 'Noch kein Monat abgeschlossen.' });
+      const bis = MONAT[J.n - 1], a = r0(J.akt.at(-1)), v = J.vj ? r0(J.vj.at(-1)) : null, zr = `${J.j}-01_${mkey(J.j, J.n)}`;
+      return cvKarte({ titel: `${J.j} bisher`, wert: plusMinus(a), cls_: a < 0 ? 'neg' : 'pos', ziel: zuBuchungen({ konto: '', jahr: '', monat: '', zr }),
+        unter: `Einnahmen minus Ausgaben, Januar bis ${bis} zusammengezählt`,
+        tip: `Ergebnis ${J.j} von Januar bis ${bis}: ${plusMinus(a)}${v != null ? ` · ${J.j - 1} im selben Zeitraum: ${plusMinus(v)}` : ''} · ohne Kinder- und gemeinsame Konten`,
+        vis: `<span class="jb">${jahrSvg(J.akt, J.vj)}<span class="cv-rleg jb-leg"><span><i class="jb-i-akt"></i>${J.j}<b class="${a < 0 ? 'neg' : ''}">${plusMinus(a)}</b></span>${v != null ? `<span><i class="jb-i-vj"></i>${J.j - 1}<b class="${v < 0 ? 'neg' : ''}">${plusMinus(v)}</b></span>
+          <span class="jb-d">${a - v >= 0 ? 'besser' : 'schlechter'} als ${J.j - 1}<b>${eur0(Math.abs(a - v))}</b></span>` : ''}</span><span class="jb-ax"><span>Jan</span><span>${MON[J.n - 1]}</span></span></span>` });
     })(),
   ].join('');
 
-  // Wofür das Geld ausgeht: der Vormonat als Grundlage, Strich = Ø 12 Monate
-  const K = katVormonat(), kTop = K.l.slice(0, 8), kRest = K.l.slice(8), kR = K.teil(kRest);
-  const kZeile = (x) => ({ n: esc(schoen(x.k)), c: x.c, w: x.c > 0 ? eur0(x.c) : '–', marke: x.o > 0 ? x.o : null, p: x.o > 0 ? `Ø ${eur0(x.o)}` : '–', farbe: 'var(--accent-2)', ziel: katZielVm(x.k, K.vm),
-    tip: `${schoen(x.k)}: ${K.kurz} ${eur0(x.c)} · Ø 12 Monate ${eur0(x.o)}` });
-  const kats = K.l.length ? `<div class="bl-vm">${balkenListe([...kTop.map(kZeile),
-    ...(kRest.length ? [{ n: `${kRest.length} übrige Kategorien`, sub: kRest.slice(0, 3).map((x) => esc(schoen(x.k))).join(', ') + (kRest.length > 3 ? ' …' : ''), c: kR.c, marke: kR.o, p: `Ø ${eur0(kR.o)}`, farbe: 'var(--variabel)', ziel: katZielVm('', K.vm) }] : []),
-    { n: '<b>Summe</b>', c: 0, w: `<b>${eur0(K.sum.c)}</b>`, p: `<b>Ø ${eur0(K.sum.o)}</b>`, cls: 'bl-summe' }], { max: Math.max(1, ...K.l.map((x) => Math.max(x.c, x.o)), kR.c, kR.o), kopf: ['Kategorie', K.kurz, 'Ø 12 Mon.'] })}</div>`
-    : '<p class="leer klein">Keine Ausgaben in den letzten 12 Monaten.</p>';
-
-  // Auffällig im Vormonat: die größten Abweichungen zum Ø 12 Monate (ab 50 €), bei Mehrausgaben die größte Buchung dazu
-  const abw = K.l.map((x) => ({ ...x, d: x.c - x.o })).filter((x) => Math.abs(x.d) >= 5000).sort((a1, b1) => Math.abs(b1.d) - Math.abs(a1.d)).slice(0, 4);
+  // Auffällig im Vormonat (die volle Kategorienliste steht im Geldfluss): oben Vormonat gegen Ø 12 Monate insgesamt,
+  // darunter die Kategorien mit den größten Abweichungen (ab 50 €), bei Mehrausgaben die größte Buchung dazu
+  const K = katVormonat();
+  const kC = r0(K.sum.c), kO = r0(K.sum.o);
+  const abw = K.l.map((x) => ({ ...x, d: x.c - x.o })).filter((x) => Math.abs(x.d) >= 5000).sort((a1, b1) => Math.abs(b1.d) - Math.abs(a1.d));
   const groesste = (k) => (K.m.g.get(k)?.rows || []).filter((r) => r.c < 0).sort((a1, b1) => a1.c - b1.c)[0];
-  const auffaellig = abw.length ? `<div class="cp-auff"><p class="cp-auff-t">Auffällig im ${esc(K.kurz)} – Abweichung zum Ø 12 Monate</p>${abw.map((x) => { const g1 = x.d > 0 ? groesste(x.k) : null;
-      return `<button class="cp-auff-z"${geh(katZielVm(x.k, K.vm))}><span>${esc(schoen(x.k))}<small>${x.d > 0 ? (g1 ? `größte Buchung: ${esc(g1.g || g1.z || '–')} ${eur0(-g1.c)}` : '') : 'weniger als üblich'}</small></span>${bxDelta(dGezeigt(x.o, x.c))}</button>`; }).join('')}</div>` : '';
+  const auffaellig = `<div class="cp-auf-k"${geh(katZielVm('', K.vm))} role="button" tabindex="0" title="Anklicken: alle Ausgaben im ${esc(K.kurz)}"><div><span>ausgegeben im ${esc(K.kurz)}</span><b>${eur0(kC)}</b></div><div><span>Ø 12 Monate</span><b>${eur0(kO)}</b></div><div><span>Unterschied</span>${bxDelta(kC - kO)}</div></div>
+    ${abw.length ? `<p class="cp-auff-t">Größte Abweichungen je Kategorie</p><div class="cp-auff cp-auf-l">${abw.map((x) => { const g1 = x.d > 0 ? groesste(x.k) : null;
+      return `<button class="cp-auff-z"${geh(katZielVm(x.k, K.vm))} title="${esc(schoen(x.k))}: ${esc(K.kurz)} ${eur0(x.c)} · Ø 12 Monate ${eur0(x.o)} – anklicken: Buchungen"><span>${esc(schoen(x.k))}<small>${esc(K.kurz)} ${eur0(r0(x.c))} statt Ø ${eur0(r0(x.o))}${g1 ? ` · größte Buchung: ${esc(g1.g || g1.z || '–')} ${eur0(-g1.c)}` : ''}</small></span>${bxDelta(dGezeigt(x.o, x.c))}</button>`; }).join('')}</div>`
+      : '<p class="cp-ruhig"><i class="ampel ok" aria-hidden="true"></i>Keine Kategorie weicht um mehr als 50 € vom Durchschnitt ab.</p>'}`;
 
   const hb = handlungsbedarf(), hbRot = hb.some((x) => x.ampel === 'rot');
 
   // Reihe D: feste Abbuchungen der nächsten 30 Tage (Tag für Tag, mit Gehalt), Fixkosten nach Art, Eckwerte der anderen Bereiche
-  const T30 = naechsteTermine(R.vertraege), T30s = T30.reduce((t, x) => t + x.f.betrag, 0), gK = naechstesGehalt(), zuKal = { tab: 'fix', fixtab: 'kalender', konto: '' };
-  const vorG = T30.filter((x) => !gK || x.am < gK.am), abVor = vorG.reduce((t, x) => t + x.f.betrag, 0), nVor = vorG.length;
-  const arten = new Map();
-  for (const f of R.vertraege) { const art = fixArt(f), x = arten.get(art) || arten.set(art, { art, c: 0, n: 0 }).get(art); x.c += f.proMonat; x.n++; }
-  const al = [...arten.values()].sort((a1, b1) => b1.c - a1.c), alR = al.length > 6 ? al.slice(5) : [], alRc = alR.reduce((t, x) => t + x.c, 0), zuFix = { tab: 'fix', fixtab: 'vertraege', konto: '' };
-  const pzG = (c) => (R.gehalt ? `${((c / R.gehalt) * 100).toLocaleString('de-DE', { maximumFractionDigits: 0 })} %` : '');
-  // Euro und Anteile nach dem größten Rest gerundet: die gezeigten Teile ergeben genau die gezeigte Summe (27 + 16 + … = 67 %)
-  const alZ = al.slice(0, alR.length ? 5 : 6), teile = [...alZ.map((x) => x.c), ...(alR.length ? [alRc] : [])];
-  const eurT = rundeTeile(teile), pzT = R.gehalt ? rundeTeile(teile.map((c) => (c / R.gehalt) * 10000)).map((x) => x / 100) : null;
-  const pzW = (i) => (pzT ? `${pzT[i]} %` : ''), pzSumme = pzT ? `${pzT.reduce((t, x) => t + x, 0)} %` : '';
-  const fixL = balkenListe([...alZ.map((x, i) => ({ n: FIX_KURZ[x.art] || esc(x.art), c: x.c, w: eur0(eurT[i]), p: pzW(i), ziel: zuFix, farbe: 'var(--fest)', tip: `${x.art}: ${eur0(x.c)} im Monat · ${x.n} ${x.n === 1 ? 'Vertrag' : 'Verträge'}` })),
-    ...(alR.length ? [{ n: `${alR.length} weitere Arten`, tip: alR.map((x) => `${x.art} ${eur0(x.c)}`).join(', '), c: alRc, w: eur0(eurT.at(-1)), p: pzW(teile.length - 1), ziel: zuFix, farbe: 'var(--fest)' }] : []),
-    { n: '<b>Summe</b>', c: 0, w: `<b>${eur0(eurT.reduce((t, x) => t + x, 0))}</b>`, p: `<b>${pzSumme}</b>`, cls: 'bl-summe' }], { max: Math.max(1, ...al.map((x) => x.c), alRc), kopf: ['Art', 'im Monat', 'vom Gehalt'] });
+  const T30 = naechsteTermine(R.vertraege), gK = naechstesGehalt(), zuKal = { tab: 'fix', fixtab: 'kalender', konto: '' };
+  const T3 = t30Teile(T30, gK), t30n = (a) => `${a.xs.length} ${a.xs.length === 1 ? 'Abbuchung' : 'Abbuchungen'}`;
+  const t30Fluss = gK ? `<div class="t30-fluss">
+      <div><span>bis zum Gehalt</span><b>−${eur0(T3.vor.s)}</b><small>${t30n(T3.vor)}</small></div><i aria-hidden="true">›</i>
+      <div class="t30-fg"><span>Gehalt ${tagKurz(gK.am)}</span><b>+${eur0(gK.c)}</b><small>${gK.ueberfaellig ? 'überfällig, noch nicht gebucht' : 'erwartet'}</small></div><i aria-hidden="true">›</i>
+      <div><span>ab dem Gehalt</span><b>−${eur0(T3.nach.s)}</b><small>${t30n(T3.nach)}</small></div></div>`
+    : `<div class="t30-fluss"><div><span>feste Abbuchungen</span><b>−${eur0(T3.vor.s)}</b><small>${t30n(T3.vor)} · kein Gehalt in diesen 30 Tagen</small></div></div>`;
   const ber = [];
   const gU = sicher(() => gehaltUeberblick(gehaltHelfer())) || null;
   if (gU?.z) ber.push({ t: `Gehalt aufs Konto ${MONAT[+gU.z.m.slice(5) - 1]}`, sub: `Grundgehalt ${eurE0(gU.stufe)} brutto${gU.auto ? ` · Dienstwagen kostet ${eurE0(gU.auto.netto)} netto` : ''}`, w: eurE0(gU.z.auszahlung), ziel: { tab: 'einkommen' } });
@@ -1032,29 +1083,20 @@ function cockpitSeite() {
   if (sP) ber.push({ t: `Steuer ${sP.jahr}`, sub: `${sP.ohne.erg >= 0 ? 'Erstattung' : 'Nachzahlung'} ohne Anlage U · berechnet${sP.mit ? ` · mit Anlage U ${plusMinus(sP.mit.erg)}` : ''}`, w: plusMinus(sP.ohne.erg), cls_: sP.ohne.erg >= 0 ? 'pos' : 'neg', ziel: { tab: 'einkommen' } });
   const uK = sicher(() => unterhaltKurz(H)) || null, uL = uK?.K?.letzte;
   if (uL) { const ri = dGezeigt(Math.round(uL.summe * 100), Math.round(uK.K.X.summe * 100)); /* Differenz der gezeigten Euro-Beträge */ ber.push({ t: 'Unterhalt verbindlich', sub: `Berechnung vom ${dde(uL.datum)} · Risiko bei Neuberechnung ${ri >= 0 ? '+' : '−'}${eur0(Math.abs(ri))}`, w: eurE0(uL.summe), ziel: { tab: 'familie' } }); }
-  const vm0 = sicher(() => vermoegen(H)) || null;
-  if (vm0) ber.push({ t: 'Vermögen', sub: `Konten, Depot, Vorsorge · ohne gesetzliche Rente${vm0.depotBerechnet ? ` · ${VM_DEPOT_BERECHNET}` : ''}`, w: vmText(vm0), cls_: vm0.c < 0 ? 'neg' : '', ziel: { tab: 'vermoegen' } });
   if (uK && uK.A?.rows?.length) ber.push({ t: `Ausgleich mit ${esc(uK.A.name || 'der Gegenseite')}`, sub: uK.offen.length ? `${uK.offen.length} Posten offen` : 'keine offenen Steueranteile · plus = an dich', w: `${uK.saldo > 0 ? '+' : uK.saldo < 0 ? '−' : ''}${eur0(Math.abs(uK.saldo))}`, cls_: uK.saldo < 0 ? 'neg' : uK.saldo > 0 ? 'pos' : '', ziel: { tab: 'familie' } });
   const st0 = steuerStand();
   if (st0?.offen) ber.push({ t: `Belege ${st0.jahr}`, sub: st0.offen ? 'Steuer-Entscheidungen offen' : 'alle Steuer-Entscheidungen getroffen', w: st0.offen ? `${st0.offen} offen` : 'erledigt', ziel: { tab: 'steuer' } });
   const bereiche = ber.length ? `<div class="cp-ber">${ber.map((x) => `<button class="cp-ber-z"${geh(x.ziel)}><span>${x.t}<small>${x.sub}</small></span><b class="${x.cls_ || ''}">${x.w}</b></button>`).join('')}</div>` : '<p class="leer klein">Noch keine Angaben.</p>';
   const reiheD = `<div class="cp-reihe-d">
-      <section class="card cp-karte cp-ab"><div class="cp-kt"><h2>Die nächsten 30 Tage</h2>${zl('ganzer Kalender', zuKal)}</div>
-        <div class="cp-ab-k">
-          <div><span>vor dem Gehalt</span><b>${eur0(abVor)}</b><small>${nVor} Abbuchungen</small></div>
-          ${gK ? `<div class="cp-ab-g"><span>Gehalt ${tagKurz(gK.am)}</span><b>+${eur0(gK.c)}</b><small>${gK.ueberfaellig ? 'überfällig, noch nicht gebucht' : 'erwartet'}</small></div>` : ''}
-          <div><span>${gK ? 'nach dem Gehalt' : 'danach'}</span><b>${eur0(dGezeigt(abVor, T30s))}</b><small>${T30.length - nVor} Abbuchungen</small></div>
-          <div class="cp-ab-s"><span>zusammen</span><b>${eur0(T30s)}</b><small>${T30.length} feste Abbuchungen</small></div>
-        </div>
-        <div class="cp-agenda">${termineHtml(T30, 24)}</div></section>
-      <section class="card cp-karte cp-fx"><div class="cp-kt"><h2>Fixkosten nach Art</h2><span class="klein muted">${R.vertraege.length} laufende Verträge</span></div>${fixL}</section>
+      <section class="card cp-karte cp-ab"><div class="cp-kt"><h2>Die nächsten 30 Tage</h2><span class="klein muted">feste Abbuchungen zusammen ${eur0(T3.vor.s + T3.nach.s)} · ${zl('ganzer Kalender', zuKal)}</span></div>
+        <div class="t30-body">${t30Fluss}${t30Html(T30, gK)}</div></section>
       <section class="card cp-karte cp-bk"><div class="cp-kt"><h2>Aus den anderen Bereichen</h2></div>${bereiche}</section>
     </div>`;
   box.innerHTML = `<div class="cp">
     <div class="cp-reihe-a">
       ${hero}
-      <section class="card cp-karte cp-kat"><div class="cp-kt"><h2>Ausgaben im ${esc(K.kurz)}</h2><span class="klein muted">nach Kategorie</span></div>${kats}
-        ${auffaellig}<p class="cp-fuss" title="Durchschnitt ${esc(monatsText(K.ms))} · ohne Kinder- und gemeinsame Konten · Beträge gerundet, Summen aus den genauen Werten">Balken: ${esc(K.kurz)} · Strich: Ø 12 Monate · ${zl('alle Kategorien', katAlle)}</p></section>
+      <section class="card cp-karte cp-kat cp-auf"><div class="cp-kt"><h2>Auffällig im ${esc(K.kurz)}</h2><span class="klein muted">gegen Ø 12 Monate</span></div>${auffaellig}
+        <p class="cp-fuss" title="Durchschnitt ${esc(monatsText(K.ms))} · ohne Kinder- und gemeinsame Konten · Beträge gerundet">Ø ${esc(monatsText(K.ms))} · ohne Kinder- und gemeinsame Konten · ${zl('alle Kategorien im Geldfluss', { tab: 'geldfluss' })}</p></section>
     </div>
     <div class="cp-drei cp-vier">${kacheln}</div>
     <section class="card cp-karte cp-td-karte"><div class="cp-kt"><h2>Zu tun ${hb.length ? `<span class="cp-zahl${hbRot ? ' neg' : ''}">${hb.length}</span>` : ''}</h2>${hb.length > 4 ? `<span class="klein muted">+ ${hb.length - 4} weitere · ${zl('alle Fristen', { tab: 'fix', fixtab: 'kalender', _springe: '#fr-liste' })}</span>` : ''}</div>${handlungHtml(hb)}
@@ -1070,12 +1112,16 @@ function cockpitSeite() {
 // „Aus den anderen Bereichen“: Die Kartenhöhe gibt das Raster vor (Cockpit füllt den Bildschirm) – so viele Zeilen zeigen,
 // wie hineinpassen (Reihenfolge = Wichtigkeit), statt unten aus der Karte zu laufen. Bei Fenstergröße neu.
 function cpBerPassen() {
-  const k = document.querySelector('.cp-bk');
-  if (!k) return;
-  const z = [...k.querySelectorAll('.cp-ber-z')];
-  z.forEach((e) => e.classList.remove('fuell-aus'));
-  const unten = k.getBoundingClientRect().bottom - parseFloat(getComputedStyle(k).paddingBottom || 0);
-  for (let i = z.length - 1; i > 0 && z[i].getBoundingClientRect().bottom > unten + 0.5; i--) z[i].classList.add('fuell-aus');
+  // Karte „Aus den anderen Bereichen“ (Grenze: Kartenrand) und Liste „Auffällig“ (Grenze: die Liste, sie füllt den Rest der Karte)
+  for (const [ks, zs] of [['.cp-bk', '.cp-ber-z'], ['.cp-auf-l', '.cp-auff-z']]) {
+    const k = document.querySelector(ks);
+    if (!k) continue;
+    const z = [...k.querySelectorAll(zs)];
+    z.forEach((e) => e.classList.remove('fuell-aus'));
+    const unten = k.getBoundingClientRect().bottom - parseFloat(getComputedStyle(k).paddingBottom || 0);
+    for (let i = z.length - 1; i > 0 && z[i].getBoundingClientRect().bottom > unten + 0.5; i--) z[i].classList.add('fuell-aus');
+  }
+  t30Passen();
 }
 let cpBerT;
 addEventListener('resize', () => { clearTimeout(cpBerT); cpBerT = setTimeout(cpBerPassen, 120); });
@@ -1296,11 +1342,16 @@ function geldflussSeite() {
 
   // Reisen aus den Finanzguru-Tags: die letzten vier
   const RS = sicher(() => reisen(H)) || null, zuReisen = { tab: 'uebersicht', kart: 'tags' };
-  const rSort = (() => { try { return localStorage.getItem('fd.reisensort') || 'groesse'; } catch { return 'groesse'; } })();
-  const rListe = (RS?.karten || []).slice().sort((a1, b1) => (rSort === 'datum' ? (a1.erste < b1.erste ? 1 : -1) : b1.c - a1.c)).slice(0, 4);
-  const reiseInhalt = !RS?.karten?.length ? '<p class="bx-u">Vergib in Finanzguru Tags, dann erscheinen hier deine Reisen.</p>'
-    : `<div class="seg bx-mini" role="group" aria-label="Sortierung"><button data-rsort="groesse" class="${rSort !== 'datum' ? 'an' : ''}">nach Betrag</button><button data-rsort="datum" class="${rSort === 'datum' ? 'an' : ''}">neueste zuerst</button></div>`
-      + balkenListe(rListe.map((x) => ({ n: esc(x.tag), sub: `ab ${MONAT[+x.erste.slice(5, 7) - 1]} ${x.erste.slice(0, 4)} · ${x.n} ${x.n === 1 ? 'Buchung' : 'Buchungen'}`, c: x.c, ziel: zuReisen, farbe: 'var(--accent-2)' }))) + bxLink(`Alle ${RS.gesamt} Reisen und Projekte`, zuReisen);
+  // Reisen (Kennzeichen Urlaub, erkannt oder im Kalender – keine Projekte): Kosten je Jahr nach Reisebeginn, darunter die letzten drei
+  const rsReisen = (RS?.karten || []).filter((x) => x.urlaub || x.erkannt || x.kalender), yJ = +D.bis.slice(0, 4);
+  const rsJahre = Array.from({ length: 6 }, (_, i) => String(yJ - 5 + i)).map((j) => { const l = rsReisen.filter((x) => x.erste.slice(0, 4) === j); return { j, c: l.reduce((t, x) => t + x.c, 0), n: l.length }; });
+  const rsMax = Math.max(1, ...rsJahre.map((x) => x.c)), rsAkt = rsJahre.at(-1), rsVj = rsJahre.at(-2);
+  const zeitraum = (x) => `${dde(x.erste).slice(0, 6)}${x.letzte !== x.erste ? `–${dde(x.letzte).slice(0, 6)}` : ''}${x.letzte.slice(0, 4)} · ${x.tage} ${x.tage === 1 ? 'Tag' : 'Tage'}`;
+  const reiseInhalt = !rsReisen.length ? '<p class="bx-u">Vergib in Finanzguru Tags oder trage Reisen in den Kalender ein, dann erscheinen sie hier.</p>'
+    : `<p class="rj-kopf"><b>${eur0(rsAkt.c)}</b> für ${rsAkt.n} ${rsAkt.n === 1 ? 'Reise' : 'Reisen'} ${yJ} bisher <span>· ${yJ - 1}: ${eur0(rsVj.c)} für ${rsVj.n}</span></p>
+      <div class="rj" role="img" aria-label="Reisekosten je Jahr">${rsJahre.map((x) => `<span class="rj-s${x === rsAkt ? ' rj-akt' : ''}" title="${x.j}: ${eur0(x.c)} für ${x.n} ${x.n === 1 ? 'Reise' : 'Reisen'}${x === rsAkt ? ' (bisher)' : ''}"><small>${x.c ? kurzWert(x.c / 100) : '–'}</small><i style="height:${((x.c / rsMax) * 100).toFixed(1)}%"></i><em>${x.j}</em></span>`).join('')}</div>
+      <p class="cp-auff-t">Zuletzt</p>${rsReisen.filter((x) => x.c > 0).slice(0, 2).map((x) => `<button class="cp-auff-z"${geh(x.ziel)} title="${esc(x.tag)} · ${x.quelle} – anklicken: Buchungen der Reise"><span>${esc(x.tag)}<small>${zeitraum(x)}${x.tage > 1 ? ` · ${eur0(x.jeTag)} am Tag` : ''}</small></span><b>${eur0(x.c)}</b></button>`).join('')}`
+      + bxLink(`Alle ${RS.gesamt} Reisen und Projekte`, zuReisen);
 
   box.innerHTML = `<div class="cp bx">
     ${bxKopf('Geldfluss', kern, unter)}
@@ -1310,9 +1361,11 @@ function geldflussSeite() {
       ${bxKarte('Wofür das Geld ausgeht', kats, { rechts: `<span class="klein muted">${esc(K.name)} · daneben Ø 12 Monate</span>`, fuss: `${zl('alle Kategorien (12 Monate)', katAlle)} · sortiert nach ${esc(K.name)} · Ø ${esc(monatsText(ms))} · ohne Kinder- und gemeinsame Konten · Linie: je Monat` })}
       ${bxKarte('Verträge', vertraege, { rechts: zl(`<b class="bx-wert">${eur0(R.fix)}</b>`, zuFix), fuss: `Nächste 30 Tage: ${termine.length} feste Abbuchungen · ${zl(eur0(tSumme), { tab: 'fix', fixtab: 'kalender', konto: '' })}` })}
       ${bxKarte(rahmenTitel, rahmen, { fuss: `Ausgaben ohne Verträge in den frei gestaltbaren Kategorien${rs ? (rs.sum.n ? ' · Strich im oberen Balken = heute' : ' · Strich = Vorschlag') : ''}` })}
-      ${bxKarte('Reisen', reiseInhalt)}
-      ${L.monate.length ? bxKarte('Lebenshaltung je Monat', `<div class="cp-chart bx-chart"><canvas id="c-gf-leben" aria-label="Lebenshaltung je Monat"></canvas></div>`, { cls_: 'bx-flex',
-        rechts: `<b class="bx-wert">${eur0(L.werte.at(-1))}</b>`, fuss: `Alle Ausgaben ohne Verträge, ohne gemeinsame und Kinderkonten · dunkel: ${esc(monLang(L.monate.at(-1)))} · gestrichelt: Ø ${eur0(L.schnitt)} · Säule anklicken: Buchungen` }) : ''}
+      ${bxKarte('Reisen', reiseInhalt, { cls_: 'gf-reisen', fuss: 'Kosten je Jahr nach Reisebeginn · Reisen mit Kennzeichen Urlaub, erkannt oder aus dem Kalender' })}
+      ${L.monate.length ? bxKarte('Lebenshaltung je Monat', `<p class="bx-u gf-leben-u">Alles, was du im Monat ohne Verträge ausgibst – Essen, Einkaufen, Freizeit, Tanken. Der normale Monat rechnet mit ${esc(lebenName())}.</p>
+        <p class="cp-leg"><i class="gf-leg-l"></i>${esc(monLang(L.monate.at(-1)))} <i class="gf-leg-f"></i>frühere Monate <i class="gf-leg-o"></i>Ø 12 Monate ${eur0(L.schnitt)}</p>
+        <div class="cp-chart bx-chart"><canvas id="c-gf-leben" aria-label="Lebenshaltung je Monat"></canvas></div>`, { cls_: 'bx-flex',
+        rechts: `<span class="klein muted">${esc(MONAT[+L.monate.at(-1).slice(5) - 1])}</span> <b class="bx-wert">${eur0(L.werte.at(-1))}</b>`, fuss: 'Zahl über der Säule: Ausgaben ohne Verträge im Monat · ohne gemeinsame und Kinderkonten · Säule anklicken: Buchungen' }) : ''}
     </div>
     ${RUNDUNG}
   </div>`;
@@ -1333,7 +1386,7 @@ function gfLebenZeichnen(L) {
   o.onHover = (e, el) => { e.native.target.style.cursor = el.length ? 'pointer' : 'default'; };
   zeichne('c-gf-leben', { type: 'bar',
     data: { labels: L.monate.map(monKurz), datasets: [{ data: L.werte.map((w) => w / 100), backgroundColor: L.werte.map((_, i) => (i === n - 1 ? cA : cV)), borderRadius: 3, maxBarThickness: 26 }] },
-    options: o, plugins: [linieMit('schnitt', L.schnitt / 100, `Ø ${eur0(L.schnitt)}`, css('--text-2'))] });
+    options: o, plugins: [linieMit('schnitt', L.schnitt / 100, `Ø ${eur0(L.schnitt)}`, css('--text-2')), saeulenWerteMit({})] });
 }
 
 // ---------------------------------------------------------------- Vermögen
@@ -1482,16 +1535,20 @@ function einkommenSeite() {
     const c = (v) => Math.round(v) * 100;   // auf volle Euro, damit die gezeigten Zeilen genau aufgehen
     const B = c(T.brutto), St = c(T.steuer), So = c(T.sozial), N = B - St - So, Au = c(T.auto), Bv = c(T.bav), Az = c(T.auszahlung), Ue = N - Au - Bv - Az;
     // Rechenzeichen beim Namen, Betrag ohne Vorzeichen (Abzüge sind normale Ausgaben, nicht rot)
-    const z1 = (n, sub, v, cls_ = '', summe = false) => `<div class="bx-rz${summe ? ' bx-gilt' : ''}"><span>${summe ? '' : v > 0 ? '− ' : '+ '}${n}<small>${sub}</small></span><b class="${cls_}">${eur0(Math.abs(v))}</b></div>`;
-    brutto = `<div class="ek-wf">
+    const z1 = (n, sub, v, cls_ = '', summe = false, f = '') => `<div class="bx-rz${summe ? ' bx-gilt' : ''}" title="${esc(`${n.replace(/^= /, '')}: ${sub}`)}"><span>${f ? `<i class="ek-f ${f}"></i>` : ''}${summe ? '' : v > 0 ? '− ' : '+ '}${n}<small>${sub}</small></span><b class="${cls_}">${eur0(Math.abs(v))}</b></div>`;
+    // flach: oben ein Balken (Brutto in seine Teile zerlegt), darunter die Rechnung in zwei Spalten
+    const ueZ = Math.abs(Ue) >= 100 ? Ue : 0, seg = [['ek-t1', 'Steuern', St], ['ek-t2', 'Sozialversicherung', So], ['ek-t3', 'Dienstwagen', Au], ['ek-t4', 'Betriebsrente', Bv], ['ek-t5', 'übrige Abzüge', Math.max(0, ueZ)], ['ek-t0', 'Auszahlung', Az]].filter(([, , v]) => v > 0);
+    const segSum = seg.reduce((t, [, , v]) => t + v, 0) || 1;
+    brutto = `<div class="ek-bar" role="img" aria-label="Brutto aufgeteilt">${seg.map(([f, n, v]) => { const p = (v / segSum) * 100; return `<i class="${f}" style="width:${p.toFixed(2)}%" title="${n}: ${eur0(v)} · ${Math.round((v / B) * 100)} % vom Brutto">${p >= 9 ? `${Math.round((v / B) * 100)} %` : ''}</i>`; }).join('')}</div>
+      <div class="ek-wf ek-wf2">
       ${z1('Brutto', `Abrechnung ${monLang(z.m)}`, B, '', true)}
-      ${z1('Steuern', 'Lohnsteuer, Soli, Kirche', St)}
-      ${z1('Sozialversicherung', 'Rente, Arbeitslosen-, Kranken-, Pflege-', So)}
+      ${z1('Steuern', 'Lohnsteuer, Soli, Kirche', St, '', false, 'ek-t1')}
+      ${z1('Sozialversicherung', 'Rente, Arbeitslosen-, Kranken-, Pflege-', So, '', false, 'ek-t2')}
       ${z1('= nach Abgaben', 'Brutto minus Steuern und Sozialversicherung, berechnet', N, '', true)}
-      ${Au ? z1('Dienstwagen', 'versteuert, nicht ausgezahlt', Au) : ''}
-      ${Bv ? z1('Betriebsrente', 'Entgeltumwandlung', Bv) : ''}
-      ${Math.abs(Ue) >= 100 ? z1(Ue > 0 ? 'übrige Abzüge' : 'übrige Zuschläge', 'Differenz, berechnet', Ue) : ''}
-      ${z1('= Auszahlung', 'aufs Konto', Az, 'pos', true)}</div>`;
+      ${Au ? z1('Dienstwagen', 'versteuert, nicht ausgezahlt', Au, '', false, 'ek-t3') : ''}
+      ${Bv ? z1('Betriebsrente', 'Entgeltumwandlung', Bv, '', false, 'ek-t4') : ''}
+      ${ueZ ? z1(ueZ > 0 ? 'übrige Abzüge' : 'übrige Zuschläge', 'Differenz, berechnet', ueZ, '', false, ueZ > 0 ? 'ek-t5' : '') : ''}
+      ${z1('= Auszahlung', 'aufs Konto', Az, 'pos', true, 'ek-t0')}</div>`;
   }
 
   // Steuer laut Bescheid je Jahr
@@ -1503,8 +1560,9 @@ function einkommenSeite() {
   const reihe2 = z ? `<div class="bx-raster ek-reihe2">
       ${bxKarte('Grundgehalt und Erhöhungen', `<div class="ek-gg"><div><span>seit ${monKurz(g.erste.m)}</span><b class="pos">+${Math.round(g.seit * 100)} %</b></div><div><span>in Euro brutto im Monat</span><b>${eurE0(g.erste.gehalt)} → ${eurE0(g.stufe)}</b><small>+${eurE0(g.stufe - g.erste.gehalt)} · ${g.erh.length} Erhöhungen</small></div>
         <div><span>Arbeitgeber</span>${g.arbeitgeber.map((a) => `<b class="ek-ag">${esc(a.name)}</b><small>${monKurz(a.von)} – ${a.bis === g.alle.at(-1).m ? 'heute' : monKurz(a.bis)}</small>`).join('')}</div></div><p class="cp-leg"><i class="cp-leg-a"></i>Grundgehalt brutto im Monat <span>· Punkte: Erhöhungen mit Prozent</span></p><div class="cp-chart ek-chart"><canvas id="c-ek-verlauf" aria-label="Grundgehalt und Erhöhungen"></canvas></div>`, { cls_: 'ek-verlauf', fuss: `Von ${eurE0(g.erste.gehalt)} (${monKurz(g.erste.m)}) auf ${eurE0(g.stufe)} – laut Abrechnungen` })}
-      ${bxKarte(`Vom Brutto zur Auszahlung · ${MON[+z.m.slice(5) - 1]}`, brutto)}
-      ${bxKarte('Steuer laut Bescheid', bescheide)}
+      ${bxKarte(`Vom Brutto zur Auszahlung · ${MON[+z.m.slice(5) - 1]}`, brutto, { cls_: 'ek-brutto' })}
+      ${bxKarte('Steuer laut Bescheid', bescheide, { cls_: 'ek-bescheid' })}
+      ${jahreKarte(g)}
     </div>` : '';
 
   box.innerHTML = `<div class="cp bx">
@@ -1519,6 +1577,51 @@ function einkommenSeite() {
   </div>`;
   gehBinden(box);
   if (g?.alle?.length) sicher(() => ekVerlaufZeichnen(g));
+  if (g?.jahre?.length) sicher(() => ekJahreZeichnen(g));
+}
+
+// Jahreseinkommen der letzten Jahre (aus gehaltUeberblick.jahre, Euro): gleicher Aufbau wie „Grundgehalt und Erhöhungen“ –
+// Eckwerte oben, Legende, Grafik, Fußzeile. Laufendes Jahr: abgerechnet voll, Plan schraffiert.
+const EK_JAHRE = 8;
+// bis zum laufenden Jahr (reine Plan-Jahre danach nicht), die letzten 8
+const ekJahre = (g) => (g.jahre || []).filter((x) => +x.j <= +D.bis.slice(0, 4) && x.nIst + x.nPlan > 0).slice(-EK_JAHRE);
+function jahreKarte(g) {
+  const J = ekJahre(g);
+  if (!J.length) return '';
+  const akt = J.at(-1), laeuft = akt.nPlan > 0 || akt.nIst + akt.nFehlt < 12, voll = J.filter((x) => x !== akt || !laeuft).filter((x) => x.nIst === 12);
+  const lv = voll.at(-1), ev = voll[0];
+  const plus = lv && ev && lv !== ev && ev.brutto ? lv.brutto / ev.brutto - 1 : null;
+  const stats = `<div class="ek-gg">
+      ${lv ? `<div><span>brutto ${lv.j}</span><b>${eurE0(lv.brutto)}</b><small>letztes volles Jahr</small></div>
+      <div><span>aufs Konto ${lv.j}</span><b>${eurE0(lv.netto)}</b><small>${Math.round((lv.netto / lv.brutto) * 100)} % vom Brutto</small></div>` : ''}
+      ${plus != null ? `<div><span>seit ${ev.j}</span><b class="${plus >= 0 ? 'pos' : 'neg'}">${plus >= 0 ? '+' : '−'}${Math.round(Math.abs(plus) * 100)} %</b><small>brutto, volle Jahre ${ev.j} → ${lv.j}</small></div>` : ''}</div>`;
+  const teil = J.filter((x) => x !== akt && x.nIst < 12).map((x) => `${x.j}: ${x.nIst} ${x.nIst === 1 ? 'Monat' : 'Monate'}${x.nFehlt ? `, ${x.nFehlt} fehlen` : ''}`);
+  return bxKarte('Jahreseinkommen der letzten Jahre', `${stats}<p class="cp-leg"><i class="ek-leg-b"></i>brutto <i class="cp-leg-a"></i>aufs Konto ${laeuft ? `<i class="ek-leg-p"></i>${akt.j}: Plan, noch ohne Abrechnung ` : ''}<span>· Zahl: brutto im Jahr</span></p><div class="cp-chart ek-chart ek-jchart"><canvas id="c-ek-jahre" aria-label="Jahreseinkommen brutto und aufs Konto"></canvas></div>`,
+    { cls_: 'ek-verlauf ek-jahre', fuss: `Summe der Abrechnungen je Jahr${laeuft ? ` · ${akt.j}: ${akt.nIst} von 12 Monaten abgerechnet, ${akt.nPlan} laut Gehaltsplan` : ''}${teil.length ? ` · nicht ganze Jahre: ${teil.join(', ')}` : ''}` });
+}
+function ekJahreZeichnen(g) {
+  if (!$('#c-ek-jahre')) return;
+  const J = ekJahre(g), c = css('--accent'), hell = alpha(c, 0.3);
+  const o = basis();
+  o.layout = { padding: { top: 22, right: 8 } };
+  o.interaction = { mode: 'index', intersect: false };
+  o.scales = { x: { ...achsenStil(), stacked: true, grid: { display: false }, ticks: { ...achsenStil().ticks, font: { size: 11 }, maxRotation: 0 } },
+    y: { ...achsenStil(), stacked: true, beginAtZero: true, ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 5 } } };
+  o.plugins.tooltip.callbacks = { title: (it) => { const x = J[it[0].dataIndex]; return `${x.j} · ${x.nIst} ${x.nIst === 1 ? 'Monat' : 'Monate'} abgerechnet${x.nPlan ? `, ${x.nPlan} Plan` : ''}${x.nFehlt ? `, ${x.nFehlt} fehlen` : ''}`; },
+    label: (it) => (it.raw ? ` ${it.dataset.label}: ${EUR0.format(it.raw)}` : null) };
+  o.onClick = () => setze({ tab: 'gehalt', gmonat: '' });
+  const bar = (label, data, farbe, stack) => ({ label, data, backgroundColor: farbe, stack, borderRadius: 2, borderSkipped: false, categoryPercentage: 0.72, barPercentage: 0.94, maxBarThickness: 46 });
+  const r = (v) => Math.round(v) || null;
+  zeichne('c-ek-jahre', { type: 'bar',
+    data: { labels: J.map((x) => x.j), datasets: [
+      bar('brutto', J.map((x) => r(x.brutto)), hell, 'b'), bar('brutto Plan', J.map((x) => r(x.bruttoPlan)), schraffur(hell), 'b'),
+      bar('aufs Konto', J.map((x) => r(x.netto)), c, 'n'), bar('aufs Konto Plan', J.map((x) => r(x.nettoPlan)), schraffur(c), 'n')] },
+    options: o,
+    plugins: [{ id: 'jahrSumme', afterDatasetsDraw(ch) {
+      const x = ch.ctx, m0 = ch.getDatasetMeta(0), m1 = ch.getDatasetMeta(1);
+      x.save(); x.font = `700 11px ${css('--font')}`; x.textAlign = 'center'; x.textBaseline = 'bottom'; x.lineJoin = 'round'; x.lineWidth = 3; x.strokeStyle = css('--surface'); x.fillStyle = css('--text-2');
+      J.forEach((j, i) => { const p = (m1.data[i] && j.bruttoPlan ? m1.data[i] : m0.data[i]); if (!p) return; const t = `${j.bruttoPlan ? '≈ ' : ''}${kurzWert(Math.round(j.brutto + j.bruttoPlan))}`; x.strokeText(t, p.x, p.y - 5); x.fillText(t, p.x, p.y - 5); });
+      x.restore(); } }] });
 }
 
 // Grundgehalt je Abrechnung als Stufenlinie, Erhöhungen als Punkte mit Prozent (Euro aus gehalt.js)
@@ -2337,74 +2440,55 @@ function tabBuchungen(conds) {
   const re = w.length ? new RegExp('(' + w.map(escRe).join('|') + ')', 'gi') : null;
   const mk = (s) => (re ? esc(s).replace(re, '<mark>$1</mark>') : esc(s));
   const kn = (r) => D.konten[r.k].name;
-  // Kennzahlen der Treffer (alle, nicht nur die angezeigten) – wie in den Kennzahlen nach Art: Einnahmen und Ausgaben
+  // Summen der Treffer (alle, nicht nur die angezeigten) – wie in den Kennzahlen nach Art: Einnahmen und Ausgaben
   // (Erstattungen mindern die Ausgaben), Sparen/Depot und Umbuchungen extra. Auf Konten der Kinder und gemeinsamen
   // Konten haben die Buchungen keine solche Art – dort zählt das Vorzeichen, ebenso wenn nur Sparen/Umbuchungen gefunden sind.
   const nachArt = (r) => (r.art === 'Einnahme' ? 'ein' : r.art === 'Ausgabe' ? 'aus' : FREMD_ART.has(r.art) ? (r.c > 0 ? 'ein' : 'aus') : 'extra');
   const nurExtra = rows.every((r) => nachArt(r) === 'extra'), seite = (r) => (nurExtra ? (r.c > 0 ? 'ein' : 'aus') : nachArt(r));
-  let ein = 0, aus = 0, extra = 0, nEin = 0, nAus = 0, nExtra = 0, von = rows[0].d, bis = rows[0].d;
-  const mon = new Map(), tag = new Map();
+  let ein = 0, aus = 0, extra = 0, nExtra = 0, von = rows[0].d, bis = rows[0].d;
   for (const r of rows) {
-    const s = seite(r), k = r.d.slice(0, 7), m = mon.get(k) || { ein: 0, aus: 0 };
-    if (s === 'ein') { ein += r.c; m.ein += r.c; nEin++; } else if (s === 'aus') { aus -= r.c; m.aus -= r.c; nAus++; } else { extra += r.c; nExtra++; }
+    const s = seite(r);
+    if (s === 'ein') ein += r.c; else if (s === 'aus') aus -= r.c; else { extra += r.c; nExtra++; }
     if (r.d < von) von = r.d; if (r.d > bis) bis = r.d;
-    mon.set(k, m);
-    tag.set(r.d, (tag.get(r.d) || 0) + r.c);
   }
-  const monate = [];
-  for (let k = von.slice(0, 7); k <= bis.slice(0, 7); k = mVor(k, 1)) monate.push(k);
-  const nM = monate.length, je = (c) => (nM > 1 ? ` · Ø ${eur0(c / nM)} im Monat` : '');
-  const extraText = nExtra ? ` · extra: Sparen/Umbuchungen <span class="${extra < 0 ? 'neg' : ''}">${plusMinus(extra)}</span>` : '';
-  const msA = [], msE = [];
-  for (let k = von.slice(0, 7); k <= bis.slice(0, 7); k = mVor(k, 1)) { msA.push(mon.get(k)?.aus || 0); msE.push(mon.get(k)?.ein || 0); }
-  const zahlen = [
-    kachel({ titel: 'Treffer', wert: NUM.format(rows.length), aend: von === bis ? dde(von) : `${dde(von)} – ${dde(bis)}`, unter: 'Buchungen mit den gewählten Filtern' }),
-    kachel({ titel: 'Ausgaben', wert: eur0(aus), aend: `${nAus} Buchungen${je(aus)}`, spark: msA.length > 1 ? sparkline(msA) : '', unter: 'Linie: je Monat' }),
-    kachel({ titel: 'Einnahmen', wert: eur0(ein), cls_: ein < 0 ? 'neg' : '', aend: `${nEin} Buchungen${je(ein)}`, spark: msE.length > 1 ? sparkline(msE) : '', unter: 'Linie: je Monat' }),
-    kachel({ titel: 'Saldo', wert: plusMinus(ein - aus), cls_: ein - aus >= 0 ? 'pos' : 'neg', aend: `Einnahmen minus Ausgaben${extraText}`, unter: 'Sparen und Umbuchungen extra' }),
-  ].join('');
   const bkKern = `${NUM.format(rows.length)} ${rows.length === 1 ? 'Buchung' : 'Buchungen'}${von === bis ? ` am ${dde(von)}` : ` von ${dde(von)} bis ${dde(bis)}`}: Ausgaben <b>${eur0(aus)}</b> · Einnahmen <b>${eur0(ein)}</b>`;
-  if (nM > 36) {   // lange Zeiträume: je Jahr
-    const jahr = new Map();
-    for (const [k, m] of mon) { const y = k.slice(0, 4), x = jahr.get(y) || { ein: 0, aus: 0 }; x.ein += m.ein; x.aus += m.aus; jahr.set(y, x); }
-    const jahre = []; for (let y = +von.slice(0, 4); y <= +bis.slice(0, 4); y++) jahre.push(String(y));
-    buchGrafik = { monate: jahre, mon: jahr, jahre: true };
-  } else if (nM >= 2) buchGrafik = { monate, mon };
   const pf = (k) => (S.sort === k ? ` ${S.dir < 0 ? '↓' : '↑'}` : '');
   const sortKnoepfe = `<div class="seg bt-sort" role="group" aria-label="Sortieren">${[['datum', 'Datum'], ['betrag', 'Betrag'], ['wer', 'Empfänger']].map(([k, t]) => `<button data-sort="${k}" class="${S.sort === k ? 'an' : ''}" title="${S.sort === k ? 'nochmal klicken: Reihenfolge umdrehen' : `nach ${t} sortieren`}">${t}${pf(k)}</button>`).join('')}</div>`;
-  const gruppiert = S.sort === 'datum', zeig = rows.slice(0, limit), anzahl = new Map();
-  for (const r of rows) anzahl.set(r.d, (anzahl.get(r.d) || 0) + 1);
+  const gruppiert = S.sort === 'datum', zeig = rows.slice(0, limit);
+  // je Tag (nur die angezeigten Buchungen): Anzahl, Summe, berührte Konten – die Kopfzeile zeigt genau diese Zeilen
+  const tage = new Map();
+  for (const r of zeig) { const t = tage.get(r.d) || tage.set(r.d, { n: 0, c: 0, k: [] }).get(r.d); t.n++; t.c += r.c; if (!t.k.includes(r.k)) t.k.push(r.k); }
   const datum = (d) => `${WTAG[new Date(`${d}T12:00:00Z`).getUTCDay()]} ${dde(d).slice(0, 6)}${d.slice(2, 4)}`;
-  // Kontostand am Tagesende: bei der letzten angezeigten Buchung eines Kontos an diesem Tag (nur nach Datum sortiert)
+  const datumLang = (d) => `${WTAG[new Date(`${d}T12:00:00Z`).getUTCDay()]}, ${dde(d)}`;
+  // Kontostand am Tagesende (wie auf der Seite Konten): je Tag einmal gerechnet
   const standTag = new Map(), standAm = (d) => { if (!standTag.has(d)) standTag.set(d, kontostaende(D, d)); return standTag.get(d); };
-  const letzteJeKonto = new Set();
-  if (gruppiert) { const gesehen = new Set(); for (const r of [...zeig].reverse()) { const key = `${r.d}|${r.k}`; if (!gesehen.has(key)) { gesehen.add(key); letzteJeKonto.add(r); } } }
-  const standHtml = (r) => {
-    if (!letzteJeKonto.has(r)) return '';
-    const x = standAm(r.d)[r.k];
-    return x?.c == null ? '' : `<small class="bz-stand" title="Kontostand von ${esc(D.konten[r.k].name)} am Ende dieses Tages">Stand ${x.status === 'ungefaehr' || x.status === 'geschaetzt' ? '≈ ' : ''}${eur(x.c)}</small>`;
+  const tagKopf = (d) => {
+    const t = tage.get(d), st = standAm(d);
+    const stand = t.k.map((k) => { const x = st[k]; if (x?.c == null) return ''; const ca = x.status === 'ungefaehr' || x.status === 'geschaetzt' ? '≈ ' : '';
+      return `<span class="bt-st" title="Kontostand von ${esc(D.konten[k].name)} am Ende dieses Tages${fremd(D.konten[k]) ? ' (zählt nicht in deine Summen)' : ''}">${esc(D.konten[k].name)} <b class="${x.c < 0 ? 'neg' : ''}">${ca}${eur(x.c)}</b></span>`; }).filter(Boolean);
+    return `<div class="bt-tag"><span class="bt-tag-d">${datumLang(d)}</span><span class="bt-tag-st">${stand.length ? `<small>Stand am Abend</small>${stand.join('')}` : ''}</span>`
+      + `<span class="bt-tag-n" title="${t.n} ${t.n === 1 ? 'Buchung' : 'Buchungen'} an diesem Tag zusammen">${t.n > 1 ? `${t.n} Buchungen · ` : ''}<b class="${cls(t.c)}">${eur(t.c)}</b></span></div>`;
   };
   let h = '';
   zeig.forEach((r, i) => {
-    const erster = !gruppiert || i === 0 || zeig[i - 1].d !== r.d, letzter = i === zeig.length - 1 || zeig[i + 1].d !== r.d;
-    const auf = offen.has(r.i);
-    h += `<div class="bz mit-datum${auf ? ' offen' : ''}${gruppiert && erster ? ' tag-anfang' : ''}" data-i="${r.i}" role="button" tabindex="0" aria-expanded="${auf ? 'true' : 'false'}" title="Anklicken: Einzelheiten">
-      <span class="bz-d">${erster ? datum(r.d) : ''}</span>
-      <span class="bz-n"><b>${mk(r.g || r.z || '–')}</b>${r.g && r.z ? `<small>${mk(r.z)}</small>` : ''}${sicher(() => chip(r))}</span>
-      <span class="bz-k"><span>${esc(schoen(r.kat))}</span><small>${esc(schoen(r.ukat))}${r.ukat ? ' · ' : ''}${esc(kn(r))}</small></span>
-      <b class="bz-b ${cls(r.c)}">${eur(r.c)}${standHtml(r)}</b></div>`;
+    const erster = i === 0 || zeig[i - 1].d !== r.d, auf = offen.has(r.i);
+    if (gruppiert && erster) h += tagKopf(r.d);
+    // Verwendungszweck nur, wenn die Suche darin trifft (sonst beim Aufklappen)
+    const zweck = r.z && r.g && re && new RegExp(re.source, 'i').test(r.z) ? `<small class="bz-z">${mk(r.z)}</small>` : '';
+    h += `<div class="bz bz2${gruppiert ? '' : ' mit-datum'}${auf ? ' offen' : ''}" data-i="${r.i}" role="button" tabindex="0" aria-expanded="${auf ? 'true' : 'false'}" title="Anklicken: Einzelheiten">
+      ${gruppiert ? '' : `<span class="bz-d">${datum(r.d)}</span>`}
+      <span class="bz-n"><b>${mk(r.g || r.z || '–')}</b>${zweck}<small>${esc(schoen(r.kat))}${r.ukat ? ` › ${esc(schoen(r.ukat))}` : ''} · ${esc(kn(r))}</small>${sicher(() => chip(r))}</span>
+      <b class="bz-b ${cls(r.c)}">${eur(r.c)}</b></div>`;
     if (auf) h += buchDetail(r);
-    if (gruppiert && letzter && anzahl.get(r.d) > 1) h += `<div class="bz-tagsumme">${anzahl.get(r.d)} Buchungen am ${dde(r.d).slice(0, 6)} · zusammen <b class="${cls(tag.get(r.d))}">${eur(tag.get(r.d))}</b></div>`;
   });
   let fuss = `<div class="bt-summe"><span>Summe ${rows.length === 1 ? 'der Buchung' : `aller ${NUM.format(rows.length)} Treffer`}<small>Einnahmen ${eur(ein)} · Ausgaben ${eur(-aus)}${nExtra ? ` · Sparen/Umbuchungen ${eur(extra)}` : ''}</small></span><b class="${cls(ein - aus + extra)}">${eur(ein - aus + extra)}</b></div>`;
   if (rows.length > limit) fuss += `<div class="mehr">${NUM.format(limit)} von ${NUM.format(rows.length)} angezeigt <button class="btn sm" id="mehr">Weitere ${NUM.format(Math.min(500, rows.length - limit))} anzeigen</button></div>`;
-  return `<div class="bt cp bx bk">${bxKopf('Buchungen', bkKern, 'Suche und Filter oben · Zeile anklicken: Einzelheiten · Säule anklicken: nur dieser Zeitraum')}
-    <div class="cp-kz bt-zahlen">${zahlen}</div>
-    ${sicher(kontenStandKarte) || ''}
-    ${buchGrafik ? `<div class="bt-grafik"><div class="bt-g-t"><b>Je ${buchGrafik.jahre ? 'Jahr' : 'Monat'}</b><span class="muted klein">Ausgaben orange, Einnahmen grün${nExtra ? ' (ohne Sparen/Umbuchungen)' : ''} · Säule anklicken: nur ${buchGrafik.jahre ? 'dieses Jahr' : 'dieser Monat'}</span></div><div class="s5-chart bt-chart"><canvas id="c-buch"></canvas></div></div>` : ''}
+  return `<div class="bt cp bx bk">${bxKopf('Buchungen', bkKern, 'Zeile anklicken: Verwendungszweck, IBAN und mehr')}
+    <div class="bk-raster"><div class="bk-haupt">
     ${sicher(() => neuLeiste(H))}
-    <div class="bt-leiste"><span class="muted klein">${gruppiert ? 'Nach Datum, bei mehreren Buchungen am Tag mit Tagessumme' : S.sort === 'betrag' ? 'Nach Betrag sortiert' : 'Nach Empfänger sortiert'} · Zeile anklicken: Einzelheiten</span>${sortKnoepfe}</div>
-    <div class="bt-liste">${h}</div>${fuss}</div>`;
+    <div class="bt-leiste"><span class="muted klein">${gruppiert ? 'Nach Tagen · in der Kopfzeile: Kontostand am Abend und Summe des Tages' : S.sort === 'betrag' ? 'Nach Betrag sortiert' : 'Nach Empfänger sortiert'}</span>${sortKnoepfe}</div>
+    <div class="bt-liste">${h}</div>${fuss}</div>
+    <aside class="bk-seite">${sicher(kontenStandKarte) || ''}</aside></div></div>`;
 }
 
 // Einzelheiten einer Buchung (aufgeklappte Zeile)
@@ -3419,13 +3503,24 @@ function aktualisieren(hist = 'ersetzen') {
 }
 
 // Buchungen ohne Suche: ein paar Vorschläge zum Antippen
+// Schnell finden: Knöpfe über die volle Breite; ein Klick schreibt die Suche ins Suchfeld (so sieht man, wie sie geht),
+// noch ein Klick auf den aktiven Knopf hebt sie auf. „letzte 30 Tage“ gilt über den Jahreswechsel (Jahr wird frei).
+const SCHNELL = [['Letzte 30 Tage', '30tage', true], ['Lebensmittel', 'lebensmittel'], ['Restaurants', 'restaurants|lieferservice'], ['Kantine', 'kantine'], ['Drogerie', 'drogerie'],
+  ['Kleidung', 'bekleidung'], ['Tanken', 'tanken|tankstelle'], ['Auto', 'mobilitaet'], ['Kinder', 'kinder'], ['Unterhalt', 'unterhalt'], ['Urlaub', 'urlaub|hotel'], ['Freizeit', 'freizeit'],
+  ['Gesundheit', 'gesundheit|apotheke'], ['Versicherungen', 'versicherung'], ['Miete und Wohnen', 'wohnen'], ['Steuern', 'steuern|finanzamt'], ['Amazon / PayPal', 'amazon|paypal'],
+  ['Bargeld', 'bargeld|geldautomat'], ['Gehalt', 'gehalt'], ['Erstattungen', 'erstattung'], ['Über 500 €', '>500'], ['Sparen und Depot', 'sparen|kapitalanlage']];
 function schnellSuche() {
   const box = $('#schnell');
-  box.hidden = S.tab !== 'buchungen' || !!S.q;
+  box.hidden = S.tab !== 'buchungen';
   if (box.hidden) return;
-  const V = [['Über 500 €', '>500'], ['Gehalt', 'gehalt'], ['Miete', 'miete'], ['Versicherungen', 'versicherung'], ['Unterhalt', 'unterhalt'], ['Tanken', 'tankstelle|tanken'], ['Erstattungen', 'erstattung']];
-  box.innerHTML = `<span class="muted klein">Schnell finden:</span>${V.map(([t, q]) => `<button class="chip" data-schnell="${esc(q)}">${t}</button>`).join('')}`;
-  box.querySelectorAll('[data-schnell]').forEach((b) => b.onclick = () => setze({ q: b.dataset.schnell }));
+  const q = (S.q || '').trim();
+  box.innerHTML = `<p class="schnell-tipp">Suche nach Name, Text oder Betrag – z. B. ${['rewe', '49,99', '>500', '100-250', '03.2025'].map((x) => `<button class="schnell-bsp" data-schnell="${esc(x)}">${esc(x)}</button>`).join(' ')} · mehrere Wörter grenzen ein, a|b findet eines von beiden, -wort schließt aus · <button class="schnell-bsp" data-schnell-hilfe>alle Möglichkeiten</button></p>
+    <div class="schnell-l" role="group" aria-label="Schnell finden">${SCHNELL.map(([t, x]) => `<button class="chip${q === x ? ' an' : ''}" data-schnell="${esc(x)}" title="Sucht: ${esc(x)}">${t}</button>`).join('')}</div>`;
+  box.querySelectorAll('[data-schnell]').forEach((b) => b.onclick = () => {
+    const x = b.dataset.schnell, frei = SCHNELL.find((y) => y[1] === x)?.[2];
+    setze(q === x ? { q: '' } : { q: x, ...(frei ? { jahr: '', monat: '', zr: '' } : {}) });
+  });
+  box.querySelector('[data-schnell-hilfe]').onclick = () => $('#dlg-hilfe').showModal();
 }
 
 function hashSchreiben(hist = 'ersetzen') {

@@ -7,6 +7,7 @@
 //   −49,99  -50 €  → nur Ausgaben genau dieses Betrags (auch typografisches Minus, wie die App Beträge anzeigt)
 //   >500  <20  100-250  → Betragsbereich
 //   2024  2019-2021  03.2024  2024-03  12.03.2024  → Zeitraum
+//   30tage         → die letzten 30 Tage bis heute
 
 // Kleinschreibung, Umlaute und Akzente vereinheitlichen: „Mobilität“ findet „Mobilitaet“
 export function norm(s) {
@@ -42,6 +43,10 @@ export function parse(q) {
     let m;
     const add = (label, test, kind = 'filter', span) => out.push({ raw: tk.raw, label, test, kind, span });
     if (!tk.quoted) {
+      if ((m = t.match(/^(\d{1,3})tage$/i)) && +m[1] > 0) {   // letzte n Tage bis heute, z. B. 30tage
+        const n = +m[1], d = new Date(Date.now() - n * 864e5), ab = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        add(`letzte ${n} Tage`, (r) => r.d > ab, 'zeit'); continue;
+      }
       if ((m = t.match(/^(\d{4})$/)) && isYear(+m[1])) { const y = +m[1]; add(`Jahr ${y}`, (r) => r.y === y, 'zeit', [`${y}-01`, `${y}-12`]); continue; }
       if ((m = t.match(/^(\d{4})-(\d{4})$/)) && isYear(+m[1]) && isYear(+m[2])) {
         const a = Math.min(+m[1], +m[2]), b = Math.max(+m[1], +m[2]);
