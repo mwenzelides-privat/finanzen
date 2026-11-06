@@ -793,27 +793,47 @@ function t30Teile(l, g) {
 function t30Html(l, g) {
   if (!l.length && !g) return '<div class="leer klein">Keine festen Abbuchungen in den nächsten 30 Tagen.</div>';
   const { vor, nach } = t30Teile(l, g);
-  const zeile = (x, i, xs) => {
-    const offen = x.am <= D.bis, neu = i === 0 || xs[i - 1].am !== x.am;
+  const nA = (n) => `${n} ${n === 1 ? 'Abbuchung' : 'Abbuchungen'}`;
+  const zeile = (x) => {
+    const offen = x.am <= D.bis;
     return `<button class="t30-z" data-c="${x.e}" data-fix="${esc(vertragsKey(x.f))}" title="${esc(vertragName(x.f))} · ${esc(x.f.rh.name)} · ${eur(x.f.betrag)}${offen ? ' · fällig, bis zum Datenstand nicht gebucht' : ''} – anklicken: alle Zahlungen">`
-      + `<span class="t30-d">${neu ? (offen ? 'fällig' : tagKurz(x.am)) : ''}</span><span class="t30-n">${esc(vertragName(x.f))}${offen ? ` <small class="t30-offen">seit ${+x.am.slice(8)}.${+x.am.slice(5, 7)}., noch nicht gebucht</small>` : x.f.rh.proJahr < 12 ? ` <small>${esc(x.f.rh.name)}</small>` : ''}</span><b>${eur0(x.e)}</b></button>`;
+      + `<span class="t30-d${offen ? ' t30-offen' : ''}">${offen ? 'fällig' : tagKurz(x.am)}</span><span class="t30-n">${esc(vertragName(x.f))}${offen ? ` <small class="t30-offen">seit ${+x.am.slice(8)}.${+x.am.slice(5, 7)}., noch nicht gebucht</small>` : x.f.rh.proJahr < 12 ? ` <small>${esc(x.f.rh.name)}</small>` : ''}</span><b>${eur0(x.e)}</b></button>`;
   };
-  const kopf = (t, a) => `<div class="t30-k"><span>${t} · ${a.xs.length} ${a.xs.length === 1 ? 'Abbuchung' : 'Abbuchungen'}</span><b>${eur0(a.s)}</b></div>`;
-  const gz = g ? `<button class="t30-k t30-gk"${geh(zuGehalt())} title="Anklicken: alle Gehälter"><span>${tagKurz(g.am)} · Gehalt ${g.ueberfaellig ? 'überfällig, noch nicht gebucht' : 'erwartet'}</span><b>+${eur0(g.c)}</b></button>` : '';
-  return `<div class="t30-l">${vor.xs.length || g ? kopf(g ? 'bis zum Gehalt' : 'feste Abbuchungen', vor) : ''}${vor.xs.map(zeile).join('')}${gz}${g && nach.xs.length ? kopf('ab dem Gehalt', nach) : ''}${nach.xs.map(zeile).join('')}<div class="t30-mehr" hidden></div></div>`;
+  // eine Spalte: oben Titel und Summe, darunter genau die Zeilen, die diese Summe ergeben
+  const spalte = (t, sub, a) => `<div class="t30-g"><div class="t30-gk"><span><b>${t}</b><small>${sub}</small></span><b class="${a.s ? 'neg' : ''}">${a.s ? '−' : ''}${eur0(a.s)}</b></div>`
+    + `<div class="t30-gl">${a.xs.length ? a.xs.map(zeile).join('') : '<p class="muted klein">keine festen Abbuchungen</p>'}<div class="t30-mehr" hidden></div></div></div>`;
+  const ende = tagKurz(plusTage(D.bis, 30));
+  if (!g) return `<div class="t30 t30-ohne">${spalte('feste Abbuchungen', `${nA(vor.xs.length)} bis ${ende} · kein Gehalt in diesen 30 Tagen`, vor)}</div>`;
+  const gz = `<button class="t30-geh"${geh(zuGehalt())} title="Anklicken: alle Gehälter"><span>Gehalt</span><b>+${eur0(g.c)}</b><small>${tagKurz(g.am)}</small><small>${g.ueberfaellig ? 'überfällig, noch nicht gebucht' : 'erwartet'}</small></button>`;
+  return `<div class="t30">${spalte('bis zum Gehalt', `${nA(vor.xs.length)} bis ${tagKurz(plusTage(g.am, -1))}`, vor)}${gz}${spalte('ab dem Gehalt', `${nA(nach.xs.length)} bis ${ende}`, nach)}</div>`;
 }
-// Zeilen, die unten bzw. rechts aus der Liste laufen würden, ausblenden und als „+ n weitere · Summe“ zusammenfassen
+// Am PC hat die Karte eine feste Höhe: je Spalte so viele Unterspalten wie nötig (zusammen so viele, wie in die Breite
+// passen); Zeilen, die dann noch unten bzw. rechts herauslaufen, ausblenden und als „+ n weitere · Summe“ zusammenfassen.
 function t30Passen() {
-  const box = document.querySelector('.cp-ab .t30-l');
+  const box = document.querySelector('.cp-ab .t30');
   if (!box) return;
-  const z = [...box.querySelectorAll('.t30-z')], mehr = box.querySelector('.t30-mehr');
-  z.forEach((e) => { e.hidden = false; }); mehr.hidden = true;
-  const B = box.getBoundingClientRect(), raus = (e) => { const r = e.getBoundingClientRect(); return r.right > B.right + 1 || r.bottom > B.bottom + 1; };
-  let i = z.length, weg = 0, c = 0;
-  while (i > 0 && (raus(z[i - 1]) || (!mehr.hidden && raus(mehr)))) {
-    const e = z[--i]; e.hidden = true; weg++; c += +e.dataset.c;
-    mehr.hidden = false; mehr.textContent = `+ ${weg} weitere ${weg === 1 ? 'Abbuchung' : 'Abbuchungen'} · ${eur0(c)}`;
-  }
+  const gs = [...box.querySelectorAll('.t30-g')], ls = gs.map((x) => x.querySelector('.t30-gl'));
+  for (const gl of ls) { gl.querySelectorAll('.t30-z').forEach((e) => { e.hidden = false; }); gl.querySelector('.t30-mehr').hidden = true; gl.style.columnCount = ''; }
+  box.style.gridTemplateColumns = '';
+  if (!matchMedia('(min-width: 901px)').matches || !box.offsetParent) return;
+  const geh0 = box.querySelector('.t30-geh'), frei = box.clientWidth - (geh0 ? geh0.offsetWidth + 2 * 18 : 0);
+  const max = Math.max(gs.length, Math.floor(frei / 250));
+  const brauch = ls.map((gl) => {
+    const z = gl.querySelectorAll('.t30-z'), h = z[0]?.offsetHeight || 1;
+    return Math.max(1, Math.ceil(z.length / Math.max(1, Math.floor(gl.clientHeight / h))));
+  });
+  while (brauch.reduce((t, n) => t + n, 0) > max) { const i = brauch.indexOf(Math.max(...brauch)); if (brauch[i] <= 1) break; brauch[i]--; }
+  if (geh0) box.style.gridTemplateColumns = `minmax(0, ${brauch[0]}fr) auto minmax(0, ${brauch[1]}fr)`;
+  ls.forEach((gl, k) => {
+    gl.style.columnCount = brauch[k];
+    const z = [...gl.querySelectorAll('.t30-z')], mehr = gl.querySelector('.t30-mehr');
+    const B = gl.getBoundingClientRect(), raus = (e) => { const r = e.getBoundingClientRect(); return r.right > B.right + 1 || r.bottom > B.bottom + 1; };
+    let i = z.length, weg = 0, c = 0;
+    while (i > 0 && (raus(z[i - 1]) || (!mehr.hidden && raus(mehr)))) {
+      const e = z[--i]; e.hidden = true; weg++; c += +e.dataset.c;
+      mehr.hidden = false; mehr.textContent = `+ ${weg} weitere ${weg === 1 ? 'Abbuchung' : 'Abbuchungen'} · ${eur0(c)}`;
+    }
+  });
 }
 
 // ---------------------------------------------------------------- Navigation: 5 Bereiche
@@ -1070,12 +1090,7 @@ function cockpitSeite() {
 
   // Reihe D: feste Abbuchungen der nächsten 30 Tage (Tag für Tag, mit Gehalt), Fixkosten nach Art, Eckwerte der anderen Bereiche
   const T30 = naechsteTermine(R.vertraege), gK = naechstesGehalt(), zuKal = { tab: 'fix', fixtab: 'kalender', konto: '' };
-  const T3 = t30Teile(T30, gK), t30n = (a) => `${a.xs.length} ${a.xs.length === 1 ? 'Abbuchung' : 'Abbuchungen'}`;
-  const t30Fluss = gK ? `<div class="t30-fluss">
-      <div><span>bis zum Gehalt</span><b>−${eur0(T3.vor.s)}</b><small>${t30n(T3.vor)}</small></div><i aria-hidden="true">›</i>
-      <div class="t30-fg"><span>Gehalt ${tagKurz(gK.am)}</span><b>+${eur0(gK.c)}</b><small>${gK.ueberfaellig ? 'überfällig, noch nicht gebucht' : 'erwartet'}</small></div><i aria-hidden="true">›</i>
-      <div><span>ab dem Gehalt</span><b>−${eur0(T3.nach.s)}</b><small>${t30n(T3.nach)}</small></div></div>`
-    : `<div class="t30-fluss"><div><span>feste Abbuchungen</span><b>−${eur0(T3.vor.s)}</b><small>${t30n(T3.vor)} · kein Gehalt in diesen 30 Tagen</small></div></div>`;
+  const T3 = t30Teile(T30, gK);
   const ber = [];
   const gU = sicher(() => gehaltUeberblick(gehaltHelfer())) || null;
   if (gU?.z) ber.push({ t: `Gehalt aufs Konto ${MONAT[+gU.z.m.slice(5) - 1]}`, sub: `Grundgehalt ${eurE0(gU.stufe)} brutto${gU.auto ? ` · Dienstwagen kostet ${eurE0(gU.auto.netto)} netto` : ''}`, w: eurE0(gU.z.auszahlung), ziel: { tab: 'einkommen' } });
@@ -1089,7 +1104,7 @@ function cockpitSeite() {
   const bereiche = ber.length ? `<div class="cp-ber">${ber.map((x) => `<button class="cp-ber-z"${geh(x.ziel)}><span>${x.t}<small>${x.sub}</small></span><b class="${x.cls_ || ''}">${x.w}</b></button>`).join('')}</div>` : '<p class="leer klein">Noch keine Angaben.</p>';
   const reiheD = `<div class="cp-reihe-d">
       <section class="card cp-karte cp-ab"><div class="cp-kt"><h2>Die nächsten 30 Tage</h2><span class="klein muted">feste Abbuchungen zusammen ${eur0(T3.vor.s + T3.nach.s)} · ${zl('ganzer Kalender', zuKal)}</span></div>
-        <div class="t30-body">${t30Fluss}${t30Html(T30, gK)}</div></section>
+        <div class="t30-body">${t30Html(T30, gK)}</div></section>
       <section class="card cp-karte cp-bk"><div class="cp-kt"><h2>Aus den anderen Bereichen</h2></div>${bereiche}</section>
     </div>`;
   box.innerHTML = `<div class="cp">
@@ -1108,6 +1123,7 @@ function cockpitSeite() {
   box.querySelector('[data-cp-waechter]')?.addEventListener('click', () => { cpWaechterAuf = !cpWaechterAuf; cockpitSeite(); if (cpWaechterAuf) springe('#cp-waechter'); });
   sicher(() => cpMonateZeichnen(V.monate));
   cpBerPassen();
+  requestAnimationFrame(() => requestAnimationFrame(cpBerPassen));   // nochmal, wenn das Raster seine endgültige Höhe hat
 }
 // „Aus den anderen Bereichen“: Die Kartenhöhe gibt das Raster vor (Cockpit füllt den Bildschirm) – so viele Zeilen zeigen,
 // wie hineinpassen (Reihenfolge = Wichtigkeit), statt unten aus der Karte zu laufen. Bei Fenstergröße neu.

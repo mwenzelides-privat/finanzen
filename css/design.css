@@ -809,23 +809,33 @@ i.cv-offen { background: var(--surface-2); border: 1px solid var(--border-strong
 .cp-auf-l .cp-auff-z { padding: 5px 2px; border-top: 1px solid var(--border); border-radius: 0; }
 .cp-auf-l .cp-auff-z:first-child { border-top: 0; }
 .cp-auf .cp-fuss { margin-top: auto; }
-/* 30 Tage: Ablauf links senkrecht, Liste rechts in Spalten über die volle Kartenhöhe */
-.t30-body { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 18px; }
-.t30-body .t30-fluss { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; align-content: start; gap: 2px; }
-.t30-body .t30-fluss > i { justify-self: center; transform: rotate(90deg); font-size: 15px; line-height: 1; }
-.t30-body .t30-fluss > div { padding: 5px 10px; }
-.t30-body .t30-fluss b { font-size: 18px; }
-.t30-body .t30-l { columns: 3 230px; height: 100%; }
 .cp-auf-l .cp-auff-z { padding: 3px 2px; }
-@media (max-width: 900px) { .t30-body { grid-template-columns: minmax(0, 1fr); } .t30-body .t30-l { height: auto; columns: 1; } }
-.t30-body { grid-template-rows: minmax(0, 1fr); }
-.t30-body > * { min-height: 0; }
-.t30-body .t30-fluss > div { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; align-items: baseline; padding: 4px 10px; }
-.t30-body .t30-fluss > div > span { grid-column: 1 / -1; }
-.t30-body .t30-fluss b { font-size: 17px; }
-.t30-body .t30-fluss small { text-align: right; }
-.t30-body .t30-fluss > i { font-size: 12px; height: 10px; }
-@media (max-width: 900px) { .t30-body { grid-template-rows: auto; } }
+/* d7.18: 30 Tage als zwei Spalten in zeitlicher Reihenfolge – bis zum Gehalt | Gehalt | ab dem Gehalt.
+   Jede Spalte: Kopf mit Summe, darunter genau ihre Zeilen (Unterspalten setzt t30Passen nach Platz). */
+.t30-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.t30 { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 18px; }
+.t30.t30-ohne { grid-template-columns: minmax(0, 1fr); }
+.t30-g { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.t30-gk { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 7px 12px; border-radius: var(--radius-s); background: var(--surface-2); }
+.t30-gk > span { display: flex; flex-direction: column; min-width: 0; }
+.t30-gk > span > b { font-size: var(--fs-s); font-weight: 650; }
+.t30-gk small { font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.t30-gk > b { font-size: 20px; font-weight: 650; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.t30-gk > b.neg { color: var(--aus-text); }
+.t30-gl { flex: 1 1 auto; min-height: 0; overflow: hidden; margin-top: 6px; column-gap: 24px; column-fill: auto; column-rule: 1px solid var(--border); }
+.t30-gl .t30-z { grid-template-columns: 68px minmax(0, 1fr) auto; padding: 3px 4px; border-bottom: 1px solid var(--border); border-radius: 0; }
+.t30-gl .t30-z:hover { border-radius: 5px; }
+.t30-d.t30-offen { color: var(--aus-text); }
+.t30-geh { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 2px; width: 128px; padding: 10px 8px; border: 0; border-radius: var(--radius-s); background: color-mix(in srgb, var(--ein) 13%, transparent); color: inherit; font: inherit; cursor: pointer; text-align: center; }
+.t30-geh:hover { background: color-mix(in srgb, var(--ein) 22%, transparent); }
+.t30-geh span { font-size: var(--fs-s); font-weight: 650; }
+.t30-geh b { font-size: 20px; font-weight: 650; color: var(--ein-text); white-space: nowrap; }
+.t30-geh small { font-size: var(--fs-xs); color: var(--muted); }
+@media (max-width: 900px) {
+  .t30 { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; gap: 10px; }
+  .t30-gl { overflow: visible; columns: 1; }
+  .t30-geh { width: auto; flex-direction: row; flex-wrap: wrap; gap: 4px 10px; padding: 8px 12px; }
+}
 
 /* d7.17: Einkommen – Grundgehalt links über zwei Reihen, rechts oben Brutto/Bescheid (flach), darunter Jahreseinkommen */
 .ek-reihe2 { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
@@ -902,7 +912,11 @@ i.cv-offen { background: var(--surface-2); border: 1px solid var(--border-strong
 .schnell-l { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
 .schnell-l .chip { justify-content: center; text-align: center; width: 100%; }
 .schnell-l .chip.an { background: var(--accent); color: #fff; border-color: var(--accent); }
-@media (max-width: 1100px) { .bk-raster { grid-template-columns: minmax(0, 1fr); } .bk-seite { position: static; order: -1; } .bk-seite .bks-liste { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); } }
+/* d7.18: Liste über die volle Breite, Kontostände darüber (nicht mehr rechts daneben) */
+.bk-raster { grid-template-columns: minmax(0, 1fr); }
+.bk-haupt { max-width: none; }
+.bk-seite { position: static; order: -1; }
+.bk-seite .bks-liste { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 @media (max-width: 640px) {
   .bt-tag { grid-template-columns: minmax(0, 1fr) auto; padding: 7px 8px 5px; }
   .bt-tag-st { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; }
