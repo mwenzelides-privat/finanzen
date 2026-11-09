@@ -929,3 +929,79 @@ i.cv-offen { background: var(--surface-2); border: 1px solid var(--border-strong
 .cp-auf-l, .cp-auff { grid-template-columns: minmax(0, 1fr); }
 .cp-auf-k > div { min-width: 0; }
 @media (max-width: 640px) { .cp-auf-k b, .cp-auf-k .bx-d { font-size: 16px; } .cp-auf-k > div { padding: 6px 8px; } }
+
+/* d7.19: Buchungen – Liste links schmaler, rechts die Auswertung der Treffer (Monate, Jahre, feste Verträge, Empfänger) */
+.bk-raster { grid-template-columns: minmax(0, 11fr) minmax(380px, 9fr); gap: 16px; align-items: start; }
+.bk-seite { grid-column: 1 / -1; order: 0; }
+.bk-ausw { position: sticky; top: 76px; min-width: 0; }
+.bk-ausw-d > summary { display: none; }
+.bk-a { padding: 12px 14px; }
+.bk-ausw .bk-a + .bk-a { margin-top: 12px; }
+.bk-a .cp-kt { flex-wrap: wrap; gap: 2px 10px; }
+.bk-a .cp-fuss { margin-top: 4px; }
+.bk-ch { position: relative; }
+.bk-ch-m { height: 170px; }
+.bk-ch-j { height: 130px; }
+.bk-fb { display: flex; height: 14px; border-radius: 4px; overflow: hidden; background: var(--surface-2); margin: 6px 0 8px; }
+.bk-fb i { display: block; height: 100%; }
+.bk-fb-f, .bk-fl i.bk-fb-f { background: var(--fest); }
+.bk-fb-v, .bk-fl i.bk-fb-v { background: var(--variabel); }
+.bk-fl { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: var(--fs-s); }
+.bk-fl i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.bk-fl b { font-variant-numeric: tabular-nums; }
+.bk-fl em { font-style: normal; color: var(--muted); font-size: var(--fs-xs); }
+.bk-fz { margin-top: 8px; border-top: 1px solid var(--border); }
+.bk-z, .bk-e { width: 100%; border: 0; border-bottom: 1px solid var(--border); background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; font-size: var(--fs-s); padding: 4px 2px; }
+.bk-z { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+.bk-z:last-child, .bk-e:last-child { border-bottom: 0; }
+.bk-z:disabled { cursor: default; color: var(--muted); }
+.bk-z:not(:disabled):hover, .bk-e:hover { background: var(--accent-soft); }
+.bk-z span, .bk-e span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.bk-z b, .bk-e b { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bk-el { display: grid; }
+.bk-e { display: grid; grid-template-columns: minmax(0, 1fr) minmax(40px, 28%) auto 36px; gap: 8px; align-items: center; }
+.bk-e i { display: block; height: 8px; border-radius: 2px; background: var(--accent-2); justify-self: start; }
+.bk-e em { font-style: normal; color: var(--muted); font-size: var(--fs-xs); text-align: right; }
+@media (max-width: 1100px) {
+  .bk-raster { grid-template-columns: minmax(0, 1fr); }
+  .bk-ausw { position: static; order: 1; }
+  .bk-haupt { order: 2; }
+  .bk-ausw-d > summary { display: list-item; cursor: pointer; font-weight: 650; padding: 8px 4px; }
+}
+
+/* Kredite (Seite Vermögen): je Vertrag Restschuld, Fortschritt, Zins/Tilgung, Prüfung und die Werte aus dem Vertrag */
+.bx-ganz { grid-column: 1 / -1; }
+.kr-l { display: grid; }
+.kr-z { display: grid; grid-template-columns: minmax(0, 1.3fr) auto minmax(0, 1.2fr) minmax(0, 1.3fr); gap: 8px 24px; align-items: center; padding: 10px 0; border-top: 1px solid var(--border); }
+.kr-z:first-child { border-top: 0; padding-top: 2px; }
+.kr-k { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kr-k[role="button"] { cursor: pointer; }
+.kr-k small, .kr-fort small, .kr-rest span, .kr-rest small { color: var(--muted); font-size: var(--fs-xs); }
+.kr-rest { display: flex; flex-direction: column; align-items: flex-end; }
+.kr-rest b { font-size: 22px; font-weight: 650; white-space: nowrap; }
+.kr-bar { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; margin-bottom: 3px; }
+.kr-bar i { display: block; height: 100%; background: var(--ein); }
+.kr-svg { display: block; width: 100%; height: 38px; margin-top: 4px; overflow: visible; }
+.kr-flaeche { fill: color-mix(in srgb, var(--aus) 14%, transparent); stroke: none; }
+.kr-linie { fill: none; stroke: var(--aus); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.kr-heute { fill: none; stroke: var(--text-2); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.kr-dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 16px; margin: 0; }
+.kr-dl div { display: flex; justify-content: space-between; gap: 8px; font-size: var(--fs-s); }
+.kr-dl dt { color: var(--muted); }
+.kr-dl dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.kr-pruef, .kr-belege { grid-column: 1 / -1; margin: 0; font-size: var(--fs-xs); color: var(--text-2); }
+.kr-belege summary { cursor: pointer; color: var(--accent); }
+.kr-belege table { margin-top: 6px; }
+.kr-z.fremd .kr-rest b { color: var(--muted); }
+.kr-unvoll { grid-template-columns: minmax(0, 1fr); }
+.cv-kr i, .bx-leg-kr i { background: var(--aus) !important; }
+@media (max-width: 900px) { .kr-z { grid-template-columns: minmax(0, 1fr) auto; } .kr-fort, .kr-dl { grid-column: 1 / -1; } }
+.kr-belege table { width: 100%; table-layout: fixed; }
+.kr-belege td { overflow-wrap: anywhere; vertical-align: top; }
+.kr-belege td:first-child { width: 28%; }
+.kr-belege td:nth-child(2) { width: 22%; }
+@media (max-width: 640px) {
+  .kr-belege tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .kr-belege td, .kr-belege td:first-child, .kr-belege td:nth-child(2) { width: auto; }
+  .kr-belege td:nth-child(3) { grid-column: 1 / -1; padding-top: 0; }
+}

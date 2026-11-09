@@ -127,9 +127,11 @@ export function vermoegen(H) {
     .sort((a, b) => b.c - a.c);
   const ohneWert = V.filter((v) => v.wert == null).length;
   const vorsorge = summe(vertraege, (v) => v.c);
-  const c = (ks?.c || 0) + (dp?.wert || 0) + (kaution?.c || 0) + vorsorge;
+  // Restschuld eigener Kredite (kredit.js, berechnet nach Tilgungsplan) wird abgezogen; ohne Kredit 0
+  const schulden = H.schulden ? H.schulden() : 0;
+  const c = (ks?.c || 0) + (dp?.wert || 0) + (kaution?.c || 0) + vorsorge - schulden;
   // depotBerechnet: der Depotteil enthält Einstand bzw. netto eingezahlt (berechnet), keinen oder nicht nur Kurswert
-  return { tag, ks, dp, kautionKonto, kaution, vertraege, ohneWert, vorsorge, c, voll: !!ks?.voll, ungefaehr: !!(ks?.abw || ks?.geschaetzt), depotBerechnet: !!dp && dp.berechnet > 0 };
+  return { tag, ks, dp, kautionKonto, kaution, vertraege, ohneWert, vorsorge, schulden, c, voll: !!ks?.voll, ungefaehr: !!(ks?.abw || ks?.geschaetzt), depotBerechnet: !!dp && dp.berechnet > 0 };
 }
 
 export function vermoegenKarte(H) {
