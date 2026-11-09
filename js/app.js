@@ -759,7 +759,7 @@ function naechsteTermine(vs, tage = 30) {
   }
   // als Vertrag darstellbar: Name, Rate, monatlich (vertragName erkennt f.kredit)
   if (mitKrediten()) for (const x of sicher(() => neueRaten(KH(), plusTage(D.bis, 1), bis)) || []) {
-    l.push({ am: x.am, f: { kredit: true, name: `Kreditrate ${x.x.geber}`, sig: 'kredit', seit: x.x.datei, betrag: x.c, rh: { name: 'monatlich, neuer Kredit', proJahr: 12 } } });
+    l.push({ am: x.am, f: { kredit: true, name: `Kreditrate ${x.x.zweck || x.x.geber}`, sig: 'kredit', seit: x.x.datei, betrag: x.c, rh: { name: 'monatlich, neuer Kredit', proJahr: 12 } } });
   }
   return l.sort((a, b) => (a.am < b.am ? -1 : a.am > b.am ? 1 : b.f.betrag - a.f.betrag));
 }

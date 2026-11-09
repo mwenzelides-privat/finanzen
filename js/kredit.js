@@ -60,7 +60,8 @@ export function kredite(H) {
   const out = [];
   for (const v of D.j.kredite?.vertraege || []) {
     const plan = tilgungsplan(v, H), geber = String(wert(v, 'kreditgeber') || v.datei.replace(/\.pdf$/i, '')).split(',')[0].trim();
-    const x = { v, datei: v.datei, geber, nr: wert(v, 'vertragsnummer') || '', status: v.status, fehlt: v.fehlt || [], plan: plan && !plan.fehler ? plan : null, fehler: plan?.fehler || '' };
+    const zweck = String(wert(v, 'zweck') || '').trim();   // was finanziert wird – unterscheidet mehrere Kredite derselben Bank
+    const x = { v, datei: v.datei, geber, zweck, titel: zweck ? `${zweck} · ${geber}` : geber, nr: wert(v, 'vertragsnummer') || '', status: v.status, fehlt: v.fehlt || [], plan: plan && !plan.fehler ? plan : null, fehler: plan?.fehler || '' };
     if (x.plan) {
       const p = x.plan, heute = D.bis, jahr = heute.slice(0, 4);
       x.rows = gebucht(H, v, p);
@@ -104,7 +105,8 @@ export function neueRaten(H, von, bis) {
 
 // ---------------------------------------------------------------- Anzeige (Seite Vermögen)
 const FELD_NAME = { kreditgeber: 'Kreditgeber', vertragsnummer: 'Vertragsnummer', vertragsdatum: 'Vertragsdatum', nettobetrag: 'Nettodarlehensbetrag', sollzins: 'Sollzins',
-  effzins: 'effektiver Jahreszins', rate: 'monatliche Rate', anzahl: 'Anzahl der Raten', erste_rate: 'erste Rate', schlussrate: 'Schlussrate', gesamtbetrag: 'Gesamtbetrag', konto: 'Lastschrift von' };
+  effzins: 'effektiver Jahreszins', rate: 'monatliche Rate', anzahl: 'Anzahl der Raten', erste_rate: 'erste Rate', schlussrate: 'Schlussrate', gesamtbetrag: 'Gesamtbetrag', konto: 'Lastschrift von',
+  zweck: 'finanziert', iban: 'IBAN für die Lastschrift', anzahlung: 'Anzahlung (nicht im Kredit)', kaufpreis: 'Kaufpreis' };
 const pz = (H, x) => `${H.NUM.format(x)} %`;
 
 function verlaufSvg(H, x) {
@@ -120,7 +122,7 @@ export function kreditKarte(H) {
   if (!l.length) return '';
   const zeile = (x) => {
     if (!x.plan) {
-      return `<div class="kr-z kr-unvoll"><div class="kr-k"><b>${esc(x.geber)}</b><small>${esc(x.datei)} · ${esc(x.fehler || x.status)}</small></div>
+      return `<div class="kr-z kr-unvoll"><div class="kr-k"><b>${esc(x.titel)}</b><small>${esc(x.datei)} · ${esc(x.fehler || x.status)}</small></div>
         <p class="bx-u">Ohne ${esc(x.fehlt.map((f) => FELD_NAME[f] || f).join(', ')) || 'alle Werte'} lässt sich kein Tilgungsplan rechnen. Sag Claude Bescheid, dann wird der Vertrag ausgelesen und die fehlenden Werte werden in „Kredite-abgeschrieben.json“ nachgetragen.</p></div>`;
     }
     const p = x.plan, anteil = Math.round((x.getilgt / p.P) * 100), ziel = x.rows.length ? H.zuBuchungen({ q: `"${x.geber.split(' ')[0]}"`, konto: '' }) : null;
@@ -128,9 +130,9 @@ export function kreditKarte(H) {
     const pruef = x.gesamtGedruckt != null ? (Math.abs(dG) <= Math.max(100, p.n * 2)
       ? (dG === 0 ? `Plan geprüft: Summe aller Raten ${eur(p.gesamt)} = Gesamtbetrag laut Vertrag` : `Plan geprüft: Summe aller Raten ${eur(p.gesamt)}, Gesamtbetrag laut Vertrag ${eur(x.gesamtGedruckt)} – ${eur(Math.abs(dG))} Unterschied durch Rundung der Schlussrate`) :`Achtung: Summe aller Raten ${eur(p.gesamt)}, laut Vertrag ${eur(x.gesamtGedruckt)} – die Bank rechnet anders, Restschuld daher nur ungefähr`) : 'Gesamtbetrag nicht im Vertrag gefunden – Plan nicht gegengeprüft';
     const buch = x.planBisHeute ? `${x.rows.length} von ${x.planBisHeute} fälligen Raten in deinen Buchungen gefunden` : `erste Rate am ${dde(p.erste)}`;
-    const belege = Object.entries(x.v.werte || {}).map(([f, w]) => `<tr><td>${esc(FELD_NAME[f] || f)}</td><td class="r">${esc(typeof w.wert === 'number' ? (f === 'sollzins' || f === 'effzins' ? pz(H, w.wert) : f === 'anzahl' ? String(w.wert) : eur(Math.round(w.wert * 100))) : /^\d{4}-\d{2}-\d{2}$/.test(w.wert) ? dde(w.wert) : w.wert)}</td><td><small>${w.quelle === 'gedruckt' ? `laut Vertrag: „${esc(w.beleg)}“` : esc(w.quelle)}</small></td></tr>`).join('');
+    const belege = Object.entries(x.v.werte || {}).map(([f, w]) => `<tr><td>${esc(FELD_NAME[f] || f)}</td><td class="r">${esc(typeof w.wert === 'number' ? (f === 'sollzins' || f === 'effzins' ? pz(H, w.wert) : f === 'anzahl' ? String(w.wert) : eur(Math.round(w.wert * 100))) : /^\d{4}-\d{2}-\d{2}$/.test(w.wert) ? dde(w.wert) : w.wert)}</td><td><small>${w.quelle === 'gedruckt' ? `laut Vertrag: „${esc(w.beleg)}“` : w.beleg ? `aus dem Scan abgeschrieben: „${esc(w.beleg)}“` : esc(w.quelle)}</small></td></tr>`).join('');
     return `<div class="kr-z${x.fremd ? ' fremd' : ''}">
-      <div class="kr-k"${ziel ? H.geh(ziel) : ''}${ziel ? ' role="button" tabindex="0" title="Anklicken: die gebuchten Raten"' : ''}><b>${esc(x.geber)}${x.nr ? ` <small>Nr. ${esc(x.nr)}</small>` : ''}</b>
+      <div class="kr-k"${ziel ? H.geh(ziel) : ''}${ziel ? ' role="button" tabindex="0" title="Anklicken: die gebuchten Raten"' : ''}><b>${esc(x.titel)}${x.nr ? ` <small>Nr. ${esc(x.nr)}</small>` : ''}</b>
         <small>${eur0(p.P)} zu ${pz(H, wert(x.v, 'sollzins'))} Sollzins · Rate ${eur(p.R)}${p.rateBerechnet ? ' (berechnet)' : ''} · ${x.konto ? `von ${esc(x.konto)}` : 'Konto unbekannt'}${x.fremd ? ' · zählt nicht in deine Summen' : ''}</small></div>
       <div class="kr-rest"><span>Restschuld heute <em class="marke">berechnet</em></span><b class="neg">${x.offen ? '−' : ''}${eur0(x.rest)}</b><small>${x.offen ? `letzte Rate ${dde(p.ende)}` : `abbezahlt seit ${dde(p.ende)}`}</small></div>
       <div class="kr-fort"><div class="kr-bar" title="${anteil} % getilgt"><i style="width:${anteil}%"></i></div><small>${anteil} % getilgt · ${eur0(x.getilgt)} von ${eur0(p.P)}</small>${verlaufSvg(H, x)}</div>
