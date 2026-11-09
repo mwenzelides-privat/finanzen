@@ -1021,3 +1021,20 @@ i.cv-offen { background: var(--surface-2); border: 1px solid var(--border-strong
 .kv-p { font-size: 12px; color: var(--text-2); }
 .zk-k.extra.kredit, .zk-leg .zk-k.kredit { background: #7a5af5; }
 .zk-l.kredit { color: #5a3fd8; border-color: rgba(122, 90, 245, .4); }
+
+/* d7.20 PDF-Export der Buchungen */
+.bt-export { display: inline-flex; gap: 6px; margin-left: 8px; }
+@media (max-width: 640px) { .bt-export { margin-left: 0; } }
+
+/* d7.20 Familie: Unterhalt pro Monat */
+.fu-karte { padding: 14px 18px; margin-bottom: 14px; }
+.fu-l { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-top: 8px; }
+.fu-s { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; min-width: 0; }
+.fu-s.fu-sum { background: var(--surface-2); border-color: var(--border-strong); }
+.fu-n { font-weight: 600; display: flex; flex-direction: column; }
+.fu-n small { font-weight: 400; color: var(--muted); font-size: 12px; }
+.fu-w { font-size: 30px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.fu-g { font-size: 12.5px; color: var(--text-2); display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline; }
+.bx-sechs > .fam-breit { grid-column: span 2; }
+.bx-sechs > .fam-voll { grid-column: 1 / -1; }
+@media (max-width: 900px) { .bx-sechs > .fam-breit { grid-column: auto; } .fu-w { font-size: 24px; } }

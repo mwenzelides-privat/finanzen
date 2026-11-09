@@ -1754,17 +1754,33 @@ function familieSeite() {
   const gezahlt = `${uhArten.map((a1, i) => `<div class="bx-rz"><span>${esc(a1.n)}</span><b>${eur0(uhTeile[i])}</b></div>`).join('')}
     <div class="bx-rz bx-gilt"><span>Summe gezahlt</span><b>${eur0(uhSum)}</b></div>
     ${uhSoll != null ? `<div class="bx-rz"><span>Soll laut deinen Angaben${ohneLfd ? ` bis ${esc(monLang(uhF.at(-1)?.k || uhM[0].k))}` : ''}<small>Abweichung ${uhAbw >= 0 ? '+' : '−'}${eur0(Math.abs(uhAbw))}${ohneLfd ? ' · laufender Monat noch nicht enthalten' : ''}</small></span><b>${eur0(uhSoll)}</b></div>` : ''}`;
+  // Unterhalt pro Monat: je Kind und Trennungsunterhalt das Soll laut verbindlicher Berechnung und was im letzten
+  // abgeschlossenen Monat überwiesen wurde – Teile auf Euro gerundet so, dass sie die gezeigten Summen ergeben
+  let proMonat = '';
+  if (l) {
+    const namen = [...(l.ku || []).map((_, i) => ({ n: U?.kinder?.[i]?.name || `Kind ${i + 1}`, art: 'Kindesunterhalt' })), { n: 'Trennungsunterhalt', art: U?.A?.name ? `an ${esc(U.A.name)}` : '' }];
+    const gRoh = mL ? [...(l.ku || []).map((_, i) => mL.kind[i] || 0), mL.tu || 0] : null, na = mL?.na || 0;
+    const gT = gRoh ? rundeTeile([...gRoh, ...(na ? [na] : [])]) : null, gS = gT ? gT.reduce((t, c) => t + c, 0) : null, sS = lTeile.reduce((t, c) => t + c, 0);
+    const status = (s, g) => (g == null ? '' : Math.abs(g - s) < 100 ? '<span class="bx-ok">passt</span>' : `<span class="bx-d neg">${g < s ? 'fehlt' : 'mehr'} ${eur0(Math.abs(g - s))}</span>`);
+    const spalte = (n, art, s, g, cls_ = '') => `<div class="fu-s ${cls_}"><span class="fu-n">${esc(n)}<small>${art}</small></span><b class="fu-w">${s == null ? '–' : eur0(s)}</b>
+      <span class="fu-g">${g == null ? '<span class="muted">noch nichts überwiesen</span>' : `überwiesen ${eur0(g)} ${s == null ? '' : status(s, g)}`}</span></div>`;
+    proMonat = `<section class="card bx-karte fu-karte"><div class="cp-kt"><h2>Unterhalt pro Monat</h2><span class="klein muted">Soll laut Berechnung vom ${dde(l.datum)}${mL ? ` · überwiesen im ${monLang(mL.k)}` : ''}</span></div>
+      <div class="fu-l">${namen.map((x, i) => spalte(x.n, x.art, lTeile[i], gT ? gT[i] : null)).join('')}
+        ${na ? spalte('nicht zugeordnet', 'Verwendungszweck nennt kein Kind', null, gT.at(-1)) : ''}
+        ${spalte('Zusammen', 'im Monat', sS, gS, 'fu-sum')}</div>
+      <p class="cp-fuss">${zl('Monat für Monat und Ausgleich ansehen', { ...zuU, _springe: '#uh-a' })} · gilt, bis die Gegenseite Auskunft verlangt</p></section>`;
+  }
   box.innerHTML = `<div class="cp bx">
     ${bxKopf('Familie', kern, unter)}
-    ${kacheln ? `<div class="cp-kz">${kacheln}</div>` : ''}
+    ${proMonat || (kacheln ? `<div class="cp-kz">${kacheln}</div>` : '')}
     <div class="bx-raster bx-sechs">
-      ${bxKarte('Risiko bei Neuberechnung', risikoInhalt, { rechts: '<span class="marke">berechnet</span>', fuss: 'Nichts selbst anstoßen – neu gerechnet wird erst, wenn die Gegenseite Auskunft verlangt. Mit RA Vitti abstimmen.' })}
-      ${bxKarte('Monat für Monat', `<div class="bx-ml">${monate || '<p class="bx-u">Keine Unterhaltszahlungen auf deinen Konten.</p>'}</div>${grund ? `<p class="bx-hinw-z">Warum: ${grund}. Die Zahlung liegt also ${mL.abw < 0 ? 'unter' : 'über'} der verbindlichen Berechnung.</p>` : ''}${bxLink('Alle Monate', { ...zuU, _springe: '#uh-a' })}`, { rechts: '<span class="klein muted">gezahlt · Abweichung zum Soll</span>' })}
+      ${uhM.length ? bxKarte('Unterhalt je Monat', `<p class="cp-leg">${uhArten.map((a1, i) => `<i style="background:${a1.f}"></i>${esc(a1.n)}`).join(' ')} <span>· Linie: Soll</span></p><div class="cp-chart bx-chart"><canvas id="c-fam-uh" aria-label="Unterhalt je Monat nach Art"></canvas></div>`,
+        { cls_: 'bx-flex fam-breit', fuss: 'Gezahlt laut Buchungen deiner Konten · ein Kind bekommt einen Betrag nur, wenn der Verwendungszweck es nennt' }) : ''}
+      ${bxKarte('Monat für Monat', `<div class="bx-ml">${monate || '<p class="bx-u">Keine Unterhaltszahlungen auf deinen Konten.</p>'}</div>${grund && !proMonat ? `<p class="bx-hinw-z">Warum: ${grund}. Die Zahlung liegt also ${mL.abw < 0 ? 'unter' : 'über'} der verbindlichen Berechnung.</p>` : ''}${bxLink('Alle Monate', { ...zuU, _springe: '#uh-a' })}`, { rechts: '<span class="klein muted">gezahlt · Abweichung zum Soll</span>' })}
+      ${uhM.length ? bxKarte(`Gezahlt seit ${esc(monLang(uhM[0].k))}`, gezahlt, { rechts: `<b class="bx-wert">${eur0(uhSum)}</b>`, fuss: `${uhM.length} Monate · Soll laut deinen Angaben${uhSoll != null ? '' : ' (nicht für alle Monate hinterlegt)'}` }) : ''}
       ${bxKarte(U?.A?.name ? `Ausgleich mit ${esc(U.A.name)}` : 'Ausgleich', ausgleich, { rechts: U ? `<b class="bx-wert ${U.saldo < 0 ? 'neg' : ''}">${U.saldo > 0 ? '+' : U.saldo < 0 ? '−' : ''}${eur0(Math.abs(U.saldo))}</b>` : '', fuss: 'Plus = an dich, minus = von dir · ohne die Unterhaltsraten' })}
       ${bxKarte('Kinder und Fristen', kinderInhalt, { fuss: 'Kinderkonten zählen nicht zu deinen Finanzen' })}
-      ${uhM.length ? bxKarte('Unterhalt je Monat', `<p class="cp-leg">${uhArten.map((a1, i) => `<i style="background:${a1.f}"></i>${esc(a1.n)}`).join(' ')} <span>· Linie: Soll</span></p><div class="cp-chart bx-chart"><canvas id="c-fam-uh" aria-label="Unterhalt je Monat nach Art"></canvas></div>`,
-        { cls_: 'bx-flex', fuss: 'Gezahlt laut Buchungen deiner Konten · ein Kind bekommt einen Betrag nur, wenn der Verwendungszweck es nennt' }) : ''}
-      ${uhM.length ? bxKarte(`Gezahlt seit ${esc(monLang(uhM[0].k))}`, gezahlt, { rechts: `<b class="bx-wert">${eur0(uhSum)}</b>`, fuss: `${uhM.length} Monate · Soll laut deinen Angaben${uhSoll != null ? '' : ' (nicht für alle Monate hinterlegt)'}` }) : ''}
+      ${bxKarte('Falls neu gerechnet wird', risikoInhalt, { cls_: 'fam-voll', rechts: '<span class="marke">berechnet</span>', fuss: 'Nichts selbst anstoßen – neu gerechnet wird erst, wenn die Gegenseite Auskunft verlangt. Mit RA Vitti abstimmen.' })}
     </div>
     ${RUNDUNG}
   </div>`;
@@ -2521,11 +2537,13 @@ function tabBuchungen(conds) {
   });
   let fuss = `<div class="bt-summe"><span>Summe ${rows.length === 1 ? 'der Buchung' : `aller ${NUM.format(rows.length)} Treffer`}<small>Einnahmen ${eur(ein)} · Ausgaben ${eur(-aus)}${nExtra ? ` · Sparen/Umbuchungen ${eur(extra)}` : ''}</small></span><b class="${cls(ein - aus + extra)}">${eur(ein - aus + extra)}</b></div>`;
   if (rows.length > limit) fuss += `<div class="mehr">${NUM.format(limit)} von ${NUM.format(rows.length)} angezeigt <button class="btn sm" id="mehr">Weitere ${NUM.format(Math.min(500, rows.length - limit))} anzeigen</button></div>`;
+  buchPdf = { rows, seite, ein, aus, extra, nExtra, von, bis };   // für den PDF-Export: dieselben Treffer und Summen
   const ausw = sicher(() => bkAuswertung(rows, conds, seite, ein, aus)) || '';
   return `<div class="bt cp bx bk">${bxKopf('Buchungen', bkKern, 'Zeile anklicken: Verwendungszweck, IBAN und mehr')}
     <div class="bk-raster"><aside class="bk-seite">${sicher(kontenStandKarte) || ''}</aside><div class="bk-haupt">
     ${sicher(() => neuLeiste(H))}
-    <div class="bt-leiste"><span class="muted klein">${gruppiert ? 'Nach Tagen · in der Kopfzeile: Kontostand am Abend und Summe des Tages' : S.sort === 'betrag' ? 'Nach Betrag sortiert' : 'Nach Empfänger sortiert'}</span>${sortKnoepfe}</div>
+    <div class="bt-leiste"><span class="muted klein">${gruppiert ? 'Nach Tagen · in der Kopfzeile: Kontostand am Abend und Summe des Tages' : S.sort === 'betrag' ? 'Nach Betrag sortiert' : 'Nach Empfänger sortiert'}</span>${sortKnoepfe}
+      <span class="bt-export"><button class="btn sm" data-bk-pdf title="Alle ${NUM.format(rows.length)} Treffer mit Filter und Summen als PDF (im Druckfenster „Als PDF speichern“ wählen)">PDF</button><button class="btn sm" data-bk-xlsx title="Alle Treffer als Excel-Datei">Excel</button></span></div>
     <div class="bt-liste">${h}</div>${fuss}</div>
     ${ausw}</div></div>`;
 }
@@ -2744,6 +2762,8 @@ function tabelle(conds) {
     setze(zuBuchungen({ jahr: m.slice(0, 4), monat: String(+m.slice(5)), art: S.kart, ...(S.kart === 'aus' ? { kat: k } : einFilter(k)) }));
   });
   el.querySelectorAll('[data-fixtab]').forEach((b) => b.onclick = () => setze({ fixtab: b.dataset.fixtab }));
+  el.querySelectorAll('[data-bk-pdf]').forEach((b) => b.onclick = () => sicher(() => buchungenPdf(conds)));
+  el.querySelectorAll('[data-bk-xlsx]').forEach((b) => b.onclick = () => exportieren('xlsx'));
   el.querySelectorAll('[data-sort]').forEach((th) => th.onclick = () => {
     const k = th.dataset.sort;
     S.dir = S.sort === k ? -S.dir : k === 'wer' ? 1 : -1; S.sort = k; tabelle(conds);
@@ -3583,6 +3603,59 @@ function tabelleExport() {
     { titel: 'Art', typ: 'text', breite: 10 }, { titel: 'Betrag', typ: 'euro', breite: 13 }, { titel: 'Vertrag', typ: 'text' }, { titel: 'Tags', typ: 'text' }, { titel: 'Notiz', typ: 'text', breite: 24 }, { titel: 'Steuerkategorie (Buhl)', typ: 'text', breite: 26 }];
   const zeilen = sortiert().map((r) => [r.d, D.konten[r.k].name, r.g, r.z, r.kat, r.ukat, r.art, r.c / 100, r.v, r.t, r.n, r.st]);
   return { name: dateiname('Buchungen'), blatt: 'Buchungen', spalten, zeilen };
+}
+
+// PDF der Buchungen: eigene Druckseite (alle Treffer, nicht nur die angezeigten) mit Filter, Summen wie unter der Liste
+// und Tabelle; im Druckfenster „Als PDF speichern“. Ohne Zusatzbibliothek, geht auch offline.
+let buchPdf = null;
+function filterTexte(conds) {
+  const t = [];
+  if (conds.length) t.push(`Suche: ${conds.map((c) => c.label).join(', ')}`);
+  const jw = jahreWahl(), mw = monateWahl();
+  if (jw.length) t.push(`${jw.length === 1 ? 'Jahr' : 'Jahre'} ${jw.join(', ')}`);
+  if (mw.length) t.push(`${mw.length === 1 ? 'Monat' : 'Monate'} ${mw.map((m) => MONAT[m - 1]).join(', ')}`);
+  if (S.zr) t.push(`Zeitraum ${zrText()}`);
+  t.push(kontoText());
+  if (S.kat) t.push(`Kategorie ${schoen(S.kat)}${S.ukat ? ` › ${schoen(S.ukat)}` : ''}`);
+  if (S.art !== 'alle') t.push(S.art === 'aus' ? 'nur Ausgaben' : 'nur Einnahmen');
+  if (S.vertrag) t.push(`Vertrag ${vertragText(S.vertrag)}`);
+  if (S.nf) t.push('ohne Fixkosten');
+  if (S.umb) t.push('mit Umbuchungen');
+  return t;
+}
+function buchungenPdf(conds) {
+  const P = buchPdf;
+  if (!P?.rows.length) return toast('Nichts zum Exportieren – keine Treffer.');
+  const e = (c) => esc(eur(c)), saldo = P.ein - P.aus + P.extra;
+  const zeilen = P.rows.map((r) => `<tr><td>${dde(r.d)}</td><td>${esc(r.g || '–')}${r.z ? `<small>${esc(r.z)}</small>` : ''}</td><td>${esc(schoen(r.kat))}${r.ukat ? ` › ${esc(schoen(r.ukat))}` : ''}</td><td>${esc(D.konten[r.k].name)}</td><td class="r${r.c < 0 ? ' neg' : ''}">${e(r.c)}</td></tr>`).join('');
+  const titel = `Buchungen ${P.von === P.bis ? dde(P.von) : `${dde(P.von)} – ${dde(P.bis)}`}`;
+  const html = `<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${esc(dateiname(titel))}</title><style>
+    @page { size: A4; margin: 14mm 12mm 16mm; }
+    body { font: 10px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #1a1a1a; margin: 0; }
+    h1 { font-size: 16px; margin: 0 0 4px; } .f { color: #555; margin: 0 0 8px; }
+    .s { display: flex; gap: 18px; border: 1px solid #ccc; border-radius: 6px; padding: 6px 10px; margin: 0 0 10px; }
+    .s b { display: block; font-size: 12px; } .neg { color: #b3401a; } .pos { color: #1b6b3a; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th { text-align: left; font-weight: 600; color: #555; border-bottom: 1px solid #999; padding: 3px 4px; }
+    td { border-bottom: 1px solid #e3e3e3; padding: 3px 4px; vertical-align: top; overflow-wrap: anywhere; }
+    td small { display: block; color: #666; } .r { text-align: right; white-space: nowrap; }
+    tr { break-inside: avoid; } thead { display: table-header-group; } tfoot td { font-weight: 700; border-top: 1px solid #999; border-bottom: 0; }
+    .fuss { color: #777; margin-top: 8px; }
+  </style></head><body>
+    <h1>${esc(titel)}</h1>
+    <p class="f">${filterTexte(conds).map(esc).join(' · ')}</p>
+    <div class="s"><span>Treffer<b>${NUM.format(P.rows.length)}</b></span><span>Einnahmen<b class="pos">${e(P.ein)}</b></span><span>Ausgaben<b class="neg">${e(-P.aus)}</b></span>${P.nExtra ? `<span>Sparen/Umbuchungen<b>${e(P.extra)}</b></span>` : ''}<span>Summe<b class="${saldo < 0 ? 'neg' : 'pos'}">${e(saldo)}</b></span></div>
+    <table><colgroup><col style="width:11%"><col style="width:45%"><col style="width:20%"><col style="width:12%"><col style="width:12%"></colgroup>
+      <thead><tr><th>Datum</th><th>Empfänger · Verwendungszweck</th><th>Kategorie</th><th>Konto</th><th class="r">Betrag</th></tr></thead>
+      <tbody>${zeilen}</tbody><tfoot><tr><td></td><td>Summe aller ${NUM.format(P.rows.length)} Treffer</td><td></td><td></td><td class="r${saldo < 0 ? ' neg' : ''}">${e(saldo)}</td></tr></tfoot></table>
+    <p class="fuss">Erstellt am ${dde(heuteLokal())} aus der App Finanzen · Datenstand ${dde(D.bis)} · Reihenfolge wie in der App</p>
+  </body></html>`;
+  const f = Object.assign(document.createElement('iframe'), { title: 'PDF' });
+  f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  document.body.append(f);
+  const d = f.contentDocument;
+  d.open(); d.write(html); d.close();
+  setTimeout(() => { f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 60000); }, 200);
 }
 
 async function exportieren(format) {
