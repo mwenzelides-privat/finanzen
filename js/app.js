@@ -14,7 +14,7 @@ import { fristenLaden, fristenKarte, fristenListe, fristenBinden, fristenAlle, i
 import { waechterLaden, istNeu, waechterKarte, neuLeiste, chip, waechterBinden, treffer } from './waechter.js';
 import { planGehalt, prognoseText, rahmenKarte, freiZeile, rahmenBinden, rahmenStand } from './planung.js';
 import { vermoegenLaden, depotKarte, vermoegenKarte, vermoegenBinden, reisenSeite, reisenBinden, vermoegen, reisen } from './vermoegen.js';
-import { kreditKarte, schuldenSumme, eigeneKredite, kreditEnde, neueRaten } from './kredit.js';
+import { kreditKarte, schuldenSumme, eigeneKredite, kreditEnde, neueRaten, kredite } from './kredit.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -3185,7 +3185,7 @@ function fixJahrHtml(aktiv) {
   const extra = Z.monate.reduce((t, m) => t + m.extra.reduce((s, f) => s + f.betrag, 0), 0);
   const maxX = Math.max(1, ...Z.monate.map((m) => m.summe - normal));
   const saeulen = `<div class="s5-teil fuell-aus" data-fuell="1"><h3>Außer der Reihe – die nächsten 12 Monate</h3>
-    <div class="mj">${Z.monate.map((m) => { const ex = Math.max(0, m.summe - normal); return `<button class="mj-s" data-fixtab="kalender" title="${esc(`${monLang(m.k)}: ${eur0(m.summe)} feste Abbuchungen${m.extra.length ? ` – außer der Reihe: ${m.extra.map((f) => `${vertragName(f)} ${eur0(f.betrag)}`).join(', ')}` : ' – nichts außer der Reihe'}`)}">
+    <div class="mj">${Z.monate.map((m) => { const ex = Math.max(0, m.summe - normal); return `<button class="mj-s" data-fixtab="kalender" title="${esc(`${monLang(m.k)}: ${eur0(m.summe)} feste Abbuchungen${m.extra.length ? ` – außer der Reihe: ${m.extra.map((f) => `${vertragName(f)} ${eur0(f.betrag)}`).join(', ')}` : m.kredit.length ? '' : ' – nichts außer der Reihe'}${m.kredit.length ? ` – neue Kreditraten: ${m.kredit.map((z) => `${z.x.zweck || z.x.geber} ${eur0(z.c)}`).join(', ')}` : ''}`)}">
       <span class="mj-w">${ex ? eur0(ex) : ''}</span><span class="mj-b"><i class="mj-x" style="height:${(ex / maxX) * 100}%"></i></span><span class="mj-m">${MON[+m.k.slice(5) - 1].slice(0, 1)}</span></button>`; }).join('')}</div>
     <p class="s5-erkl">zusätzlich zu ${eur0(normal)}, die jeden Monat gleich abgehen · Säule anklicken: Kalender</p></div>`;
   const fakten = `<dl class="s5-dl fuell-aus" data-fuell="2">
@@ -3199,6 +3199,61 @@ function fixJahrHtml(aktiv) {
   const weg = fixkostenErkennen().filter((f) => !f.aktiv && !f.gemeinsam && f.zuletzt >= seit && !laufendAn.has(empfaengerKey(f.name))).sort((a, b) => b.proMonat - a.proMonat);
   const beendet = weg.length ? `<div class="s5-teil fuell-aus" data-fuell="3"><h3>In den letzten 12 Monaten beendet</h3><div class="nt">${weg.map((f, i) => `<button class="nt-z bw-z${i ? ' fuell-aus' : ''}"${i ? ` data-fuell="${3 + i}" data-stopp` : ''} data-fix="${esc(vertragsKey(f))}" title="Anklicken: alle Zahlungen"><span class="nt-n">${esc(vertragName(f))} <small>bis ${dde(f.zuletzt).slice(3)}</small></span><b>${eur0(f.proMonat)}/Monat</b></button>`).join('')}</div></div>` : '';
   return saeulen + fakten + beendet;
+}
+// Vorausberechnung der Kredite je Monat (ab dem nächsten Monat bis nach der letzten Rate): Raten neuer Kredite (noch kein
+// erkannter Vertrag) kommen zu den heutigen Fixkosten dazu, ein Kredit, der schon als Vertrag läuft, fällt nach seiner
+// letzten Rate weg. Raten laut Vertrag (Tilgungsplan aus kredit.js); nur eigene Konten bzw. die gewählten.
+function kreditMonate() {
+  if (!mitKrediten()) return null;
+  const ks = kontoSet(), jetzt = D.bis.slice(0, 7);
+  const l = (sicher(() => kredite(KH())) || []).filter((x) => x.plan && !x.fremd && x.offen && (!ks || ks.has(D.kontoIdx.get(x.konto))));
+  const dazu = new Map(), weg = [];
+  let ende = '';
+  for (const x of l) {
+    if (!x.vertrag) {
+      for (const z of x.plan.zeilen) {
+        if (z.am <= D.bis) continue;
+        const k = z.am.slice(0, 7), e = dazu.get(k) || dazu.set(k, []).get(k);
+        e.push({ x, c: z.rate, am: z.am });
+        if (k > ende) ende = k;
+      }
+    } else if (x.vertrag.aktiv) {
+      const ab = mVor(x.plan.ende.slice(0, 7), 1);
+      weg.push({ x, ab, c: x.vertrag.proMonat });
+      if (ab > ende) ende = ab;
+    }
+  }
+  if (!ende) return null;
+  const monate = [];
+  for (let k = mVor(jetzt, 1), n = 0; k <= mVor(ende, 1) && n < 72; k = mVor(k, 1), n++) {
+    const neu = dazu.get(k) || [], fort = weg.filter((w) => w.ab <= k);
+    monate.push({ k, neu, fort, c: neu.reduce((t, z) => t + z.c, 0) - fort.reduce((t, w) => t + w.c, 0) });
+  }
+  return { monate, dazu, l };
+}
+// Karte „Fixkosten mit Krediten“: Zeiträume mit gleicher Änderung, je mit Fixkosten im Monat (heute + Änderung, auf Euro
+// gerundete Teile – die Zeile geht auf) und Anteil am Gehalt; darüber die Kreditraten je Monat als Säulen
+function kreditVorschauHtml(pm, pct) {
+  const K = kreditMonate();
+  if (!K?.monate.length) return '';
+  const zeitraum = [];
+  for (const m of K.monate) {
+    const z = zeitraum.at(-1);
+    if (z && z.c === m.c) z.bis = m.k; else zeitraum.push({ von: m.k, bis: m.k, c: m.c, m });
+  }
+  const mt = (k) => `${MON[+k.slice(5) - 1]} ${k.slice(0, 4)}`;
+  const text = (z, letzte) => (letzte && z.c === 0 ? `ab ${mt(z.von)}` : z.von === z.bis ? mt(z.von) : z.von.slice(0, 4) === z.bis.slice(0, 4) ? `${MON[+z.von.slice(5) - 1]} – ${mt(z.bis)}` : `${mt(z.von)} – ${mt(z.bis)}`);
+  const wer = (m) => [...m.neu.map((z) => `${z.x.zweck || z.x.geber} ${EUR.format(z.c / 100)}`), ...m.fort.map((w) => `${w.x.zweck || w.x.geber} fällt weg (−${EUR.format(w.c / 100)})`)].join(' + ') || (m.k < (K.monate.find((x) => x.neu.length || x.fort.length)?.k || '') ? 'noch keine Kreditrate' : 'keine Kreditrate mehr');
+  const pmE = r0(pm), zeilen = zeitraum.map((z, i) => {
+    const dE = r0(z.c), tE = pmE + dE;
+    return `<div class="kv-z"><span class="kv-n">${text(z, i === zeitraum.length - 1)}<small>${esc(wer(z.m))}</small></span><b class="kv-d${dE > 0 ? ' neg' : dE < 0 ? ' pos' : ''}">${dE > 0 ? '+' : dE < 0 ? '−' : '±'}${eur0(Math.abs(dE))}</b><b class="kv-t">${eur0(tE)}</b><span class="kv-p">${pct(tE)}</span></div>`;
+  }).join('');
+  const max = Math.max(1, ...K.monate.map((m) => Math.max(0, m.c))), hoch = zeitraum.reduce((a, z) => (z.c > a.c ? z : a), zeitraum[0]);
+  const saeulen = `<div class="kv-s" role="img" aria-label="Kreditraten je Monat">${K.monate.map((m) => `<span class="kv-sa${m.k.endsWith('-01') ? ' jan' : ''}" title="${esc(`${mt(m.k)}: ${m.c >= 0 ? '+' : '−'}${EUR.format(Math.abs(m.c) / 100)} – ${wer(m)}`)}"><i style="height:${(Math.max(0, m.c) / max) * 100}%"></i>${m.k.endsWith('-01') || m === K.monate[0] ? `<em>${m.k.endsWith('-01') ? m.k.slice(0, 4) : MON[+m.k.slice(5) - 1]}</em>` : ''}</span>`).join('')}</div>`;
+  const rechts = hoch.c > 0 ? zl(`<span class="s5-wert">+${eur0(r0(hoch.c))}</span>`, { tab: 'vermoegen', _springe: '#kr-karte' }) : '';
+  return karte5('Fixkosten mit Krediten', `Vorausberechnung: heute ${eur0(pmE)} im Monat, dazu die Raten laut Kreditvertrag bis zur letzten Rate · anklicken oben rechts: die Kredite`,
+    `${saeulen}<div class="kv-kopf"><span>Zeitraum · Raten</span><span>Kredite</span><span>Fixkosten</span><span>% Gehalt</span></div>${zeilen}
+    <p class="s5-erkl">Die übrigen Verträge sind wie heute gerechnet. Die ganze Rate zählt als Fixkosten (bei 0 % Zins ist sie reine Tilgung).</p>`, 'kv-karte', rechts);
 }
 const fvId = (art) => `fv-${norm(art).replace(/[^a-z]+/g, '-')}`;
 // Farbe je Art: von dunkel (größter Posten) nach hell, alle im Ton der Fixkosten
@@ -3238,6 +3293,7 @@ function fixVertraegeAnsicht(o) {
     ${karte5('Verträge', 'nach Art gruppiert: oben die Summe der Art, eingerückt die einzelnen Verträge · anklicken: alle Zahlungen', `<div class="seg fix-seg">${seg('laufend', `Laufend (${aktiv.length})`)}${nFrueher ? seg('frueher', `+ frühere seit 2020 (${nFrueher})`) : ''}${nFrueher + nAelter ? seg('alle', `alle (${alle.length})`) : ''}</div>${liste.length ? `<div class="vgs">${vertraege}</div>` : '<div class="leer">Keine regelmäßigen Zahlungen gefunden.</div>'}${gem}`, 's5-b2')}
     <div class="s5-spalte">
       ${karte5('Wofür', `Anteil an deinen Fixkosten (${eur0(pm)} im Monat) · anklicken: die Verträge`, wofuer)}
+      ${sicher(() => kreditVorschauHtml(pm, pct))}
       ${lebenKarte(R)}
       ${karte5('Nächste 30 Tage', 'Feste Abbuchungen je Tag, dazwischen das erwartete Gehalt · anklicken: alle Zahlungen', termineHtml(termine, 14) + fixJahrHtml(aktiv), '', zl(`<span class="s5-wert">${eur0(tSumme)}</span>`, { fixtab: 'kalender' }))}
     </div>
@@ -3288,17 +3344,22 @@ function termineImMonat(f, k) {
 
 function zahlungsDaten(lauf) {
   const jetzt = D.bis.slice(0, 7), ek = einkommen(), lohn = ek.aktuell.wert || ek.schnitt.wert, gt = gehaltstag();
-  const monate = [];
+  const monate = [], KM = sicher(() => kreditMonate()) || null;
   for (let i = 0; i < 12; i++) {
-    const k = mVor(jetzt, i), tage = new Map();
-    for (const f of lauf) for (const d of termineImMonat(f, k)) {
-      if (!tage.has(d)) tage.set(d, { mon: 0, extra: [], fs: [] });
-      const x = tage.get(d);
-      if (f.rh.proJahr === 12) { x.mon += f.betrag; x.fs.push(f); } else x.extra.push(f);
+    const k = mVor(jetzt, i), tage = new Map(), tag = (d) => tage.get(d) || tage.set(d, { mon: 0, extra: [], fs: [], kredit: [] }).get(d);
+    for (const f of lauf) {
+      const ende = vertragEnde(f);
+      if (ende && `${k}-01` > ende) continue;   // Kredit nach der letzten Rate
+      for (const d of termineImMonat(f, k)) {
+        const x = tag(d);
+        if (f.rh.proJahr === 12) { x.mon += f.betrag; x.fs.push(f); } else x.extra.push(f);
+      }
     }
-    const summe = [...tage.values()].reduce((t, x) => t + x.mon + x.extra.reduce((s, f) => s + f.betrag, 0), 0);
-    const extra = [...tage.values()].flatMap((x) => x.extra);
-    monate.push({ k, tage, summe, extra });
+    // Raten neuer Kredite (laut Vertrag, noch nicht als Vertrag erkannt)
+    for (const z of KM?.dazu.get(k) || []) tag(+z.am.slice(8)).kredit.push(z);
+    const summe = [...tage.values()].reduce((t, x) => t + x.mon + x.extra.reduce((s, f) => s + f.betrag, 0) + x.kredit.reduce((s, z) => s + z.c, 0), 0);
+    const extra = [...tage.values()].flatMap((x) => x.extra), kredit = [...tage.values()].flatMap((x) => x.kredit);
+    monate.push({ k, tage, summe, extra, kredit });
   }
   // monatliche Abbuchungen je Tag (für Satz und Tagesliste) – gleich in jedem Monat
   const tag1 = Array.from({ length: 31 }, () => ({ c: 0, fs: [] }));
@@ -3332,6 +3393,11 @@ function zahlungskalenderHtml(lauf) {
         inhalt += kreis('extra', d, f.betrag, `${d}. ${MONAT[+m.k.slice(5) - 1]}: ${vertragName(f)} ${EUR.format(f.betrag / 100)} (${f.rh.name})`);
         inhalt += `<span class="zk-l${d > 18 ? ' links' : ''}" role="button" tabindex="0" style="left:${pos(d)}" data-fix="${esc(vertragsKey(f))}">${esc(vertragName(f))} <b>${eur0(f.betrag)}</b></span>`;
       }
+      for (const z of x.kredit) {   // Rate eines neuen Kredits laut Vertrag – anklicken: Karte Kredite
+        const n = `Kreditrate ${z.x.zweck || z.x.geber}`;
+        inhalt += kreis('extra kredit', d, z.c, `${d}. ${MONAT[+m.k.slice(5) - 1]}: ${n} ${EUR.format(z.c / 100)} (laut Kreditvertrag)`);
+        inhalt += `<span class="zk-l kredit${d > 18 ? ' links' : ''}" role="button" tabindex="0" style="left:${pos(d)}"${geh({ tab: 'vermoegen', _springe: '#kr-karte' })}>${esc(n)} <b>${eur0(z.c)}</b></span>`;
+      }
     }
     if (gt && lohn) inhalt += kreis('lohn', gt, lohn, `Gehalt um den ${gt}.: ≈ ${eur0(lohn)} (zuletzt ${lohnText})`);
     const mehr = m.summe - normal;
@@ -3341,7 +3407,7 @@ function zahlungskalenderHtml(lauf) {
       <span class="zk-s"><i style="width:${(m.summe / maxSum) * 100}%"></i><b>${eur0(m.summe)}</b>${mehr >= 500 ? `<small>+${eur0(mehr)}</small>` : ''}</span></div>`;
   }).join('');
   return `<p class="ab-satz">${satz}</p>
-    <div class="zk-leg"><span><i class="zk-k mon"></i>monatlich</span><span><i class="zk-k extra"></i>außer der Reihe (jährlich, halb- oder vierteljährlich)</span><span><i class="zk-k lohn"></i>Gehalt (zuletzt ${eur0(lohn)})</span><span class="muted">Kreisfläche = Betrag · Kreis antippen: Einzelheiten</span></div>
+    <div class="zk-leg"><span><i class="zk-k mon"></i>monatlich</span><span><i class="zk-k extra"></i>außer der Reihe (jährlich, halb- oder vierteljährlich)</span>${monate.some((m) => m.kredit.length) ? '<span><i class="zk-k extra kredit"></i>Rate eines neuen Kredits (laut Vertrag)</span>' : ''}<span><i class="zk-k lohn"></i>Gehalt (zuletzt ${eur0(lohn)})</span><span class="muted">Kreisfläche = Betrag · Kreis antippen: Einzelheiten</span></div>
     <div class="zk">
       <div class="zk-zeile zk-kopf"><span class="zk-m"></span><div class="zk-spur">${[1, 5, 10, 15, 20, 25, 31].map((d) => `<span style="left:${pos(d)}">${d}.</span>`).join('')}</div><span class="zk-s">feste Abbuchungen</span></div>
       ${zeilen}

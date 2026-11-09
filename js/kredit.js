@@ -99,7 +99,7 @@ export function kreditEnde(H, f) {
 // von und bis – für Prognose und die nächsten 30 Tage
 export function neueRaten(H, von, bis) {
   const D = H.D();
-  return kredite(H).filter((x) => x.plan && !x.fremd && !x.vertrag && !x.rows.length)
+  return kredite(H).filter((x) => x.plan && !x.fremd && !x.vertrag)   // ohne erkannten Vertrag: künftige Raten fehlen sonst in den Fixkosten
     .flatMap((x) => x.plan.zeilen.filter((z) => z.am > D.bis && z.am >= von && z.am <= bis).map((z) => ({ x, am: z.am, c: z.rate })));
 }
 
