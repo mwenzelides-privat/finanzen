@@ -2569,7 +2569,7 @@ function bkAuswertung(rows, conds, seite, ein, aus) {
     const teile = rundeTeile([...zeig.map(([, c]) => c), ...(rest ? [rest] : []), aus - fc]), tE = teile.reduce((t, c) => t + c, 0) || 1;
     const fE = teile.slice(0, -1).reduce((t, c) => t + c, 0), pF = rundeTeile([fE / tE * 10000, (tE - fE) / tE * 10000]);
     const zeilen = [...zeig.map(([f], i) => ({ n: esc(vertragName(f)), c: teile[i], ziel: zuBuchungen({ vertrag: vertragsKey(f), konto: '' }) })),
-      ...(rest ? [{ n: `${top.length - 3} weitere Verträge`, c: teile[zeig.length], ziel: null }] : [])];
+      ...(rest ? [{ n: top.length - 3 === 1 ? '1 weiterer Vertrag' : `${top.length - 3} weitere Verträge`, c: teile[zeig.length], ziel: null }] : [])];
     fest = `<section class="card bk-a"><div class="cp-kt"><h2>Anteil feste Verträge</h2><span class="klein muted">an ${eur0(tE)} Ausgaben</span></div>
       <div class="bk-fb" role="img" aria-label="fest ${pF[0] / 100} Prozent, frei ${pF[1] / 100} Prozent"><i class="bk-fb-f" style="width:${pF[0] / 100}%"></i><i class="bk-fb-v" style="width:${pF[1] / 100}%"></i></div>
       <div class="bk-fl"><span><i class="bk-fb-f"></i>feste Verträge <b>${eur0(fE)}</b> <em>${pF[0] / 100} %</em></span><span><i class="bk-fb-v"></i>frei gestaltbar <b>${eur0(teile.at(-1))}</b> <em>${pF[1] / 100} %</em></span></div>
@@ -2580,7 +2580,7 @@ function bkAuswertung(rows, conds, seite, ein, aus) {
   for (const r of rows) { if (seite(r) !== haupt || !r.g) continue; jeE.set(r.g, (jeE.get(r.g) || 0) + (haupt === 'aus' ? -r.c : r.c)); }
   const eTop = [...jeE].filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]).slice(0, 5), eMax = eTop[0]?.[1] || 1;
   const empf = eTop.length > 1 ? `<section class="card bk-a"><div class="cp-kt"><h2>Größte Empfänger</h2><span class="klein muted">${hName} der Treffer</span></div>
-    <div class="bk-el">${eTop.map(([g, c]) => `<button class="bk-e"${geh({ tab: 'buchungen', q: `"${g.replace(/"/g, '')}"` })} title="Anklicken: nur ${esc(g)}"><span>${esc(g)}</span><i style="width:${((c / eMax) * 100).toFixed(1)}%"></i><b>${eur0(c)}</b><em>${Math.round((c / (haupt === 'aus' ? aus : ein)) * 100)} %</em></button>`).join('')}</div></section>` : '';
+    <div class="bk-el">${eTop.map(([g, c]) => `<button class="bk-e"${geh({ tab: 'buchungen', q: `an:"${g.replace(/"/g, '')}"` })} title="Anklicken: nur ${esc(g)}"><span>${esc(g)}</span><i style="width:${((c / eMax) * 100).toFixed(1)}%"></i><b>${eur0(c)}</b><em>${Math.round((c / (haupt === 'aus' ? aus : ein)) * 100)} %</em></button>`).join('')}</div></section>` : '';
   const offen = matchMedia('(min-width: 1101px)').matches ? ' open' : '';
   return `<aside class="bk-ausw"><details class="bk-ausw-d"${offen}><summary>Auswertung der Treffer</summary>
     <section class="card bk-a"><div class="cp-kt"><h2>${hName} je Monat</h2><span class="klein muted">${mKopf}</span></div><div class="bk-ch bk-ch-m"><canvas id="c-bm" aria-label="${hName} der Treffer je Monat"></canvas></div>
@@ -3554,7 +3554,7 @@ function vorschlaege() {
   let n = 0;
   for (const e of D.emp) {
     if (n >= 6) break;
-    if (e.key.includes(w)) { n++; out.push({ typ: 'Empfänger', name: e.name, info: `${NUM.format(e.n)}× · ${eur0(e.c)}`, q: `"${e.name}"` }); }
+    if (e.key.includes(w)) { n++; out.push({ typ: 'Empfänger', name: e.name, info: `${NUM.format(e.n)}× · ${eur0(e.c)}`, q: `an:"${e.name.replace(/"/g, '')}"` }); }
   }
   vorschlagListe = out.slice(0, 10);
   vorschlagSel = -1;

@@ -2,6 +2,7 @@
 //   rewe edeka     → beide Wörter müssen vorkommen
 //   rewe|edeka     → eines von beiden
 //   "dm drogerie"  → genau diese Wortfolge
+//   an:"Sandra Wenzelides" → nur Buchungen genau dieses Empfängers/Auftraggebers (nicht „Mara Sandra Wenzelides“)
 //   -storno        → ohne dieses Wort (nur Wörter mit Buchstaben; -50 ist ein Betrag)
 //   49,99          → Betrag genau 49,99 € (egal ob Ein- oder Ausgabe); auch 49.99, 49,99 €, 1.305 (Tausenderpunkt)
 //   −49,99  -50 €  → nur Ausgaben genau dieses Betrags (auch typografisches Minus, wie die App Beträge anzeigt)
@@ -23,11 +24,13 @@ const pad = (n) => String(n).padStart(2, '0');
 // Zerlegt die Eingabe in Wörter; "…" bleibt zusammen
 export function tokens(q) {
   const out = [];
-  const re = /(-?)"([^"]*)"?|(\S+)/g;
+  const re = /(-?)(an:)?"([^"]*)"?|(\S+)/gi;
   let m;
   while ((m = re.exec(q))) {
-    if (m[3] !== undefined) out.push({ raw: m[0], text: m[3], quoted: false });
-    else if (m[2].trim()) out.push({ raw: m[0], text: (m[1] || '') + m[2], quoted: true });
+    if (m[4] !== undefined) {
+      const a = m[4].match(/^(-?)an:(.+)$/i);   // an:rewe ohne Anführungszeichen
+      out.push(a ? { raw: m[0], text: a[1] + a[2], quoted: true, an: true } : { raw: m[0], text: m[4], quoted: false });
+    } else if (m[3].trim()) out.push({ raw: m[0], text: (m[1] || '') + m[3], quoted: true, an: !!m[2] });
   }
   return out;
 }
@@ -42,6 +45,13 @@ export function parse(q) {
     if (!tk.quoted) t = t.replace(/(\d)\s*(€|eur|euro)$/i, '$1');
     let m;
     const add = (label, test, kind = 'filter', span) => out.push({ raw: tk.raw, label, test, kind, span });
+    if (tk.an) {   // genau dieser Empfänger/Auftraggeber (ganzer Name, wie in der Spalte Empfänger)
+      const neg = t.startsWith('-'), w = norm(neg ? t.slice(1) : t).trim();
+      if (!w) continue;
+      if (neg) add(`ohne Empfänger „${w}“`, (r) => norm(r.g) !== w, 'ohne');
+      else out.push({ raw: tk.raw, label: `Empfänger „${w}“`, test: (r) => norm(r.g) === w, kind: 'text', words: [w] });
+      continue;
+    }
     if (!tk.quoted) {
       if ((m = t.match(/^(\d{1,3})tage$/i)) && +m[1] > 0) {   // letzte n Tage bis heute, z. B. 30tage
         const n = +m[1], d = new Date(Date.now() - n * 864e5), ab = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
