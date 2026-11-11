@@ -2820,6 +2820,7 @@ function tabelle(conds) {
     tabelle(conds);
   });
   if (S.tab === 'fix') planBinden();
+  if (S.tab === 'fix' && S.fixtab === 'vertraege') sicher(kvZeichnen);
   if (S.tab === 'fix' && S.fixtab === 'unterhalt') sicher(() => unterhaltBinden(el, H));
   if (S.tab === 'fix' && S.fixtab === 'kalender') sicher(() => fristenBinden(el, H));
   if (S.tab === 'konten') kontenGrafikZeichnen();
@@ -3295,12 +3296,40 @@ function kreditVorschauHtml(pm, pct) {
     const dE = r0(z.c), tE = pmE + dE;
     return `<div class="kv-z"><span class="kv-n">${text(z, i === zeitraum.length - 1)}<small>${esc(wer(z.m))}</small></span><b class="kv-d${dE > 0 ? ' neg' : dE < 0 ? ' pos' : ''}">${dE > 0 ? '+' : dE < 0 ? '−' : '±'}${eur0(Math.abs(dE))}</b><b class="kv-t">${eur0(tE)}</b><span class="kv-p">${pct(tE)}</span></div>`;
   }).join('');
-  const max = Math.max(1, ...K.monate.map((m) => Math.max(0, m.c))), hoch = zeitraum.reduce((a, z) => (z.c > a.c ? z : a), zeitraum[0]);
-  const saeulen = `<div class="kv-s" role="img" aria-label="Kreditraten je Monat">${K.monate.map((m) => `<span class="kv-sa${m.k.endsWith('-01') ? ' jan' : ''}" title="${esc(`${mt(m.k)}: ${m.c >= 0 ? '+' : '−'}${EUR.format(Math.abs(m.c) / 100)} – ${wer(m)}`)}"><i style="height:${(Math.max(0, m.c) / max) * 100}%"></i>${m.k.endsWith('-01') || m === K.monate[0] ? `<em>${m.k.endsWith('-01') ? m.k.slice(0, 4) : MON[+m.k.slice(5) - 1]}</em>` : ''}</span>`).join('')}</div>`;
+  const hoch = zeitraum.reduce((a, z) => (z.c > a.c ? z : a), zeitraum[0]);
+  // Grafik: je Kredit eine Reihe in einem eigenen Grün (gestapelt), ein Kredit, der schon als Vertrag läuft, nach seinem Ende
+  // als „fällt weg“ unter der Nulllinie – dieselben Monatswerte wie die Tabelle
+  const fest = css('--fest') || '#1b4d37', gruen = [fest, '#5fa37f', '#a3cfb6', '#2f7a57'];
+  const namen = [...new Set(K.monate.flatMap((m) => m.neu.map((z) => z.x.zweck || z.x.geber)))];
+  const reihen = namen.map((n, i) => ({ n, f: gruen[i % gruen.length], w: K.monate.map((m) => m.neu.filter((z) => (z.x.zweck || z.x.geber) === n).reduce((t, z) => t + z.c, 0)) }));
+  if (K.monate.some((m) => m.fort.length)) reihen.push({ n: 'fällt weg', f: css('--variabel') || '#b9d6c5', w: K.monate.map((m) => -m.fort.reduce((t, w) => t + w.c, 0)) });
+  kvGrafik = { monate: K.monate, reihen, wer, mt, pmE };
+  const saeulen = `<p class="cp-leg kv-leg">${reihen.map((x) => `<i style="background:${x.f}"></i>${esc(x.n)}`).join(' ')}</p>
+    <div class="cp-chart kv-chart"><canvas id="c-kv" aria-label="Kreditraten je Monat bis zur letzten Rate"></canvas></div>`;
   const rechts = hoch.c > 0 ? zl(`<span class="s5-wert">+${eur0(r0(hoch.c))}</span>`, { tab: 'vermoegen', _springe: '#kr-karte' }) : '';
   return karte5('Fixkosten mit Krediten', `Vorausberechnung: heute ${eur0(pmE)} im Monat, dazu die Raten laut Kreditvertrag bis zur letzten Rate · anklicken oben rechts: die Kredite`,
     `<div class="kv-in"><div class="kv-li"><h3 class="kv-h">Kreditraten je Monat</h3>${saeulen}</div><div><div class="kv-kopf"><span>Zeitraum · Raten</span><span>Kredite</span><span>Fixkosten</span><span>% Gehalt</span></div>${zeilen}</div></div>
     <p class="s5-erkl">Die übrigen Verträge sind wie heute gerechnet. Die ganze Rate zählt als Fixkosten (bei 0 % Zins ist sie reine Tilgung).</p>`, 'kv-karte', rechts);
+}
+let kvGrafik = null;
+function kvZeichnen() {
+  const G = kvGrafik;
+  if (!G || !$('#c-kv')) return;
+  const o = basis();
+  o.interaction = { mode: 'index', intersect: false };
+  o.layout = { padding: { top: 6 } };
+  o.scales = {
+    x: { ...achsenStil(), stacked: true, grid: { display: false }, ticks: { ...achsenStil().ticks, font: { size: 10.5 }, maxRotation: 0, autoSkip: true, autoSkipPadding: 10 } },
+    y: { ...achsenStil(), stacked: true, beginAtZero: true, ticks: { ...achsenStil().ticks, callback: achse, maxTicksLimit: 4 } },
+  };
+  o.plugins.tooltip.callbacks = {
+    title: (it) => G.mt(G.monate[it[0].dataIndex].k),
+    label: (it) => (it.raw ? ` ${it.dataset.label}: ${EUR.format(it.raw)}` : null),
+    footer: (it) => { const m = G.monate[it[0].dataIndex]; return `Kredite zusammen ${m.c < 0 ? '−' : '+'}${eur0(Math.abs(m.c))} · Fixkosten ${eur0(G.pmE + r0(m.c))}`; },
+  };
+  zeichne('c-kv', { type: 'bar',
+    data: { labels: G.monate.map((m) => monKurz(m.k)), datasets: G.reihen.map((x) => ({ label: x.n, data: x.w.map((c) => c / 100), backgroundColor: x.f, borderRadius: 3, maxBarThickness: 22, stack: 'k' })) },
+    options: o });
 }
 const fvId = (art) => `fv-${norm(art).replace(/[^a-z]+/g, '-')}`;
 // Farbe je Art: von dunkel (größter Posten) nach hell, alle im Ton der Fixkosten

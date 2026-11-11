@@ -1091,3 +1091,7 @@ i.cv-offen { background: var(--surface-2); border: 1px solid var(--border-strong
 @media (max-width: 900px) { .nav .nav-lang { display: none; } .nav button[data-bereich="buchungen"] { display: none; } .nav button { min-width: 0; } .nav .n { position: absolute; top: 2px; right: 50%; transform: translateX(22px); font-size: 9.5px; line-height: 14px; padding: 0 5px; background: var(--accent); color: #fff; } }
 /* d7.22.1 Handy: Datenstand oben ausblenden (überlappte den Schriftzug; steht im Cockpit in der Einlese-Leiste) */
 @media (max-width: 900px) { .stand { display: none !important; } }
+/* d7.22.2 Fixkosten mit Krediten: Grafik in Grüntönen */
+.kv-chart { height: 210px; min-height: 0; }
+.kv-leg { margin: 0 0 4px; }
+@media (max-width: 1000px) { .kv-chart { height: 180px; } }
