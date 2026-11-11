@@ -1038,3 +1038,54 @@ i.cv-offen { background: var(--surface-2); border: 1px solid var(--border-strong
 .bx-sechs > .fam-breit { grid-column: span 2; }
 .bx-sechs > .fam-voll { grid-column: 1 / -1; }
 @media (max-width: 900px) { .bx-sechs > .fam-breit { grid-column: auto; } .fu-w { font-size: 24px; } }
+
+/* d7.22 Einlesen-Leiste (Cockpit, Zu prüfen) */
+.ei-leiste { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 16px; border-left: 4px solid var(--accent); }
+.ei-leiste > svg { width: 22px; height: 22px; flex: none; fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.ei-t { display: flex; flex-direction: column; min-width: 0; flex: 1 1 260px; }
+.ei-t small { color: var(--muted); font-size: 12px; }
+.ei-k { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ei-ok { color: var(--ein-text, #1b6b3a); font-weight: 600; font-size: 13px; }
+/* Cockpit: Leiste oben, „Zu tun“ ganz unten */
+@media (min-width: 901px) { .cp.cp-mit-leiste:not(.bx) { grid-template-rows: auto minmax(290px, 1.4fr) auto minmax(240px, 1fr) auto; } }
+@media (max-width: 900px) { .cp.cp-mit-leiste:not(.bx) { grid-template-rows: none; } }
+
+/* d7.22 Fixkosten mit Krediten über die volle Breite */
+.kv-karte { margin-bottom: 14px; }
+.kv-in { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 24px; align-items: start; }
+.kv-h { font-size: 12.5px; font-weight: 600; color: var(--text-2); margin: 0 0 4px; }
+@media (max-width: 1000px) { .kv-in { grid-template-columns: minmax(0, 1fr); gap: 8px; } }
+
+/* d7.22 Arbeitsmodus „Zu prüfen“ */
+.zp { max-width: 1400px; margin: 0 auto; gap: 12px; }
+.zp-kopf-k { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.zp-liste { padding: 4px 0; }
+.zp-z { display: grid; grid-template-columns: 58px minmax(0, 1.5fr) 104px minmax(0, 1.25fr) minmax(0, 1.25fr) 128px; gap: 12px; align-items: center; padding: 9px 16px; border-bottom: 1px solid var(--border); }
+.zp-z:last-child { border-bottom: 0; }
+.zp-z.offen { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.zp-kopf { font-size: 11.5px; color: var(--muted); padding-top: 8px; padding-bottom: 6px; }
+.zp-kopf .r, .zp-b { text-align: right; white-space: nowrap; }
+.zp-d { font-size: 12.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.zp-n { display: flex; flex-direction: column; min-width: 0; }
+.zp-n b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zp-n small { color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zp-n .zp-k { color: var(--text-2); }
+.zp-f { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 11.5px; color: var(--muted); }
+.zp-f select { width: 100%; min-width: 0; font-size: 13px; padding: 5px 6px; }
+.zp-f em { font-style: normal; }
+.zp-f em.zp-vor { color: var(--accent); font-weight: 600; }
+.zp-f em.zp-offen { color: var(--aus-text, #b3401a); }
+.zp-a { text-align: right; }
+.zp-mehr { padding: 10px 16px; text-align: center; }
+.zp-fuss { max-width: 900px; }
+@media (max-width: 1100px) {
+  .zp-z { grid-template-columns: 50px minmax(0, 1fr) auto; row-gap: 6px; }
+  .zp-kopf { display: none; }
+  .zp-f { grid-column: 1 / -1; }
+  .zp-a { grid-column: 1 / -1; text-align: left; }
+  .zp-a .btn { width: 100%; }
+}
+.zp-neben > summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 16px; cursor: pointer; }
+.zp-neben > summary .btn { margin-left: auto; }
+.zp-neben[open] > summary { border-bottom: 1px solid var(--border); }
+@media (max-width: 900px) { .nav .nav-lang { display: none; } .nav button[data-bereich="buchungen"] { display: none; } .nav button { min-width: 0; } .nav .n { position: absolute; top: 2px; right: 50%; transform: translateX(22px); font-size: 9.5px; line-height: 14px; padding: 0 5px; background: var(--accent); color: #fff; } }

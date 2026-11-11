@@ -15,6 +15,7 @@ import { waechterLaden, istNeu, waechterKarte, neuLeiste, chip, waechterBinden, 
 import { planGehalt, prognoseText, rahmenKarte, freiZeile, rahmenBinden, rahmenStand } from './planung.js';
 import { vermoegenLaden, depotKarte, vermoegenKarte, vermoegenBinden, reisenSeite, reisenBinden, vermoegen, reisen } from './vermoegen.js';
 import { kreditKarte, schuldenSumme, eigeneKredite, kreditEnde, neueRaten, kredite } from './kredit.js';
+import { zuPruefenSeite, zuPruefenBinden, zuPruefenZahl } from './zupruefen.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -854,7 +855,7 @@ function t30Passen() {
 // Jeder Bereich öffnet mit seinem Überblick (S.tab = Name des Bereichs); die Einzelheiten sind die bisherigen Seiten
 // (S.tab bleibt dort gleich, damit alle Verweise weiter gelten). Familie › Unterhalt ist intern fix/unterhalt.
 const SEGMENTE = {
-  geldfluss: [['geldfluss', 'Überblick'], ['uebersicht', 'Kategorien'], ['fix', 'Verträge']],
+  geldfluss: [['geldfluss', 'Überblick'], ['uebersicht', 'Kategorien']],
   vermoegen: [['vermoegen', 'Überblick'], ['konten', 'Konten & Depot']],
   einkommen: [['einkommen', 'Überblick'], ['gehalt', 'Gehalt'], ['steuer', 'Steuer']],
   familie: [['familie', 'Überblick'], ['unterhalt', 'Unterhalt & Rechner']],
@@ -862,7 +863,7 @@ const SEGMENTE = {
 function bereichVon(x = S) {
   if (x.tab === 'start') return 'cockpit';
   if (UEBERBLICK[x.tab]) return x.tab;
-  if (x.tab === 'fix') return x.fixtab === 'unterhalt' ? 'familie' : 'geldfluss';
+  if (x.tab === 'fix') return x.fixtab === 'unterhalt' ? 'familie' : 'fixkosten';
   if (x.tab === 'uebersicht' || x.tab === 'kennzahlen') return 'geldfluss';
   if (x.tab === 'konten') return 'vermoegen';
   if (x.tab === 'gehalt' || x.tab === 'steuer') return 'einkommen';
@@ -871,7 +872,7 @@ function bereichVon(x = S) {
 const segVon = () => (S.tab === 'fix' && S.fixtab === 'unterhalt' ? 'unterhalt' : S.tab);
 const segZiel = (t) => (t === 'fix' ? { tab: 'fix', fixtab: 'vertraege' } : t === 'unterhalt' ? { tab: 'fix', fixtab: 'unterhalt' } : { tab: t });
 function bereichOeffnen(b) {
-  setze(b === 'cockpit' ? { tab: 'start' } : b === 'buchungen' ? { tab: 'buchungen' } : { tab: b });
+  setze(b === 'cockpit' ? { tab: 'start' } : b === 'buchungen' ? { tab: 'buchungen' } : b === 'fixkosten' ? { tab: 'fix', fixtab: 'vertraege' } : { tab: b });
 }
 function navZeigen() {
   const b = bereichVon(), lupe = S.tab === 'buchungen';
@@ -879,6 +880,9 @@ function navZeigen() {
   // Buchungssuche: Lupe als aktiver Knopf mit Beschriftung, damit klar ist, wo man gerade ist
   $('#btn-lupe').classList.toggle('an', lupe);
   if (lupe) $('#btn-lupe').setAttribute('aria-current', 'page'); else $('#btn-lupe').removeAttribute('aria-current');
+  // Zähler „Zu prüfen“: neue Buchungen auf deinen eigenen Konten
+  const zn = $('#nav-zp-n'), n = sicher(() => zuPruefenZahl(H ??= modulHelfer()));
+  if (zn) { zn.hidden = !n; zn.textContent = n ? NUM.format(n) : ''; }
   const box = $('#bereich-seg'), l = SEGMENTE[b], jetzt = segVon();
   box.hidden = !l;
   if (!l) return;
@@ -1123,18 +1127,20 @@ function cockpitSeite() {
         <div class="t30-body">${t30Html(T30, gK)}</div></section>
       <section class="card cp-karte cp-bk"><div class="cp-kt"><h2>Aus den anderen Bereichen</h2></div>${bereiche}</section>
     </div>`;
-  box.innerHTML = `<div class="cp">
+  box.innerHTML = `<div class="cp cp-mit-leiste">
+    ${einlesenLeiste()}
     <div class="cp-reihe-a">
       ${hero}
       <section class="card cp-karte cp-kat cp-auf"><div class="cp-kt"><h2>Auffällig im ${esc(K.kurz)}</h2><span class="klein muted">gegen Ø 12 Monate</span></div>${auffaellig}
         <p class="cp-fuss" title="Durchschnitt ${esc(monatsText(K.ms))} · ohne Kinder- und gemeinsame Konten · Beträge gerundet">Ø ${esc(monatsText(K.ms))} · ohne Kinder- und gemeinsame Konten · ${zl('alle Kategorien im Geldfluss', { tab: 'geldfluss' })}</p></section>
     </div>
     <div class="cp-drei cp-vier">${kacheln}</div>
+    ${reiheD}
     <section class="card cp-karte cp-td-karte"><div class="cp-kt"><h2>Zu tun ${hb.length ? `<span class="cp-zahl${hbRot ? ' neg' : ''}">${hb.length}</span>` : ''}</h2>${hb.length > 4 ? `<span class="klein muted">+ ${hb.length - 4} weitere · ${zl('alle Fristen', { tab: 'fix', fixtab: 'kalender', _springe: '#fr-liste' })}</span>` : ''}</div>${handlungHtml(hb)}
       <div id="cp-waechter"${cpWaechterAuf ? '' : ' hidden'}>${cpWaechterAuf ? sicher(() => waechterKarte(H)) : ''}</div></section>
-    ${reiheD}
   </div>`;
   gehBinden(box);
+  einlesenLeisteBinden(box);
   if (cpWaechterAuf) sicher(() => waechterBinden(box, H));
   box.querySelector('[data-cp-waechter]')?.addEventListener('click', () => { cpWaechterAuf = !cpWaechterAuf; cockpitSeite(); if (cpWaechterAuf) springe('#cp-waechter'); });
   sicher(() => cpMonateZeichnen(V.monate));
@@ -1250,7 +1256,26 @@ function cpStandZeichnen(ms, id = 'c-cp-stand') {
 // den bisherigen Seiten (Umschalter oben, Klick auf eine Zahl). Alle Zahlen kommen aus den vorhandenen Rechnungen
 // (monatsRechnung, verlauf5, sammle, vermoegen, gehalt.js, steuerprognose.js, unterhalt.js) – hier wird nichts neu gerechnet.
 // Kinder- und gemeinsame Konten zählen in keiner Summe. Ausgaben stehen ohne Vorzeichen; Rot/Grün nur für Vorzeichen und Abweichungen.
-const UEBERBLICK = { geldfluss: () => geldflussSeite(), vermoegen: () => vermoegenSeite(), einkommen: () => einkommenSeite(), familie: () => familieSeite() };
+const UEBERBLICK = { geldfluss: () => geldflussSeite(), vermoegen: () => vermoegenSeite(), einkommen: () => einkommenSeite(), familie: () => familieSeite(), zupruefen: () => zuPruefenAnsicht() };
+
+// ---------------------------------------------------------------- Daten einlesen und prüfen (Leiste oben im Cockpit und in „Zu prüfen“)
+// Datenstand, letzter Aufbau, Knopf „Daten einlesen“ (wie im Menü) und – im Cockpit – wie viele neue Buchungen zu prüfen sind
+function einlesenLeiste(mitPruefen = true) {
+  const e = D.j.erstellt || '', st = e ? `${dde(e.slice(0, 10))}, ${e.slice(11, 16)} Uhr` : '';
+  const n = mitPruefen ? sicher(() => zuPruefenZahl(H ??= modulHelfer())) : '';
+  const pruefen = n === '' ? '' : n ? `<button class="btn primary"${geh({ tab: 'zupruefen' })}>${n === 1 ? '1 neue Buchung' : `${NUM.format(n)} neue Buchungen`} prüfen →</button>` : `<span class="ei-ok">✓ alles geprüft</span>`;
+  return `<div class="card ei-leiste"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5"/><path d="M4 15v4.5h16V15"/></svg>
+    <span class="ei-t"><b>Daten bis ${dde(D.bis)}</b><small>${st ? `zuletzt eingelesen ${st} · ` : ''}neue Kontoauszüge in Google Drive › 10 Finanzen › Eingang legen</small></span>
+    <span class="ei-k"><button class="btn" data-einlesen title="Neue Dateien aus dem Eingang einlesen und die neuesten Daten laden">↻ Daten einlesen</button>${pruefen}</span></div>`;
+}
+const einlesenLeisteBinden = (box) => box.querySelectorAll('[data-einlesen]').forEach((b) => b.onclick = () => einlesen());
+function zuPruefenAnsicht() {
+  const box = $('#s5'), h = { ...pruefHelfer(), neuZeichnen: () => aktualisieren() };
+  box.innerHTML = `<div class="cp bx zp">${zuPruefenSeite(h, einlesenLeiste(false))}</div>`;
+  zuPruefenBinden(box);
+  einlesenLeisteBinden(box);
+  gehBinden(box);
+}
 // Ausgaben je Kategorie: der letzte abgeschlossene Monat als Grundlage, daneben der Ø der letzten 12 Monate (alle eigenen Konten).
 // Wie im Reiter Kategorien zählt eine Kategorie nur mit Ausgaben über 0 (Erstattungen überwiegen sonst) – Zeilen und Summen gehen so auf.
 function katVormonat() {
@@ -3186,6 +3211,8 @@ function tabFixkosten() {
         <p class="muted klein">Lebenshaltung = alle übrigen Ausgaben deiner Konten (Einkauf, Tanken, Freizeit, Urlaub, Anschaffungen) ohne Fixkosten und ohne Gemeinschaftskonto, ${esc(monatsText(lh.monate))}. „Typischer Monat“ ist der Median – einzelne teure Monate zählen dann weniger. Die Wahl gilt überall: normaler Monat, laufender Monat und Prognose. Beim Vormonat zeigt das Cockpit zum Vergleich die Prognose mit Ø 12 Monate.</p>
       </details>
     </section>`;
+  // Vorausberechnung mit Krediten: über die volle Breite direkt unter dem Monatsbalken (gut sichtbar, nur bei den Verträgen)
+  if (S.fixtab === 'vertraege') h += sicher(() => kreditVorschauHtml(pm, pct));
   const reiter = (k, t) => `<button data-fixtab="${k}" class="${S.fixtab === k ? 'an' : ''}">${t}</button>`;
   h += `<div class="fix-tabs"><div class="seg">${reiter('vertraege', `Verträge <small>${aktiv.length}</small>`)}${reiter('kalender', 'Wann abgebucht wird')}${S.fixtab === 'plan' ? reiter('plan', 'Was wäre wenn …') : ''}</div></div>`;
   h += S.fixtab === 'kalender' ? `<div class="card fix-zk k3">${zahlungskalenderHtml(aktiv)}</div>${sicher(() => fristenListe(H))}`
@@ -3272,7 +3299,7 @@ function kreditVorschauHtml(pm, pct) {
   const saeulen = `<div class="kv-s" role="img" aria-label="Kreditraten je Monat">${K.monate.map((m) => `<span class="kv-sa${m.k.endsWith('-01') ? ' jan' : ''}" title="${esc(`${mt(m.k)}: ${m.c >= 0 ? '+' : '−'}${EUR.format(Math.abs(m.c) / 100)} – ${wer(m)}`)}"><i style="height:${(Math.max(0, m.c) / max) * 100}%"></i>${m.k.endsWith('-01') || m === K.monate[0] ? `<em>${m.k.endsWith('-01') ? m.k.slice(0, 4) : MON[+m.k.slice(5) - 1]}</em>` : ''}</span>`).join('')}</div>`;
   const rechts = hoch.c > 0 ? zl(`<span class="s5-wert">+${eur0(r0(hoch.c))}</span>`, { tab: 'vermoegen', _springe: '#kr-karte' }) : '';
   return karte5('Fixkosten mit Krediten', `Vorausberechnung: heute ${eur0(pmE)} im Monat, dazu die Raten laut Kreditvertrag bis zur letzten Rate · anklicken oben rechts: die Kredite`,
-    `${saeulen}<div class="kv-kopf"><span>Zeitraum · Raten</span><span>Kredite</span><span>Fixkosten</span><span>% Gehalt</span></div>${zeilen}
+    `<div class="kv-in"><div class="kv-li"><h3 class="kv-h">Kreditraten je Monat</h3>${saeulen}</div><div><div class="kv-kopf"><span>Zeitraum · Raten</span><span>Kredite</span><span>Fixkosten</span><span>% Gehalt</span></div>${zeilen}</div></div>
     <p class="s5-erkl">Die übrigen Verträge sind wie heute gerechnet. Die ganze Rate zählt als Fixkosten (bei 0 % Zins ist sie reine Tilgung).</p>`, 'kv-karte', rechts);
 }
 const fvId = (art) => `fv-${norm(art).replace(/[^a-z]+/g, '-')}`;
@@ -3313,7 +3340,6 @@ function fixVertraegeAnsicht(o) {
     ${karte5('Verträge', 'nach Art gruppiert: oben die Summe der Art, eingerückt die einzelnen Verträge · anklicken: alle Zahlungen', `<div class="seg fix-seg">${seg('laufend', `Laufend (${aktiv.length})`)}${nFrueher ? seg('frueher', `+ frühere seit 2020 (${nFrueher})`) : ''}${nFrueher + nAelter ? seg('alle', `alle (${alle.length})`) : ''}</div>${liste.length ? `<div class="vgs">${vertraege}</div>` : '<div class="leer">Keine regelmäßigen Zahlungen gefunden.</div>'}${gem}`, 's5-b2')}
     <div class="s5-spalte">
       ${karte5('Wofür', `Anteil an deinen Fixkosten (${eur0(pm)} im Monat) · anklicken: die Verträge`, wofuer)}
-      ${sicher(() => kreditVorschauHtml(pm, pct))}
       ${lebenKarte(R)}
       ${karte5('Nächste 30 Tage', 'Feste Abbuchungen je Tag, dazwischen das erwartete Gehalt · anklicken: alle Zahlungen', termineHtml(termine, 14) + fixJahrHtml(aktiv), '', zl(`<span class="s5-wert">${eur0(tSumme)}</span>`, { fixtab: 'kalender' }))}
     </div>
@@ -3835,7 +3861,7 @@ function hashLesen() {
   if (/^\d{4}-\d{2}$/.test(p.get('gmonat') || '')) S.gmonat = p.get('gmonat');
   if (['vm', 'vj'].includes(p.get('gbasis'))) S.gbasis = p.get('gbasis');
   if (/^\d{4}$/.test(p.get('gtjahr') || '')) S.gtjahr = p.get('gtjahr');
-  if (['kennzahlen', 'buchungen', 'uebersicht', 'konten', 'fix', 'gehalt', 'steuer', 'geldfluss', 'vermoegen', 'einkommen', 'familie'].includes(p.get('tab'))) S.tab = p.get('tab');
+  if (['kennzahlen', 'buchungen', 'uebersicht', 'konten', 'fix', 'gehalt', 'steuer', 'geldfluss', 'vermoegen', 'einkommen', 'familie', 'zupruefen'].includes(p.get('tab'))) S.tab = p.get('tab');
   if (p.get('tab') === 'cockpit') S.tab = 'start';
 }
 
@@ -3885,7 +3911,7 @@ function anzeigen(v) {
   if (LOKAL) window.__fd = { D, fix: () => fixkostenErkennen(), mr: () => monatsRechnung(), sammle, periode };   // nur zum Testen auf dem eigenen Rechner
   chatDaten(D);
   entscheidungenLaden(j).then((fehlen) => { if (fehlen && D?.j === j) { neuAufbauen(); aktualisieren(); } });
-  steuerDaten(D).then(() => { if (S.tab === 'steuer') tabelle(parse(S.q)); else if (S.tab === 'start' && startOhneSteuer) { try { cockpitSeite(); } catch (e) { console.error(e); } } else if (S.tab === 'einkommen') sicher(einkommenSeite); });
+  steuerDaten(D).then(() => { if (S.tab === 'steuer') tabelle(parse(S.q)); else if (S.tab === 'start' && startOhneSteuer) { try { cockpitSeite(); } catch (e) { console.error(e); } } else if (S.tab === 'einkommen') sicher(einkommenSeite); else if (S.tab === 'zupruefen') aktualisieren(); });
   // Zusatzmodule: eigene Angaben aus diesem Gerät (IndexedDB) einmal laden, danach neu zeichnen; neuAufbauen() braucht das nicht
   H ??= modulHelfer();
   Promise.all([prognoseLaden, unterhaltLaden, fristenLaden, waechterLaden, vermoegenLaden].map((f) => Promise.resolve().then(() => f(H)).catch(console.error))).then(() => { if (D?.j === j) aktualisieren(); });

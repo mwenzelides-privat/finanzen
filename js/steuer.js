@@ -1200,3 +1200,7 @@ async function excel() {
       { titel: 'Hinweis', typ: 'text', breite: 60 }, { titel: 'Notiz', typ: 'text', breite: 30 }, { titel: 'Steuerkategorie (Buhl)', typ: 'text', breite: 26 }], zeilen: buch },
   ]);
 }
+
+// Für den Arbeitsmodus „Zu prüfen“: deine eigene Steuer-Entscheidung zu einer Buchung (null = keine, nur Vorschlag)
+export const steuerEigen = (r) => (D && r.skey ? entscheidungen[r.skey] || null : null);
+export const steuerGeladen = () => !!D && geladen;

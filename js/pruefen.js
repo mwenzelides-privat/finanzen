@@ -569,3 +569,16 @@ export function pruefenGeoeffnet() {
   abgeglichen = true;
   abgleichen().then((mehr) => { if (mehr) { H.neuAufbauen(); G = null; } if (H.S().kart === 'pruefen') H.neuZeichnen(); });
 }
+
+// ---------------------------------------------------------------- Für den Arbeitsmodus „Zu prüfen“ (zupruefen.js)
+// Dieselben Vorschläge, dieselbe Kategorieliste und dieselben Entscheidungen wie in der Prüfliste – nur je Buchung.
+export function pruefHelfer(h) { H = h; }
+export const kategorieOffen = (r) => istOffen(r, H.D());
+export function kategorieVorschlag(r) {
+  const g = gruppen().m.get(gKey(r));
+  if (!g) return null;
+  const v = vorschlagFuer(g, r)?.vor?.[0];
+  return v ? { kat: v.kat, ukat: v.ukat, umb: !!v.umb, grund: v.gruende[0] || '' } : null;
+}
+export const kategorieOptionen = () => katOptionen();
+export function kategorieEntscheiden(rows, e) { entscheiden(rows, e); }

@@ -328,3 +328,17 @@ export function waechterBinden(el, h) {
   el.querySelectorAll('.wa-chip.warn').forEach((s) => s.onclick = (e) => e.stopPropagation());
   H.gehBinden(el);
 }
+
+// ---------------------------------------------------------------- Für den Arbeitsmodus „Zu prüfen“ (zupruefen.js)
+// neue Buchungen (wie „Neu seit deinem letzten Besuch“) und als gesehen markieren; null = Neu-Funktion aus / noch nicht geladen
+export function neueBuchungen(h) {
+  H = H || h;   // die eigenen Helfer (aus waechterLaden) behalten
+  if (!GES || aus || !H) return null;
+  return neuStand().rows;
+}
+export function alsGesehen(rows) {
+  const c = cache();
+  if (!c) return;
+  gesehen(rows.map((r) => c.h[r.i]));
+}
+export const neuSeit = () => W?.gesehen?.seit || '';
