@@ -1491,8 +1491,8 @@ function vermoegenSeite() {
   const dpTop = dp ? [...dp.papiere.map((p) => ({ n: p.name, isin: p.isin, w: p.kurs ? p.kurs.kurswert : p.basis })), ...dp.nurKurs.map((w) => ({ n: w.isin, isin: w.isin, w: w.kurswert }))].filter((x) => x.w > 0).sort((a1, b1) => b1.w - a1.w) : [];
   const dpRest = dpTop.slice(5).reduce((t, x) => t + x.w, 0);
   const depotInhalt = !dp ? '<p class="bx-u">Depot-Daten kommen mit dem nächsten Aufbau am PC.</p>'
-    : `<dl class="bx-dl"><div><dt>eingezahlt</dt><dd>${eur0(dp.eingezahlt)}</dd></div><div><dt>entnommen</dt><dd>${eur0(dp.entnommen)}</dd></div>
-      <div><dt>${dp.kurse ? (dp.berechnet ? 'Kurswert / berechnet' : 'Kurswert') : 'Wert (Einstand)'}</dt><dd>${eur0(dp.wert)}</dd></div></dl>
+    : `<dl class="bx-dl"><div><dt>eingezahlt</dt><dd>${eur0(dp.eingezahlt)}</dd></div><div><dt>ausgezahlt</dt><dd>${eur0(dp.aus)}</dd></div>
+      <div><dt>${dp.kurse ? (dp.berechnet ? 'Kurswert / Einstand' : 'Kurswert') : 'Einstand, kein Kurswert'}</dt><dd>${eur0(dp.wert)}</dd></div></dl>
       <p class="cp-auff-t">Größte Positionen · ${dpTop.length} Papiere</p>
       ${balkenListe([...dpTop.slice(0, 5).map((x) => ({ n: esc(x.n), c: x.w, p: `${Math.round((x.w / dp.wert) * 100)} %`, farbe: 'var(--accent-2)', ziel: zuBuchungen({ q: x.isin, konto: '' }) })),
         ...(dpRest ? [{ n: `${dpTop.length - 5} weitere`, c: dpRest, p: `${Math.round((dpRest / dp.wert) * 100)} %`, farbe: 'var(--variabel)', ziel: { ...zuKonten, _springe: '#dp-karte' } }] : []),

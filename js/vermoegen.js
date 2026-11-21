@@ -39,7 +39,12 @@ export function depot(H) {
     const k = kw.get(p.isin) || null, netto = (p.eingezahlt || 0) - (p.entnommen || 0);
     // ohne Einstand und mehr entnommen als eingezahlt: ganz verkauft, trägt 0 € bei (kein negativer Einstand)
     const verkauft = p.einstand == null && netto <= 0;
-    return { ...p, name: p.name || p.isin, netto, verkauft, basis: p.einstand ?? (verkauft ? 0 : netto), kurs: k,
+    const basis = p.einstand ?? (verkauft ? 0 : netto);
+    // ausgezahlt = Verkaufserlöse + Ausschüttungen/Zinsen; Wert heute = Kurswert laut Depot-Datei, sonst Einstand (berechnet)
+    const aus = (p.entnommen || 0) + (p.ertraege || 0), wertHeute = k ? k.kurswert : Math.max(0, basis);
+    // Ergebnis nur mit belegtem Wert: Kurswert, oder ganz verkauft (Stück 0 laut Buchungen; ohne Stück: mehr entnommen als eingezahlt)
+    const leer = !k && p.stueck === 0, ergebnis = k || leer || verkauft ? wertHeute + aus - (p.eingezahlt || 0) : null;
+    return { ...p, name: p.name || p.isin, netto, verkauft, basis, kurs: k, aus, wertHeute, leer, ergebnis,
       gewinn: k && p.einstand != null ? k.kurswert - p.einstand : null };
   });
   // Papiere aus der Depot-Datei ohne eine einzige Buchung (z. B. vor Beginn der Daten gekauft)
@@ -65,23 +70,60 @@ export function depot(H) {
   }
   const ab12 = H.mVor(bisM, -11), verkauf12 = summe(monate.filter((m) => m.m >= ab12), (m) => m.verkauf);
   return { stand: dep.stand, regel: dep.regel || '', hinweise: dep.hinweise || [], kurse, papiere, nurKurs, wert, ausKurs, berechnet,
-    monate, spar, verkauf12, ab12, eingezahlt: summe(papiere, (p) => p.eingezahlt || 0), entnommen: summe(papiere, (p) => p.entnommen || 0) };
+    monate, spar, verkauf12, ab12, eingezahlt: summe(papiere, (p) => p.eingezahlt || 0), entnommen: summe(papiere, (p) => p.entnommen || 0),
+    aus: summe(papiere, (p) => p.aus), ertraege: summe(papiere, (p) => p.ertraege || 0) };
 }
 
 const OHNE_DEPOT = 'Depot-Daten kommen mit dem nächsten Aufbau am PC.';
-const ZEILEN_KURZ = 8;   // so viele Papiere stehen sofort da, der Rest nach „alle zeigen“
+// Mini-Verlauf je Papier: eingezahlt (Linie, Akzent) und ausgezahlt (gestrichelt) aufsummiert, gemeinsame Zeitachse
+function verlaufSvg(p, monate) {
+  const vl = p.verlauf || [];
+  if (!vl.length || !monate.length) return '';
+  const je = new Map(vl.map(([m, k, v]) => [m, [k, v]]));
+  let ein = 0, aus = 0;
+  const pe = [], pa = [];
+  monate.forEach((m, i) => { const x = je.get(m.m); if (x) { ein += x[0]; aus += x[1]; } pe.push([i, ein]); pa.push([i, aus]); });
+  const max = Math.max(1, ein, aus), W = 96, Hh = 24, n = Math.max(1, monate.length - 1);
+  const pfad = (pts) => pts.map(([i, c], j) => `${j ? 'L' : 'M'}${((i / n) * W).toFixed(1)} ${(Hh - 1 - (c / max) * (Hh - 2)).toFixed(1)}`).join('');
+  return `<svg class="dp-spark" viewBox="0 0 ${W} ${Hh}" preserveAspectRatio="none" aria-hidden="true"><path d="${pfad(pe)}" class="dp-sp-e"/>${aus ? `<path d="${pfad(pa)}" class="dp-sp-a"/>` : ''}</svg>`;
+}
+
+// Auf volle Euro runden, sodass die Zeilen genau die gerundete Summe ergeben (größter Rest); null bleibt null
+function aufgehen(cs) {
+  const da = cs.map((c, i) => [c, i]).filter(([c]) => c != null), ziel = Math.round(da.reduce((t, [c]) => t + c, 0) / 100);
+  const fl = da.map(([c, i]) => ({ i, e: Math.floor(c / 100), r: c / 100 - Math.floor(c / 100) }));
+  let rest = ziel - fl.reduce((t, x) => t + x.e, 0);
+  fl.slice().sort((a, b) => b.r - a.r).forEach((x) => { if (rest > 0) { x.e++; rest--; } });
+  const out = cs.map(() => null);
+  fl.forEach((x) => { out[x.i] = x.e * 100; });
+  return out;
+}
 
 export function depotKarte(H) {
   const dp = depot(H);
   if (!dp) return H.karte5('Depot und Sparpläne', '', `<p class="s5-erkl">${OHNE_DEPOT}</p>`, 'dp-karte');
-  const { esc, eur0, dde, NUM } = H, k = dp.kurse;
-  const kursText = k ? `Kurswerte laut Depot-Datei vom ${dde(k.stichtag)}` : 'ohne Kurswerte – dafür einen Depot-Export (CSV, Name beginnt mit „Depot“) in den Eingang legen';
-  // Kennzahlen: Gebuchtes, nie „Wert“ ohne Depot-Datei
+  const { esc, eur0, dde, NUM } = H, k = dp.kurse, D = H.D();
+  const kn = (i) => (D.j.konten || D.konten || [])[i]?.name || '';
+  const pz = (c, basis) => (basis > 0 ? `${c >= 0 ? '+' : '−'}${NUM.format(Math.round(Math.abs(c) / basis * 1000) / 10)} %` : '');
+  const ohneKurs = dp.papiere.filter((p) => !p.kurs && !p.leer && !p.verkauft);
+  const mitErg = [...dp.papiere.filter((p) => p.ergebnis != null)];
+  const ergSumme = summe(mitErg, (p) => p.ergebnis), ergBasis = summe(mitErg, (p) => p.eingezahlt || 0);
+  const einstandSumme = summe(ohneKurs, (p) => p.wertHeute);
+  // Zeilenwerte so gerundet, dass sie genau die Summe ergeben (Abbildungen müssen aufgehen)
+  const alle = [...dp.papiere, ...dp.nurKurs.map((w) => ({ nurKurs: true, wertHeute: w.kurswert }))];
+  const rE = aufgehen(alle.map((p) => (p.nurKurs ? null : p.eingezahlt || 0))), rA = aufgehen(alle.map((p) => (p.nurKurs ? null : p.aus)));
+  const rW = aufgehen(alle.map((p) => p.wertHeute)), rG = aufgehen(alle.map((p) => (p.nurKurs ? null : p.ergebnis)));
+  const kursText = k ? `Kurswerte laut Depot-Datei vom ${dde(k.stichtag)}` : 'Wert = Einstand, kein Kurswert';
+
+  // Kennzahlen: eingezahlt, ausgezahlt, Wert heute, Ergebnis – Ergebnis nur, wo ein Wert belegt ist
   const kz = [
-    ['eingezahlt (gebucht)', eur0(dp.eingezahlt), `${NUM.format(summe(dp.papiere, (p) => p.kaeufe))} Käufe`],
-    ['entnommen (Verkäufe)', eur0(dp.entnommen), `${NUM.format(summe(dp.papiere, (p) => p.verkaeufe))} Verkäufe`],
-    k ? ['Kurswert', eur0(dp.wert), `laut Depot-Datei vom ${dde(k.stichtag)}${dp.berechnet ? ` · ${dp.berechnet} Papiere berechnet` : ''}`]
-      : ['netto eingezahlt', betrag(H, dp.eingezahlt - dp.entnommen), 'eingezahlt minus entnommen · berechnet'],
+    ['eingezahlt', eur0(dp.eingezahlt), `${NUM.format(summe(dp.papiere, (p) => p.kaeufe))} Käufe`],
+    ['ausgezahlt', eur0(dp.aus), `Verkäufe ${eur0(dp.entnommen)}${dp.ertraege ? ` · Ausschüttungen ${eur0(dp.ertraege)}` : ''}`],
+    ['Wert heute', eur0(dp.wert), !k ? 'Einstand, kein Kurswert · berechnet'
+      : ohneKurs.length ? `Kurswert laut Depot-Datei · davon ${eur0(einstandSumme)} Einstand (${ohneKurs.length} ohne Kurswert)` : `Kurswert laut Depot-Datei vom ${dde(k.stichtag)}`],
+    ['Ergebnis', mitErg.length ? pm(H, ergSumme) : '–', mitErg.length
+      ? `${pz(ergSumme, ergBasis)} · ${mitErg.length === dp.papiere.length ? 'alle Papiere' : `nur ${mitErg.length} von ${dp.papiere.length} Papieren (mit Kurswert oder verkauft)`}`
+      : 'erst mit Kurswerten aus der Depot-Datei'],
   ].map(([t, w, u]) => `<div class="dp-z"><span>${t}</span><b>${w}</b><small>${u}</small></div>`).join('');
 
   const saetze = [];
@@ -92,24 +134,45 @@ export function depotKarte(H) {
   const grafik = ms.length ? `<div class="s5-chart klein"><canvas id="c-depot-spar"></canvas></div>
     <p class="s5-erkl">Käufe und Verkäufe je Monat${ms.length < 36 ? '' : ' (36 Monate)'} · Verkäufe nach unten${ms.at(-1).m >= dp.stand.slice(0, 7) && dp.stand < H.D().bis ? ` · ${H.monKurz(ms.at(-1).m)} bis ${dde(dp.stand)}` : ''}</p>` : '';
 
+  // Anleitung, solange Kurswerte fehlen (nie geschätzt)
+  const fehlKonten = [...new Set(ohneKurs.flatMap((p) => p.konten || []))].map(kn).filter(Boolean);
+  const anleitung = !ohneKurs.length ? '' : `<div class="dp-anl"><b>So kommen Kurswert und Ergebnis dazu</b>
+    <p>${ohneKurs.length} von ${dp.papiere.length} Papieren haben noch keinen Kurswert${fehlKonten.length ? ` (Käufe über ${esc(fehlKonten.join(' und '))})` : ''}. Bis dahin steht dort der Einstand – kein Kurswert, nie geschätzt.</p>
+    <ol><li>Im Online-Banking der ING das Depot öffnen und die Depotübersicht über das Download- bzw. Export-Symbol als CSV speichern. Für Oskar genauso die Depotübersicht als CSV.</li>
+    <li>Datei so benennen, dass der Name mit „Depot“ beginnt, z. B. „Depot ING 2026-11-21.csv“ und „Depot Oskar 2026-11-21.csv“ (Datum = Stichtag).</li>
+    <li>In den Ordner 10 Finanzen › Eingang legen und am PC die Aktualisierung laufen lassen.</li></ol>
+    <p>Danach zeigt jede Zeile Kurswert und Ergebnis; eine neuere Datei desselben Depots ersetzt die ältere.</p></div>`;
+
+  const wertZelle = (p, i) => p.kurs ? `${eur0(rW[i])}<small>Kurswert ${dde(p.kurs.tag || k.stichtag)}</small>`
+    : p.leer ? `${eur0(0)}<small>verkauft (Stück 0)</small>`
+    : p.verkauft ? `${eur0(0)}<small>verkauft (angenommen: mehr ausgezahlt als eingezahlt)</small>`
+    : p.einstand != null ? `${eur0(rW[i])}<small>Einstand, kein Kurswert</small>`
+    : `${eur0(rW[i])}<small>Einstand (netto), kein Kurswert</small>`;
+  const ergZelle = (p, i) => p.ergebnis == null ? '<span class="muted">–</span><small>Kurswert fehlt</small>'
+    : `${pm(H, rG[i])}<small>${pz(p.ergebnis, p.eingezahlt)}${p.kurs ? '' : ' · endgültig'}</small>`;
   const zeile = (p, i) => {
-    const st = p.stueck != null ? `Stück ${NUM.format(p.stueck)}` : 'Stück: nicht in den Buchungen';
-    const einst = p.einstand != null ? `${betrag(H, p.einstand)}<small>Einstand · berechnet</small>`
-      : p.verkauft ? `${eur0(0)}<small>verkauft${p.netto < 0 ? ` · ${H.eur(-p.netto)} mehr entnommen als eingezahlt` : ''}</small>` : `${betrag(H, p.netto)}<small>netto eingezahlt</small>`;
-    const kurs = !k ? '' : `<td class="r">${p.kurs ? `${eur0(p.kurs.kurswert)}${p.gewinn != null ? `<small>Gewinn ${pm(H, p.gewinn)} laut Depot-Datei vom ${dde(k.stichtag)}</small>` : '<small>ohne Einstand</small>'}` : '<span class="muted">–</span>'}</td>`;
-    return `<tr class="klick${i >= ZEILEN_KURZ ? ' dp-mehr' : ''}"${H.geh(H.zuBuchungen({ q: p.isin, konto: '' }))} title="Anklicken: Buchungen zu ${esc(p.isin)}">
-      <td class="dp-n"><b>${esc(p.name)}</b><small>${p.name !== p.isin ? `${esc(p.isin)} · ` : 'ohne Namen · '}${st}</small><small class="dp-handy">${p.kaeufe} Käufe · ${p.verkaeufe} Verkäufe${p.entnommen ? ` · entnommen ${eur0(p.entnommen)}` : ''}</small></td>
-      <td class="r dp-m">${p.kaeufe} / ${p.verkaeufe}</td><td class="r${k ? ' dp-m2' : ''}">${eur0(p.eingezahlt)}</td><td class="r dp-m">${p.entnommen ? eur0(p.entnommen) : '<span class="muted">–</span>'}</td>
-      <td class="r">${einst}</td>${kurs}</tr>`;
+    const st = p.kurs ? `Stück ${NUM.format(p.kurs.stueck)}` : p.stueck != null ? `Stück ${NUM.format(p.stueck)}` : 'Stück nicht gebucht';
+    return `<tr class="klick"${H.geh(H.zuBuchungen({ q: p.isin, konto: '' }))} title="Anklicken: Buchungen zu ${esc(p.isin)}">
+      <td class="dp-n"><b>${esc(p.name)}</b><small>${p.name !== p.isin ? `${esc(p.isin)} · ` : ''}${st} · ${p.kaeufe} Käufe${p.verkaeufe ? ` · ${p.verkaeufe} Verkäufe` : ''}</small><small class="dp-handy">eingezahlt ${eur0(rE[i])}${p.aus ? ` · ausgezahlt ${eur0(rA[i])}` : ''}</small></td>
+      <td class="dp-m dp-vl">${verlaufSvg(p, dp.monate)}<small>seit ${H.monKurz(p.erste.slice(0, 7))}</small></td>
+      <td class="r dp-m">${eur0(rE[i])}</td>
+      <td class="r dp-m">${p.aus ? `${eur0(rA[i])}${p.ertraege ? `<small>davon Ausschüttungen ${eur0(p.ertraege)}</small>` : ''}` : '<span class="muted">–</span>'}</td>
+      <td class="r">${wertZelle(p, i)}</td><td class="r">${ergZelle(p, i)}</td></tr>`;
   };
-  const tabelle = `<div class="dp-rahmen"><table class="t3 t3-eng dp-t" id="dp-tab"><thead><tr><th>Papier</th><th class="r dp-m">Käufe / Verk.</th><th class="r${k ? ' dp-m2' : ''}">eingezahlt</th><th class="r dp-m">entnommen</th><th class="r">Einstand</th>${k ? '<th class="r">Kurswert</th>' : ''}</tr></thead>
-    <tbody>${dp.papiere.map(zeile).join('')}${dp.nurKurs.map((w) => `<tr><td class="dp-n"><b>${esc(w.isin)}</b><small>nur in der Depot-Datei, keine Buchung</small></td><td class="r dp-m"></td><td class="r${k ? ' dp-m2' : ''}"></td><td class="r dp-m"></td><td class="r"><span class="muted">–</span></td><td class="r">${eur0(w.kurswert)}</td></tr>`).join('')}</tbody></table></div>
-    ${dp.papiere.length > ZEILEN_KURZ ? `<button class="btn sm dp-alle" data-dp-alle>Alle ${dp.papiere.length} Papiere zeigen</button>` : ''}`;
+  const nurKursZeilen = dp.nurKurs.map((w, j) => `<tr><td class="dp-n"><b>${esc(w.isin)}</b><small>nur in der Depot-Datei, keine Buchung</small></td><td class="dp-m"></td>
+    <td class="r dp-m"><span class="muted">–</span></td><td class="r dp-m"><span class="muted">–</span></td><td class="r">${eur0(rW[dp.papiere.length + j])}<small>Kurswert</small></td><td class="r"><span class="muted">–</span></td></tr>`).join('');
+  const n = dp.papiere.length + dp.nurKurs.length;
+  const tabelle = `<div class="dp-rahmen"><table class="t3 t3-eng dp-t" id="dp-tab"><thead><tr><th>Papier</th><th class="dp-m">Einzahlungen</th><th class="r dp-m">eingezahlt</th><th class="r dp-m">ausgezahlt</th><th class="r">Wert heute</th><th class="r">Ergebnis</th></tr></thead>
+    <tbody>${dp.papiere.map(zeile).join('')}${nurKursZeilen}</tbody>
+    <tfoot><tr class="dp-summe"><td class="dp-n"><b>Summe ${n} Papiere</b><small class="dp-handy">eingezahlt ${eur0(dp.eingezahlt)} · ausgezahlt ${eur0(dp.aus)}</small></td><td class="dp-m"></td>
+      <td class="r dp-m"><b>${eur0(dp.eingezahlt)}</b></td><td class="r dp-m"><b>${eur0(dp.aus)}</b></td>
+      <td class="r"><b>${eur0(dp.wert)}</b>${k ? '' : '<small>Einstand, kein Kurswert</small>'}</td>
+      <td class="r">${mitErg.length ? `<b>${pm(H, ergSumme)}</b><small>${mitErg.length === dp.papiere.length ? pz(ergSumme, ergBasis) : `${mitErg.length} Papiere`}</small>` : '<span class="muted">–</span>'}</td></tr></tfoot></table></div>`;
   const hinweise = dp.hinweise.length ? `<ul class="dp-hinw">${dp.hinweise.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : '';
 
-  return H.karte5('Depot und Sparpläne', `Käufe und Verkäufe aus deinen Buchungen bis ${dde(dp.stand)} · ${kursText} · anklicken: Buchungen zum Papier`,
-    `<div class="dp-zahlen">${kz}</div>${saetze.length ? `<p class="s5-tipp">${saetze.join(' ')}</p>` : ''}${grafik}${tabelle}${hinweise}
-    <p class="s5-erkl dp-fuss">Regel: ${esc(dp.regel)}. Ohne Kinder- und gemeinsame Konten; Umbuchungen (Sparplan-Überträge) zählen nicht.</p>`, 's5-b2 dp-karte', '', 'dp-karte');
+  return H.karte5('Depot und Sparpläne', `Je Papier: eingezahlt, ausgezahlt, Wert heute und Ergebnis (Wert heute + ausgezahlt − eingezahlt) · Buchungen bis ${dde(dp.stand)} · ${kursText} · anklicken: Buchungen zum Papier`,
+    `<div class="dp-zahlen">${kz}</div>${anleitung}${saetze.length ? `<p class="s5-tipp">${saetze.join(' ')}</p>` : ''}${tabelle}${grafik}${hinweise}
+    <p class="s5-erkl dp-fuss">Regel: ${esc(dp.regel)}. Ergebnis nur mit Kurswert laut Depot-Datei oder bei ganz verkauften Papieren. Einzahlungen: Linie = eingezahlt, gestrichelt = ausgezahlt, aufsummiert. Ohne Kinder- und gemeinsame Konten; Umbuchungen (Sparplan-Überträge) zählen nicht.</p>`, 's5-b2 dp-karte', '', 'dp-karte');
 }
 
 // ======================================================================= Vermögen (Idee 8)

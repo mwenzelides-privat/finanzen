@@ -2,15 +2,15 @@
 
 /* ---------------------------------------------------------------- Depot und Vermögen */
 .vm5 { margin-top: 12px; }
-.dp-zahlen { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.dp-zahlen { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .dp-z { display: grid; gap: 1px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); min-width: 0; }
-.dp-z span { font-size: 12px; font-weight: 600; color: var(--muted); }
+.dp-z > span { font-size: 12px; font-weight: 600; color: var(--muted); }
 .dp-z b { font-size: 18px; font-weight: 750; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dp-z small { font-size: 11.5px; color: var(--text-2); line-height: 1.35; }
 .dp-rahmen { min-width: 0; }
 .dp-t { table-layout: auto; }
 .dp-t td small { white-space: normal; }
-.dp-n { min-width: 0; word-break: break-word; }
+.dp-n { min-width: 150px; word-break: break-word; }
 .dp-n b { font-weight: 600; }
 .dp-handy { display: none !important; }
 .dp-t tr.dp-mehr { display: none; }
@@ -18,6 +18,16 @@
 .dp-alle { align-self: flex-start; }
 .dp-hinw { margin: 0; padding: 8px 11px 8px 26px; border-radius: 9px; background: var(--surface-2); font-size: 12.5px; line-height: 1.45; color: var(--text-2); }
 .dp-fuss { margin-top: auto; }
+.dp-t td small { display: block; }
+.dp-vl { width: 110px; }
+.dp-spark { display: block; width: 100px; height: 24px; overflow: visible; }
+.dp-spark path { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.dp-sp-e { stroke: var(--accent-2); }
+.dp-sp-a { stroke: var(--muted); stroke-dasharray: 3 2; }
+.dp-summe td { border-top: 2px solid var(--border); }
+.dp-anl { padding: 10px 12px; border: 1px solid var(--border); border-left: 3px solid var(--accent-2); border-radius: 9px; background: var(--surface-2); font-size: 13px; line-height: 1.45; }
+.dp-anl p, .dp-anl ol { margin: 4px 0 0; }
+.dp-anl ol { padding-left: 20px; }
 
 .vm-karte { justify-content: flex-start; }
 .vm-dl dt small, .vm-summe dt small { display: block; font-size: 11.5px; color: var(--muted); margin-top: 1px; }
@@ -57,8 +67,12 @@
 @media (max-width: 1180px) {
   .vm5 > .vm-karte { grid-column: 1 / -1; }
 }
+@media (max-width: 900px) {
+  .dp-vl { display: none; }
+}
 @media (max-width: 640px) {
-  .dp-zahlen { grid-template-columns: minmax(0, 1fr); }
+  .dp-n { min-width: 0; }
+  .dp-zahlen { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dp-m, .dp-m2 { display: none; }
   .dp-handy { display: block !important; }
   .dp-t th, .dp-t td { padding-left: 4px; padding-right: 4px; }

@@ -24,14 +24,18 @@ const ABSCHNITTE = [
   { id: 'sonder', name: 'Sonderausgaben', form: 'Hauptvordruck, Anlage U, Anlage Kind',
     info: () => 'Unterhalt an den getrennt lebenden Ehegatten (Realsplitting) bis 13.805 € zzgl. übernommener Kranken-/Pflegeversicherung, nur mit ihrer Zustimmung (Anlage U). Schulgeld für Privatschulen: 30 %, höchstens 5.000 €.' },
   { id: 'agb', name: 'Außergewöhnliche Belastungen', form: 'Anlage Außergewöhnliche Belastungen',
-    info: () => 'Krankheitskosten wirken erst über der zumutbaren Belastung (je nach Einkünften, Familienstand und Kinderzahl etwa 1–7 % der Einkünfte). Erstattungen der Krankenkasse werden abgezogen.' },
+    info: () => 'Krankheitskosten wirken erst über der zumutbaren Belastung (je nach Einkünften, Familienstand und Kinderzahl etwa 1–7 % der Einkünfte). Erstattungen der Krankenkasse werden abgezogen. Unterhalt nach § 33a zählt ohne zumutbare Belastung.' },
   { id: 'haushalt', name: 'Handwerker und haushaltsnahe Dienstleistungen', form: '§ 35a EStG, Anlage Haushaltsnahe Aufwendungen',
     info: () => '20 % der Arbeitskosten werden direkt von der Steuer abgezogen: Handwerker höchstens 1.200 €, haushaltsnahe Dienstleistungen höchstens 4.000 € im Jahr. Nur Arbeitskosten laut Rechnung und nur unbar bezahlt; Material und Verbrauch zählen nicht.' },
   { id: 'kinder', name: 'Kinder', form: 'Anlage Kind',
     info: (j) => (j >= 2025 ? 'Kinderbetreuung (Kinder unter 14): 80 % der Kosten, höchstens 4.800 € je Kind.' : 'Kinderbetreuung (Kinder unter 14): zwei Drittel der Kosten, höchstens 4.000 € je Kind.') },
+  { id: 'doku', name: 'Nur zur Dokumentation (nicht absetzbar)', form: 'Info',
+    info: () => 'Steht nur als Nachweis da und zählt in keiner Summe. Kindesunterhalt ist mit Kindergeld bzw. Kinderfreibetrag abgegolten.' },
   { id: 'einnahmen', name: 'Einnahmen (zur Kontrolle)', form: 'Info',
     info: () => 'Nicht abziehbar. Maßgeblich sind Lohnsteuerbescheinigung, Steuerbescheinigungen der Banken und der Kindergeldbescheid.' },
 ];
+// Abschnitte ohne steuerliche Wirkung: zählen nicht in „Was du geltend machen kannst“, Vorjahre und größte Posten
+const NUR_INFO = new Set(['einnahmen', 'doku']);
 const pausch = (j) => (j >= 2023 ? 123000 : j >= 2022 ? 120000 : 100000);
 
 const POSTEN = [
@@ -59,11 +63,13 @@ const POSTEN = [
   ['sa-schulgeld', 'sonder', 'Schulgeld', '30 % des Schulgelds für Privatschulen, höchstens 5.000 € – ohne Verpflegung und Betreuung.'],
   ['sa-kirchensteuer', 'sonder', 'Kirchensteuer', 'Selbst gezahlte Kirchensteuer, auch Nachzahlungen.'],
   ['agb-krankheit', 'agb', 'Krankheitskosten (Arzt, Zahnarzt, Brille, Medikamente)', 'Selbst getragene Krankheitskosten: Arzt, Zahnarzt, Brille, Medikamente mit Rezept, Physiotherapie. Wirken über der zumutbaren Belastung.'],
-  ['agb-sonstige', 'agb', 'Sonstige außergewöhnliche Belastungen', 'Z. B. Pflegekosten, Beerdigung, Unterhalt an bedürftige Angehörige.'],
+  ['agb-unterhalt', 'agb', 'Unterhalt an bedürftige Personen (§ 33a)', 'Unterhalt an gesetzlich Unterhaltsberechtigte, z. B. ein volljähriges Kind – nur wenn für diese Person niemand Kindergeld oder Kinderfreibetrag bekommt. Abziehbar bis zum Grundfreibetrag (2025: 12.096 €, 2026: 12.348 €) zzgl. übernommener Kranken- und Pflegeversicherung, gemindert um eigene Einkünfte der Person über 624 €; ohne zumutbare Belastung. Angaben in der Anlage Unterhalt: Name, Zeitraum, Einkünfte der Person.'],
+  ['agb-sonstige', 'agb', 'Sonstige außergewöhnliche Belastungen', 'Z. B. Pflegekosten, Beerdigung.'],
   ['ha-handwerker', 'haushalt', 'Handwerkerleistungen', 'Arbeitskosten von Handwerkern im eigenen Haushalt laut Rechnung, unbar bezahlt. Material zählt nicht.'],
   ['ha-dienstleistung', 'haushalt', 'Haushaltsnahe Dienstleistungen', 'Reinigung, Gartenpflege, privates Umzugsunternehmen, Pflegedienst im Haushalt – Arbeitskosten laut Rechnung.'],
   ['ha-nebenkosten', 'haushalt', 'Nebenkosten, Hausgeld (Abrechnung prüfen)', 'Nur die Arbeitsanteile aus der jährlichen Neben- oder Hausgeldabrechnung (Hausmeister, Treppenhausreinigung, Schornsteinfeger).'],
   ['ki-betreuung', 'kinder', 'Kinderbetreuung', 'Kita, Tagesmutter, Hort, Babysitter für Kinder unter 14, unbar bezahlt – ohne Verpflegung und Unterricht.'],
+  ['doku-kindesunterhalt', 'doku', 'Kindesunterhalt', 'Unterhalt für die Kinder. Nicht absetzbar: Solange es für das Kind Kindergeld oder Kinderfreibetrag gibt, ist er damit abgegolten (für volljährige Kinder ohne Kindergeld: Unterhalt nach § 33a). Nur als Nachweis.'],
   ['ein-lohn', 'einnahmen', 'Arbeitslohn (Auszahlungen)', 'Zur Kontrolle; maßgeblich ist die Lohnsteuerbescheinigung.'],
   ['ein-kindergeld', 'einnahmen', 'Kindergeld', 'Zur Kontrolle; wird mit dem Kinderfreibetrag verglichen.'],
   ['ein-kapital', 'einnahmen', 'Kapitalerträge, Zinsen', 'Zur Kontrolle; maßgeblich sind die Steuerbescheinigungen der Banken.'],
@@ -94,7 +100,7 @@ const FG_VORSCHLAG = {
   'Aerztliche Behandlung': 'agb-krankheit', Apotheke: 'agb-krankheit', 'Sonstige Gesundheitsausgaben': 'agb-krankheit', Spende: 'sa-spenden',
   Riestervertrag: 'vs-riester', Lebensversicherung: 'vs-leben', Berufsunfaehigkeitsversicherung: 'vs-bu', Haftpflichtversicherung: 'vs-haftpflicht',
   Jagdhaftpflichtversicherung: 'vs-haftpflicht', Unfallversicherung: 'vs-weitere', 'KFZ-Versicherung': 'vs-weitere', 'Gesetzliche Krankenversicherung': 'vs-kv',
-  'Private Krankenversicherung': 'vs-kv', Trennungsunterhalt: 'sa-unterhalt', Kinderbetreuung: 'ki-betreuung', 'Schule & Foerderung': 'sa-schulgeld', Bildung: 'wk-fortbildung',
+  'Private Krankenversicherung': 'vs-kv', Trennungsunterhalt: 'sa-unterhalt', Kindesunterhalt: 'doku-kindesunterhalt', Kinderbetreuung: 'ki-betreuung', 'Schule & Foerderung': 'sa-schulgeld', Bildung: 'wk-fortbildung',
   'Lohn / Gehalt': 'ein-lohn', Kindergeld: 'ein-kindergeld', Kapitalertraege: 'ein-kapital', Mobilfunk: 'wk-telefon', 'Internet & Telefon': 'wk-telefon',
 };
 const WORT_VORSCHLAG = [
@@ -124,10 +130,15 @@ function pruefung(r, p) {
   // Reiner Kindesunterhalt (ohne Hinweis auf Ehegatten-/Trennungsunterhalt) ist nie absetzbar
   if (p === 'sa-unterhalt' && r.ukat === 'Kindesunterhalt' && !/gesamt|ehegatt|trennung|ehefrau/.test(norm(r.z))) return { art: 'pruefen',
     text: 'Das ist Kindesunterhalt. Er ist steuerlich nicht absetzbar – Realsplitting (Anlage U) gilt nur für Unterhalt an den Ehegatten. Für die Kinder gibt es stattdessen Kindergeld bzw. Kinderfreibeträge.',
-    rat: 'Ausschließen.', klar: 'Kindesunterhalt', aktionen: [AUS, { t: 'Enthält auch Ehegattenunterhalt – behalten und Anteil notieren', p: 'sa-unterhalt', notiz: true }] };
+    rat: 'Als Kindesunterhalt dokumentieren (zählt nicht) oder ausschließen.', klar: 'Kindesunterhalt', aktionen: [{ t: 'Als Kindesunterhalt dokumentieren', p: 'doku-kindesunterhalt' }, AUS, { t: 'Enthält auch Ehegattenunterhalt – behalten und Anteil notieren', p: 'sa-unterhalt', notiz: true }] };
   if (p === 'sa-unterhalt' && (/kind|gesamt/.test(norm(r.z)) || r.ukat === 'Kindesunterhalt')) return { art: 'pruefen',
     text: 'Die Zahlung enthält Kindes- und Ehegattenunterhalt. Absetzbar (Realsplitting, Anlage U) ist nur der Unterhalt für den Ehegatten, Kindesunterhalt nicht.',
     rat: 'Behalten und in der Notiz den Ehegattenanteil angeben, z. B. „davon 1.360 € Ehegattenunterhalt“.', aktionen: [{ t: 'Behalten und Ehegattenanteil notieren', p: 'sa-unterhalt', notiz: true }, AUS] };
+  // § 33a: nur ohne Kindergeld/Kinderfreibetrag – immer nachfragen
+  if (p === 'agb-unterhalt') return { art: 'pruefen',
+    text: 'Unterhalt nach § 33a ist nur absetzbar, wenn für die Person niemand Kindergeld oder Kinderfreibetrag bekommt. Für ein minderjähriges Kind nie; für ein volljähriges Kind gibt es Kindergeld, solange es in Ausbildung oder Studium ist (bis 25) – dann zählt der Unterhalt nicht.',
+    rat: 'Kein Kindergeld für die Person → behalten und in der Notiz Name, Zeitraum und deren Einkünfte angeben. Sonst als Kindesunterhalt dokumentieren.',
+    aktionen: [{ t: 'Kein Kindergeld für die Person – behalten', p: 'agb-unterhalt', notiz: true }, { t: 'Kindergeld besteht – als Kindesunterhalt dokumentieren', p: 'doku-kindesunterhalt' }, AUS] };
   if (p === 'wk-arbeitszimmer' && /immobilienscout|immowelt|wohnungsboerse/.test(t)) return { art: 'pruefen',
     text: 'Das ist Wohnungssuche, kein Arbeitszimmer. Kosten der Wohnungssuche sind nur absetzbar, wenn der Umzug beruflich veranlasst war (neue Stelle, Arbeitsweg deutlich kürzer) – dann als Umzugskosten. Privat veranlasst sind sie nicht absetzbar.',
     rat: 'Privater Umzug → ausschließen. Beruflicher Umzug → als Umzugskosten übernehmen.', aktionen: [AUS, { t: 'Beruflicher Umzug – als Umzugskosten übernehmen', p: 'wk-umzug' }] };
@@ -373,7 +384,7 @@ function offEinordnung(r, p) {
     if (ps?.t) return { art: 'info', text: `${offName(O)}: ${ps.t}` };
     // Bescheid ergangen: welche Ausgabe dort nicht steht, wurde nicht angesetzt – zu entscheiden gibt es dann nichts mehr.
     // Einnahmen und Zahlungen ans Finanzamt stehen nicht als Einzelposten im Bescheid; sie bleiben zur Kontrolle.
-    return O.art === 'Bescheid' && POSTEN_ID.get(p)?.abschnitt !== 'einnahmen' ? { art: 'nein', text: `laut ${offName(O)} nicht angesetzt` } : null;
+    return O.art === 'Bescheid' && !NUR_INFO.has(POSTEN_ID.get(p)?.abschnitt) ? { art: 'nein', text: `laut ${offName(O)} nicht angesetzt` } : null;
   }
   // Jahre ohne Unterlagen: was in den Vorjahren nie bzw. immer angesetzt wurde
   const vj = offJahre().filter((y) => y < r.y);
@@ -554,7 +565,7 @@ export function steuerZeigen(el, c) {
   const fremdZu = D.rows.filter((r) => r.y === jahr && fremd(r) && entscheidungen[r.skey]?.p && !entscheidungen[r.skey].x).length;
 
   // Was du geltend machen kannst: je Abschnitt ein Balken, bei den Werbungskosten mit dem Pauschbetrag als Marke
-  const abs = ABSCHNITTE.filter((a) => a.id !== 'einnahmen').map((a) => {
+  const abs = ABSCHNITTE.filter((a) => !NUR_INFO.has(a.id)).map((a) => {
     const xs = wirksam.filter((x) => POSTEN_ID.get(x.p).abschnitt === a.id);
     return { a, xs, betrag: -summe(xs), offen: arbeitsGruppen(xs.filter((x) => ZU.includes(x.status))).length };
   }).filter((x) => x.xs.length);
@@ -594,10 +605,10 @@ export function steuerZeigen(el, c) {
   const absBetrag = (y, id) => -summe(jeJahr.get(y).filter((x) => POSTEN_ID.get(x.p).abschnitt === id));
   const vergleich = vjahre.length > 1 ? `<div class="s5-teil fuell-aus" data-fuell="1"><h3>Im Vergleich der Jahre</h3>
     <div class="t3-rahmen"><table class="t3 t3-eng st5-vgl"><thead><tr><th>laut Kontoauszügen</th>${vjahre.map((y) => `<th class="r${y === jahr ? ' an' : ''}"><button class="link" data-sjahr="${y}">${y}</button></th>`).join('')}</tr></thead><tbody>
-    ${ABSCHNITTE.filter((a) => a.id !== 'einnahmen' && vjahre.some((y) => absBetrag(y, a.id))).map((a) => `<tr><td>${esc(a.name)}</td>${vjahre.map((y) => `<td class="r${y === jahr ? ' an' : ''}">${absBetrag(y, a.id) ? eur0(absBetrag(y, a.id)) : '<span class="muted">–</span>'}</td>`).join('')}</tr>`).join('')}
+    ${ABSCHNITTE.filter((a) => !NUR_INFO.has(a.id) && vjahre.some((y) => absBetrag(y, a.id))).map((a) => `<tr><td>${esc(a.name)}</td>${vjahre.map((y) => `<td class="r${y === jahr ? ' an' : ''}">${absBetrag(y, a.id) ? eur0(absBetrag(y, a.id)) : '<span class="muted">–</span>'}</td>`).join('')}</tr>`).join('')}
     <tr class="st5-erg"><td>Erstattung (+) / Nachzahlung (−) laut Unterlagen</td>${vjahre.map((y) => { const e = offiziell(y)?.ergebnis?.erstattung; return `<td class="r${y === jahr ? ' an' : ''}">${e == null ? '<span class="muted">–</span>' : `<b class="${e >= 0 ? 'pos' : 'neg'}">${e >= 0 ? '+' : '−'}${EUR0.format(Math.abs(e))}</b>`}</td>`; }).join('')}</tr>
     </tbody></table></div></div>` : '';
-  const gross = wirksam.filter((x) => POSTEN_ID.get(x.p).abschnitt !== 'einnahmen' && x.r.c < 0).sort((a, b) => a.r.c - b.r.c).slice(0, 5);
+  const gross = wirksam.filter((x) => !NUR_INFO.has(POSTEN_ID.get(x.p).abschnitt) && x.r.c < 0).sort((a, b) => a.r.c - b.r.c).slice(0, 5);
   const groesste = gross.length ? `<div class="s5-teil fuell-aus" data-fuell="2"><h3>Größte Einzelposten ${jahr}</h3><div class="nt">${gross.map((x, i) => `<div class="nt-z st5-gz${i ? ' fuell-aus' : ''}"${i ? ` data-fuell="${2 + i}" data-stopp` : ''}><span class="nt-n">${dde(x.r.d).slice(0, 6)} ${esc(x.r.g || x.r.z || '–')} <small>${esc(POSTEN_ID.get(x.p).name)}</small></span><b>${eur0(-x.r.c)}</b></div>`).join('')}</div></div>` : '';
 
   const knopf = (v, t) => `<button data-sfilter="${v}" class="${filter === v ? 'an' : ''}">${t}</button>`;
