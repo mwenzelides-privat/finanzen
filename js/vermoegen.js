@@ -112,15 +112,17 @@ export function depotKarte(H) {
   // Zeilenwerte so gerundet, dass sie genau die Summe ergeben (Abbildungen müssen aufgehen)
   const alle = [...dp.papiere, ...dp.nurKurs.map((w) => ({ nurKurs: true, wertHeute: w.kurswert }))];
   const rE = aufgehen(alle.map((p) => (p.nurKurs ? null : p.eingezahlt || 0))), rA = aufgehen(alle.map((p) => (p.nurKurs ? null : p.aus)));
-  const rW = aufgehen(alle.map((p) => p.wertHeute)), rG = aufgehen(alle.map((p) => (p.nurKurs ? null : p.ergebnis)));
+  // Wert heute nur, wo er belegt ist (Kurswert oder ganz verkauft = 0); Einstand ist kein Wert, er steht nur klein daneben
+  const belegt = (p) => p.nurKurs || p.kurs || p.leer || p.verkauft;
+  const rW = aufgehen(alle.map((p) => (belegt(p) ? p.wertHeute : null))), wertBelegt = summe(alle.filter(belegt), (p) => p.wertHeute), rG = aufgehen(alle.map((p) => (p.nurKurs ? null : p.ergebnis)));
   const kursText = k ? `Kurswerte laut Depot-Datei vom ${dde(k.stichtag)}` : 'Wert = Einstand, kein Kurswert';
 
   // Kennzahlen: eingezahlt, ausgezahlt, Wert heute, Ergebnis – Ergebnis nur, wo ein Wert belegt ist
   const kz = [
     ['eingezahlt', eur0(dp.eingezahlt), `${NUM.format(summe(dp.papiere, (p) => p.kaeufe))} Käufe`],
     ['ausgezahlt', eur0(dp.aus), `Verkäufe ${eur0(dp.entnommen)}${dp.ertraege ? ` · Ausschüttungen ${eur0(dp.ertraege)}` : ''}`],
-    ['Wert heute', eur0(dp.wert), !k ? 'Einstand, kein Kurswert · berechnet'
-      : ohneKurs.length ? `Kurswert laut Depot-Datei · davon ${eur0(einstandSumme)} Einstand (${ohneKurs.length} ohne Kurswert)` : `Kurswert laut Depot-Datei vom ${dde(k.stichtag)}`],
+    ['Wert heute', !k ? 'fehlt' : eur0(wertBelegt), !k ? `kein Kurswert vorhanden · bezahlt (Einstand) ${eur0(einstandSumme)}`
+      : ohneKurs.length ? `Kurswert laut Depot-Datei · ${ohneKurs.length} Papiere ohne Kurswert (Einstand ${eur0(einstandSumme)})` : `Kurswert laut Depot-Datei vom ${dde(k.stichtag)}`],
     ['Ergebnis', mitErg.length ? pm(H, ergSumme) : '–', mitErg.length
       ? `${pz(ergSumme, ergBasis)} · ${mitErg.length === dp.papiere.length ? 'alle Papiere' : `nur ${mitErg.length} von ${dp.papiere.length} Papieren (mit Kurswert oder verkauft)`}`
       : 'erst mit Kurswerten aus der Depot-Datei'],
@@ -146,8 +148,7 @@ export function depotKarte(H) {
   const wertZelle = (p, i) => p.kurs ? `${eur0(rW[i])}<small>Kurswert ${dde(p.kurs.tag || k.stichtag)}</small>`
     : p.leer ? `${eur0(0)}<small>verkauft (Stück 0)</small>`
     : p.verkauft ? `${eur0(0)}<small>verkauft (angenommen: mehr ausgezahlt als eingezahlt)</small>`
-    : p.einstand != null ? `${eur0(rW[i])}<small>Einstand, kein Kurswert</small>`
-    : `${eur0(rW[i])}<small>Einstand (netto), kein Kurswert</small>`;
+    : `<span class="muted">fehlt</span><small>kein Kurswert · bezahlt ${eur0(p.wertHeute)}</small>`;
   const ergZelle = (p, i) => p.ergebnis == null ? '<span class="muted">–</span><small>Kurswert fehlt</small>'
     : `${pm(H, rG[i])}<small>${pz(p.ergebnis, p.eingezahlt)}${p.kurs ? '' : ' · endgültig'}</small>`;
   const zeile = (p, i) => {
@@ -166,7 +167,7 @@ export function depotKarte(H) {
     <tbody>${dp.papiere.map(zeile).join('')}${nurKursZeilen}</tbody>
     <tfoot><tr class="dp-summe"><td class="dp-n"><b>Summe ${n} Papiere</b><small class="dp-handy">eingezahlt ${eur0(dp.eingezahlt)} · ausgezahlt ${eur0(dp.aus)}</small></td><td class="dp-m"></td>
       <td class="r dp-m"><b>${eur0(dp.eingezahlt)}</b></td><td class="r dp-m"><b>${eur0(dp.aus)}</b></td>
-      <td class="r"><b>${eur0(dp.wert)}</b>${k ? '' : '<small>Einstand, kein Kurswert</small>'}</td>
+      <td class="r">${k ? `<b>${eur0(wertBelegt)}</b>` : '<span class="muted">fehlt</span>'}${ohneKurs.length ? `<small>${k ? `dazu ${ohneKurs.length} ohne Kurswert, bezahlt ${eur0(einstandSumme)}` : `kein Kurswert · bezahlt ${eur0(einstandSumme)}`}</small>` : ''}</td>
       <td class="r">${mitErg.length ? `<b>${pm(H, ergSumme)}</b><small>${mitErg.length === dp.papiere.length ? pz(ergSumme, ergBasis) : `${mitErg.length} Papiere`}</small>` : '<span class="muted">–</span>'}</td></tr></tfoot></table></div>`;
   const hinweise = dp.hinweise.length ? `<ul class="dp-hinw">${dp.hinweise.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : '';
 
