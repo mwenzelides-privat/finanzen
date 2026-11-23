@@ -2,8 +2,8 @@
 // (zählen nicht in den Summen); vergangene Monate des Jahres zeigen den festgehaltenen Plan. Einnahmen und Ausgaben je Monat, in Rubriken
 // mit aufklappbaren Einzelposten und ihrer Herkunft (Beleg, aus Buchungen erkannt, Regel, Annahme, eigener Posten).
 // Gerechnet wird am PC (vorschau_daten.py → D.j.vorschau) – dieselben Zahlen stehen in Vorschau-12-Monate.xlsx.
-// Hier wird nichts geschätzt, nur gezeigt und auf volle Euro gerundet: Die gerundeten Teile ergeben genau die gezeigte
-// Summe (größter Rest), Monatssummen und „12 Monate“ sind aus den gezeigten Zahlen addiert.
+// Hier wird nichts geschätzt, nur gezeigt: jeder Posten kaufmännisch auf volle Euro gerundet, alle Summen (Rubrik, Monat,
+// Jahr, Ergebnis) aus den gezeigten Zahlen addiert.
 // Plan/Ist: Der Plan eines Monats wird beim letzten Aufbau vor Monatsbeginn festgehalten und dann mit den Buchungen verglichen.
 // Keine Imports von app.js: Helfer kommen als H. Geld in Cent.
 
@@ -126,35 +126,23 @@ const HER = {
 };
 const herkunft = (p) => (p.annahme ? 'annahme' : p.art);
 
-// Teile auf volle Euro so runden, dass sie zusammen genau ziel (Euro) ergeben – größter Rest zuerst. schuld[j] = bisher
-// zu wenig (+) bzw. zu viel (−) gezeigter Betrag dieses Teils aus den Vormonaten: Er zählt zum Rest dazu, so dass auch die
-// Summe über 12 Monate je Posten auf den Euro stimmt (z. B. 2 × 811,50 € wechseln sich beim Aufrunden ab).
-function teile(cs, ziel, schuld) {
-  const e = cs.map((c) => c / 100), ab = e.map(Math.floor), rest = e.map((x, j) => x - ab[j] + (schuld[j] || 0));
-  let fehlt = ziel - ab.reduce((t, x) => t + x, 0);
-  const rang = e.map((x, j) => j).filter((j) => cs[j]).sort((a, b) => rest[b] - rest[a] || a - b);   // nur Teile mit Betrag
-  for (const j of rang) { if (fehlt <= 0) break; ab[j]++; fehlt--; }
-  for (const j of [...rang].reverse()) { if (fehlt >= 0) break; ab[j]--; fehlt++; }
-  e.forEach((x, j) => { schuld[j] = (schuld[j] || 0) + x - ab[j]; });
-  return ab;
-}
+// Kaufmännisch auf volle Euro runden (ab 50 Cent auf, z. B. 324,50 € → 325 €), Cent → Euro
+const kfm = (c) => Math.sign(c) * Math.round(Math.abs(c) / 100);
 
-// Gerundete Anzeige der ganzen Vorschau: je Monat Bereich → Rubriken → Posten (Euro)
+// Gerundete Anzeige der ganzen Vorschau: jeder Posten je Monat kaufmännisch gerundet; Rubrik, Bereich, Ergebnis und
+// Jahressumme aus den gezeigten (gerundeten) Zahlen addiert – sie gehen genau auf, können aber um ein paar Euro vom
+// Cent-genauen Wert abweichen (vom Nutzer so gewünscht, 23.11.2026)
 function gerundet(v) {
-  const n = v.monate.length, rub = new Map(), pos = new Map(), ber = { ein: [], aus: [] };
-  for (const b of ['ein', 'aus']) {
-    const rs = v.rubriken.filter((r) => r.bereich === b), sR = [], sP = rs.map(() => []);
-    for (let i = 0; i < n; i++) {
-      const ziel = Math.round((b === 'ein' ? v.einnahmen : v.ausgaben)[i] / 100);
-      ber[b][i] = ziel;
-      const rt = teile(rs.map((r) => r.werte[i]), ziel, sR);
-      rs.forEach((r, j) => {
-        if (!rub.has(r.key)) rub.set(r.key, []);
-        rub.get(r.key)[i] = rt[j];
-        const pt = teile(r.posten.map((p) => p.werte[i]), rt[j], sP[j]);
-        r.posten.forEach((p, k) => { if (!pos.has(p.id)) pos.set(p.id, []); pos.get(p.id)[i] = pt[k]; });
-      });
+  const n = v.monate.length, rub = new Map(), pos = new Map(), ber = { ein: Array(n).fill(0), aus: Array(n).fill(0) };
+  for (const r of v.rubriken) {
+    const rw = Array(n).fill(0);
+    for (const p of r.posten) {
+      const pw = p.werte.map(kfm);
+      pos.set(p.id, pw);
+      pw.forEach((x, i) => { rw[i] += x; });
     }
+    rub.set(r.key, rw);
+    rw.forEach((x, i) => { ber[r.bereich][i] += x; });
   }
   const erg = ber.ein.map((x, i) => x - (ber.aus[i] || 0));
   return { rub, pos, ber, erg };
