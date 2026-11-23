@@ -40,6 +40,7 @@ export function depot(H) {
   for (const p of dep.papiere) { const w = kw.get(p.isin); if (w) for (const ko of p.konten || []) auszugTag.set(ko, w.tag || kurse.stichtag); }
   const papiere = dep.papiere.map((p) => {
     const k = kw.get(p.isin) || null, netto = (p.eingezahlt || 0) - (p.entnommen || 0);
+    const nachAuszug = !k && (p.konten || []).some((ko) => auszugTag.has(ko) && p.erste > auszugTag.get(ko));
     const nichtImAuszug = !k && (p.konten || []).some((ko) => auszugTag.has(ko) && p.letzte <= auszugTag.get(ko)) ? auszugTag.get(p.konten.find((ko) => auszugTag.has(ko))) : '';
     // ohne Einstand und mehr entnommen als eingezahlt: ganz verkauft, trägt 0 € bei (kein negativer Einstand)
     const verkauft = p.einstand == null && netto <= 0;
@@ -50,7 +51,7 @@ export function depot(H) {
     const wertHeute = k ? Math.max(0, k.kurswert + nach) : Math.max(0, basis);
     // Ergebnis nur mit belegtem Wert: Kurswert, oder ganz verkauft (Stück 0 laut Buchungen; ohne Stück: mehr entnommen als eingezahlt)
     const leer = !k && (p.stueck === 0 || !!nichtImAuszug), ergebnis = k || leer || verkauft ? wertHeute + aus - (p.eingezahlt || 0) : null;
-    return { ...p, name: p.name || p.isin, netto, verkauft, basis, kurs: k, aus, wertHeute: leer ? 0 : wertHeute, leer, nichtImAuszug, ergebnis: leer ? aus - (p.eingezahlt || 0) : ergebnis,
+    return { ...p, name: p.name || p.isin, netto, verkauft, basis, kurs: k, aus, wertHeute: leer ? 0 : wertHeute, leer, nichtImAuszug, nachAuszug, ergebnis: leer ? aus - (p.eingezahlt || 0) : ergebnis,
       gewinn: k && p.einstand != null ? k.kurswert - p.einstand : null };
   });
   // Papiere aus der Depot-Datei ohne eine einzige Buchung (z. B. vor Beginn der Daten gekauft)
@@ -80,6 +81,9 @@ export function depot(H) {
     aus: summe(papiere, (p) => p.aus), ertraege: summe(papiere, (p) => p.ertraege || 0) };
 }
 
+// Herkunft der Kurswerte je Datei, z. B. „ING per 30.09.2026, Oskar per 31.12.2025“
+const kursQuelle = (H, k) => (k?.dateien?.length ? k.dateien : k ? [{ datei: k.datei, stichtag: k.stichtag }] : [])
+  .map((d) => `${/baader/i.test(d.datei) ? 'Oskar' : /direkt_depot|depotauszug/i.test(d.datei) ? 'ING' : 'Depot-Datei'} per ${H.dde(d.stichtag)}`).join(', ');
 const OHNE_DEPOT = 'Depot-Daten kommen mit dem nächsten Aufbau am PC.';
 // Mini-Verlauf je Papier: eingezahlt (Linie, Akzent) und ausgezahlt (gestrichelt) aufsummiert, gemeinsame Zeitachse
 function verlaufSvg(p, monate) {
@@ -99,7 +103,7 @@ export function depotKarte(H) {
   if (!dp) return H.karte5('Depot und Sparpläne', '', `<p class="s5-erkl">${OHNE_DEPOT}</p>`, 'dp-karte');
   const { esc, eur0, dde, NUM } = H, k = dp.kurse, D = H.D();
   const kn = (i) => (D.j.konten || D.konten || [])[i]?.name || '';
-  const pz = (c, basis) => (basis > 0 ? `${c >= 0 ? '+' : '−'}${NUM.format(Math.round(Math.abs(c) / basis * 1000) / 10)} %` : '');
+  const pz = (c, basis) => (basis > 0 ? `${Math.round(Math.abs(c) / basis * 1000) === 0 ? '' : c > 0 ? '+' : '−'}${NUM.format(Math.round(Math.abs(c) / basis * 1000) / 10)} %` : '');
   const ohneKurs = dp.papiere.filter((p) => !p.kurs && !p.leer && !p.verkauft);
   const mitErg = [...dp.papiere.filter((p) => p.ergebnis != null)];
   const ergBasis = summe(mitErg, (p) => p.eingezahlt || 0);
@@ -113,14 +117,14 @@ export function depotKarte(H) {
   const rW = alle.map((p) => (!belegt(p) ? null : p.kurs ? Math.max(0, r0(p.kurs.kurswert) + r0(p.nach?.kauf) - r0(p.nach?.verkauf)) : r0(p.wertHeute)));
   const rG = alle.map((p, i) => (p.nurKurs || p.ergebnis == null ? null : rW[i] + rA[i] - rE[i]));
   const wertBelegt = sumR(rW), ergSumme = sumR(rG), eSum = sumR(rE), aSum = sumR(rA);
-  const kursText = k ? `Kurswerte per ${dde(k.stichtag)} laut ${k.datei.includes('Depotauszug') ? 'ING-Depotauszug' : 'Depot-Datei'}` : 'Wert = Einstand, kein Kurswert';
+  const kursText = k ? `Kurswerte laut Depotauszug ${kursQuelle(H, k)}` : 'Wert = Einstand, kein Kurswert';
 
   // Kennzahlen: eingezahlt, ausgezahlt, Wert heute, Ergebnis – Ergebnis nur, wo ein Wert belegt ist
   const kz = [
     ['eingezahlt', eur0(eSum), `${NUM.format(summe(dp.papiere, (p) => p.kaeufe))} Käufe`],
     ['ausgezahlt', eur0(aSum), `Verkäufe ${eur0(dp.entnommen)}${dp.ertraege ? ` · Ausschüttungen ${eur0(dp.ertraege)}` : ''}`],
     ['Wert heute', !k ? 'fehlt' : eur0(wertBelegt), !k ? `kein Kurswert vorhanden · bezahlt (Einstand) ${eur0(einstandSumme)}`
-      : ohneKurs.length ? `Kurswert per ${dde(k.stichtag)} laut ${k.datei.includes('Depotauszug') ? 'ING-Depotauszug' : 'Depot-Datei'} · ${ohneKurs.length} Papiere ohne Kurswert (Einstand ${eur0(einstandSumme)})` : `Kurswert laut Depot-Datei vom ${dde(k.stichtag)}`],
+      : ohneKurs.length ? `Kurswert laut Depotauszug ${kursQuelle(H, k)} · ${ohneKurs.length} ${ohneKurs.length === 1 ? 'Papier' : 'Papiere'} ohne Kurswert (Einstand ${eur0(einstandSumme)})` : `Kurswert laut Depotauszug ${kursQuelle(H, k)}`],
     ['Ergebnis', mitErg.length ? pm(H, ergSumme) : '–', mitErg.length
       ? `${pz(ergSumme, ergBasis)} · ${mitErg.length === dp.papiere.length ? 'alle Papiere' : `nur ${mitErg.length} von ${dp.papiere.length} Papieren (mit Kurswert oder verkauft)`}`
       : 'erst mit Kurswerten aus der Depot-Datei'],
@@ -135,20 +139,21 @@ export function depotKarte(H) {
     <p class="s5-erkl">Käufe und Verkäufe je Monat${ms.length < 36 ? '' : ' (36 Monate)'} · Verkäufe nach unten${ms.at(-1).m >= dp.stand.slice(0, 7) && dp.stand < H.D().bis ? ` · ${H.monKurz(ms.at(-1).m)} bis ${dde(dp.stand)}` : ''}</p>` : '';
 
   // Anleitung, solange Kurswerte fehlen (nie geschätzt)
-  const fehlKonten = [...new Set(ohneKurs.flatMap((p) => p.konten || []))].map(kn).filter(Boolean);
-  const anleitung = !ohneKurs.length ? '' : `<div class="dp-anl"><b>So kommen Kurswert und Ergebnis dazu</b>
-    <p>${ohneKurs.length} von ${dp.papiere.length} Papieren haben noch keinen Kurswert${fehlKonten.length ? ` (Käufe über ${esc(fehlKonten.join(' und '))})` : ''}. Bis dahin steht dort der Einstand – kein Kurswert, nie geschätzt.</p>
+  const ohneAuszug = ohneKurs.filter((p) => !p.nachAuszug), neuGekauft = ohneKurs.filter((p) => p.nachAuszug);
+  const fehlKonten = [...new Set(ohneAuszug.flatMap((p) => p.konten || []))].map(kn).filter(Boolean);
+  const anleitung = !ohneAuszug.length ? (neuGekauft.length ? `<p class="s5-erkl">Ohne Kurswert: ${esc(neuGekauft.map((p) => p.name).join(', '))} – nach dem letzten Depotauszug gekauft; der Kurswert kommt mit dem nächsten Auszug.</p>` : '') : `<div class="dp-anl"><b>So kommen Kurswert und Ergebnis dazu</b>
+    <p>${ohneAuszug.length} von ${dp.papiere.length} Papieren haben noch keinen Kurswert${fehlKonten.length ? ` (Käufe über ${esc(fehlKonten.join(' und '))})` : ''}. Bis dahin steht dort der Einstand – kein Kurswert, nie geschätzt.</p>
     <ol><li>ING: Der Depotauszug (PDF, kommt jedes Quartal ins Postfach) wird automatisch erkannt – einfach in den Eingang legen. Kurswert gilt zum Stichtag des Auszugs, spätere Käufe zählen bis dahin zum Einstand.</li>
-    <li>Oskar: Die Monatsauszüge der Baader Bank zeigen nur Käufe, keinen Bestand. Dafür die Depotübersicht als CSV speichern und so benennen, dass der Name mit „Depot“ beginnt, z. B. „Depot Oskar 2026-11-23.csv“.</li>
+    <li>Oskar: Im Baader-Kundenportal die Depotübersicht als PDF drucken (Dateiname mit „Kundenportal“) – das ist der aktuellste Stand. Der Jahres-Depotauszug der Baader Bank wird ebenfalls erkannt; die Monatsauszüge zeigen nur Käufe, keinen Bestand.</li>
     <li>Alles in den Ordner 10 Finanzen › Eingang legen und am PC die Aktualisierung laufen lassen.</li></ol>
     <p>Danach zeigt jede Zeile Kurswert und Ergebnis; eine neuere Datei desselben Depots ersetzt die ältere.</p></div>`;
 
-  const wertZelle = (p, i) => p.kurs ? `${eur0(rW[i])}<small>Kurswert ${eur0(p.kurs.kurswert)} per ${dde(p.kurs.tag || k.stichtag)}${p.nach?.kauf ? ` + danach gekauft ${eur0(p.nach.kauf)} (Einstand)` : ''}${p.nach?.verkauf ? ` − danach verkauft ${eur0(p.nach.verkauf)}` : ''}</small>`
+  const wertZelle = (p, i) => p.kurs ? `${eur0(rW[i])}<small>Kurswert ${p.nach?.kauf || p.nach?.verkauf ? `${eur0(p.kurs.kurswert)} ` : ''}per ${dde(p.kurs.tag || k.stichtag)}${p.nach?.kauf ? ` + danach gekauft ${eur0(p.nach.kauf)} (Einstand)` : ''}${p.nach?.verkauf ? ` − danach verkauft ${eur0(p.nach.verkauf)}` : ''}</small>`
     : p.leer ? `${eur0(0)}<small>${p.nichtImAuszug ? `verkauft – nicht mehr im Depotauszug per ${dde(p.nichtImAuszug)}` : 'verkauft (Stück 0)'}</small>`
     : p.verkauft ? `${eur0(0)}<small>verkauft (angenommen: mehr ausgezahlt als eingezahlt)</small>`
-    : `<span class="muted">fehlt</span><small>kein Kurswert · bezahlt ${eur0(p.wertHeute)}</small>`;
+    : `<span class="muted">fehlt</span><small>${p.nachAuszug ? 'nach dem letzten Depotauszug gekauft' : 'kein Kurswert'} · bezahlt ${eur0(p.wertHeute)}</small>`;
   const ergZelle = (p, i) => p.ergebnis == null ? '<span class="muted">–</span><small>Kurswert fehlt</small>'
-    : `${pm(H, rG[i])}<small>${pz(p.ergebnis, p.eingezahlt)}${p.kurs ? '' : ' · endgültig'}</small>`;
+    : `${rG[i] === 0 ? eur0(0) : pm(H, rG[i])}<small>${pz(rG[i], rE[i])}${p.kurs ? '' : ' · endgültig'}</small>`;
   const zeile = (p, i) => {
     const st = p.kurs ? `Stück ${NUM.format(p.kurs.stueck)}` : p.stueck != null ? `Stück ${NUM.format(p.stueck)}` : 'Stück nicht gebucht';
     return `<tr class="klick"${H.geh(H.zuBuchungen({ q: p.isin, konto: '' }))} title="Anklicken: Buchungen zu ${esc(p.isin)}">
@@ -201,7 +206,7 @@ export function vermoegenKarte(H) {
   const zeile = (t, sub, w, wsub, cls = '') => `<div class="${cls}"><dt>${t}<small>${sub}</small></dt><dd>${w}<small>${wsub}</small></dd></div>`;
   const depotZeile = !dp ? zeile('Depot', OHNE_DEPOT, '<span class="muted">–</span>', '')
     : zeile('Depot', k && dp.ausKurs && !dp.berechnet ? 'Kurswert' : k && dp.ausKurs ? 'teils Kurswert, teils berechnet' : 'eingezahlt (gebucht): Einstand bzw. netto eingezahlt · berechnet, kein Kurswert',
-      betrag(H, dp.wert), k && dp.ausKurs ? `laut Depot-Datei vom ${dde(k.stichtag)}` : `Stand ${dde(dp.stand)}`);
+      betrag(H, dp.wert), k && dp.ausKurs ? `laut Depotauszug ${kursQuelle(H, k)}` : `Stand ${dde(dp.stand)}`);
   const kautionZeile = V.kautionKonto
     ? zeile('Mietkaution', `steckt schon in „Konten“ (Konto „${esc(V.kautionKonto.name)}“)`, `<span class="muted">${eur0(V.kautionKonto.c)}</span>`, 'zählt nicht doppelt', 'vm-info')
     : zeile('Mietkaution', `eigene Eingabe${V.kaution?.notiz ? ` · ${esc(V.kaution.notiz)}` : ''}`, V.kaution ? eur0(V.kaution.c) : '<span class="muted">–</span>',
