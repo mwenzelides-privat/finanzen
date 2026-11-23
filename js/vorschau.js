@@ -17,7 +17,7 @@ let vglMonat = '';                // gewählter Monat im Plan/Ist
 // vorgemerkt (IndexedDB) und geht mit, sobald die App am PC geöffnet wird. Ein übertragener Eintrag fällt weg, sobald Daten
 // da sind, die nach ihm gebaut wurden (dann steht er in Planung.xlsx – oder du hast ihn dort inzwischen selbst geändert).
 const KV_E = 'vorschau.einrichtung';
-let ENT = null, ladeP = null, neuZ = null, meldung = '';
+let ENT = null, ladeP = null, neuZ = null, meldung = '', anker = '';
 const ekey = (x) => `${x.raum}|${x.name}`;
 const amPc = () => matchMedia('(pointer: fine)').matches && !/android|iphone|ipad/i.test(navigator.userAgent);
 const jetztLokal = () => { const d = new Date(), p = (x) => String(x).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
@@ -72,13 +72,12 @@ function mitAuswahl(v) {
     const st = {};
     for (const x of of) st[x.stufe || 'ohne Einstufung'] = (st[x.stufe || 'ohne Einstufung'] || 0) + x.c;
     const fest = of.filter((x) => x.fest).length, raus = alle.filter((x) => x.status === 'raus').length;
-    const erl = alle.filter((x) => x.status === 'gekauft' || x.status === 'entfaellt').length, id = `einrichtung:${H.norm(raum)}`;
+    const erl = alle.filter((x) => ['gekauft', 'entfaellt', 'finanziert'].includes(x.status)).length, id = `einrichtung:${H.norm(raum)}`;
     neu.push({ ...(vorher.get(id) || { art: 'eigen', beleg: 'Kaufliste Dettenhofen (Planung.xlsx, Blatt Einrichtung)' }), id, rubrik: 'einrichtung', name: raum, werte, summe: werte.reduce((t, x) => t + x, 0),
       annahme: fest < of.length, artikel: of,
       herkunft: `${of.length} Artikel offen: ${Object.entries(st).map(([k, c]) => `${k} ${H.eur(c)}`).join(', ')} (${fest} mit festem Preis, ${of.length - fest} geschätzt)`
-        + (erl ? `, ${erl} gekauft oder entfallen` : '') + (raus ? `, ${raus} herausgenommen` : '') });
+        + (erl ? `, ${erl} gekauft, finanziert oder entfallen` : '') + (raus ? `, ${raus} herausgenommen` : '') });
   }
-  neu.sort((a, b) => b.summe - a.summe);
   if (!rub && neu.length) { rub = { key: 'einrichtung', name: 'Einrichtung', bereich: 'aus' }; w.rubriken.splice(Math.max(0, w.rubriken.findIndex((r) => r.key === 'leben')), 0, rub); }
   if (rub) {
     rub.posten = neu;
@@ -286,12 +285,25 @@ export function vorschauSeite(h) {
   </div>`;
 }
 
+// Neu zeichnen, ohne dass die Seite springt: die Zeile, an der du gerade warst (anker), bleibt an derselben Stelle im Bild,
+// die Tabelle bleibt seitlich so verschoben wie vorher
+function stabil(zeichnen) {
+  const el = anker && document.querySelector(anker), oben = el?.getBoundingClientRect().top;
+  const links = document.querySelector('#vs-monate .vs-scroll')?.scrollLeft || 0;
+  zeichnen();
+  const sc = document.querySelector('#vs-monate .vs-scroll');
+  if (sc) sc.scrollLeft = links;
+  const neuEl = anker && (document.querySelector(anker) || document.querySelector('[data-vsrub="einrichtung"]'));
+  if (neuEl && oben != null) window.scrollBy(0, neuEl.getBoundingClientRect().top - oben);
+}
+const raumAnker = (raum) => `[data-vspos="einrichtung:${CSS.escape(H.norm(raum))}"]`;
+
 export function vorschauBinden(box, neuZeichnen) {
-  neuZ = neuZeichnen;
-  box.querySelectorAll('[data-vsraus]').forEach((b) => b.onclick = () => { const x = wirksam(H.D().j.vorschau).find((y) => ekey(y) === b.dataset.vsraus); if (x) setzeArtikel(x, 'herausgenommen', x.monat); });
-  box.querySelectorAll('[data-vsein]').forEach((sel) => sel.onchange = () => { const x = (H.D().j.vorschau?.einrichtung || []).find((y) => ekey(y) === sel.dataset.vsein); if (x && sel.value) setzeArtikel(x, 'offen', sel.value); });
-  box.querySelectorAll('[data-vsrub]').forEach((b) => b.onclick = () => { const k = b.dataset.vsrub; if (offen.has(k)) offen.delete(k); else offen.add(k); neuZeichnen(); });
-  box.querySelectorAll('[data-vspos]').forEach((b) => b.onclick = () => { const k = b.dataset.vspos; if (offenP.has(k)) offenP.delete(k); else offenP.add(k); neuZeichnen(); });
+  neuZ = () => stabil(neuZeichnen);
+  box.querySelectorAll('[data-vsraus]').forEach((b) => b.onclick = () => { const x = wirksam(H.D().j.vorschau).find((y) => ekey(y) === b.dataset.vsraus); if (x) { anker = raumAnker(x.raum); setzeArtikel(x, 'herausgenommen', x.monat); } });
+  box.querySelectorAll('[data-vsein]').forEach((sel) => sel.onchange = () => { const x = (H.D().j.vorschau?.einrichtung || []).find((y) => ekey(y) === sel.dataset.vsein); if (x && sel.value) { anker = '#vs-raus'; setzeArtikel(x, 'offen', sel.value); } });
+  box.querySelectorAll('[data-vsrub]').forEach((b) => b.onclick = () => { const k = b.dataset.vsrub; if (offen.has(k)) offen.delete(k); else offen.add(k); anker = `[data-vsrub="${CSS.escape(k)}"]`; neuZ(); });
+  box.querySelectorAll('[data-vspos]').forEach((b) => b.onclick = () => { const k = b.dataset.vspos; if (offenP.has(k)) offenP.delete(k); else offenP.add(k); anker = `[data-vspos="${CSS.escape(k)}"]`; neuZ(); });
   box.querySelectorAll('[data-vsvgl]').forEach((b) => b.onclick = () => { vglMonat = b.dataset.vsvgl; neuZeichnen(); });
   box.querySelectorAll('[data-vsalle]').forEach((b) => b.onclick = () => {
     const v = H.D().j.vorschau;
