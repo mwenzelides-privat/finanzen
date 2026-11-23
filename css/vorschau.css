@@ -23,7 +23,7 @@
 .vs-werkzeug { display: flex; justify-content: flex-end; margin: -4px 0 6px; }
 .vs-scroll { overflow-x: auto; max-width: 100%; border: 1px solid var(--border); border-radius: 10px; -webkit-overflow-scrolling: touch; }
 .vs-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.vs-tab { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 1060px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.vs-tab { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 1180px; font-size: 13px; font-variant-numeric: tabular-nums; }
 .vs-tab.vs-vgl { min-width: 420px; }
 .vs-tab th, .vs-tab td { padding: 6px 8px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
 .vs-tab thead th { position: sticky; top: 0; background: var(--surface-2); color: var(--text-2); font-weight: 600; font-size: 12px; z-index: 1; }
@@ -31,6 +31,15 @@
 .vs-tab thead .vs-n { z-index: 3; background: var(--surface-2); }
 .vs-tab .vs-s { font-weight: 650; background: var(--surface-2); }
 .vs-tab td.neg, .vs-tab .neg { color: var(--aus-text); }
+/* Randmonate (Dezember davor, Januar danach): schlicht – kleiner, gedämpft, nicht fett, abgesetzt */
+.vs-tab .vs-rand { font-size: 11.5px; font-weight: 400 !important; color: var(--muted); background: var(--bg); }
+.vs-tab .vs-rand.neg { color: color-mix(in srgb, var(--aus-text) 60%, var(--muted)); }
+.vs-tab .vs-vor { border-right: 1px solid var(--border-strong); }
+.vs-tab .vs-nach { border-left: 1px solid var(--border-strong); }
+.vs-tab thead .vs-rand { background: var(--bg); color: var(--muted); font-weight: 400; }
+.vs-altm { display: block; font-size: 10px; font-weight: 400; color: var(--muted); }
+.vs-bar.vs-rand { opacity: .4; }
+.vs-bar.vs-rand small { font-size: 10px; }
 .vs-ber th, .vs-ber td { font-weight: 650; background: var(--surface-2); }
 .vs-ber .vs-n { background: var(--surface-2); }
 .vs-rub th, .vs-rub td { font-weight: 600; }
@@ -95,7 +104,7 @@
   .vs-bars { gap: 3px; height: 150px; }
   .vs-bar small { display: none; }
   .vs-tab .vs-n { width: 150px; min-width: 150px; max-width: 150px; }
-  .vs-tab { min-width: 980px; }
+  .vs-tab { min-width: 1080px; }
   .vs-pos .vs-n { padding-left: 14px; }
   .vs-pn { white-space: normal; overflow-wrap: break-word; hyphens: auto; }
   .vs-pos .vs-auf { flex-direction: column; align-items: flex-start; gap: 2px; }

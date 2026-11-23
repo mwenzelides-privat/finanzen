@@ -1,4 +1,5 @@
-// Vorschau 12 Monate (Bereich Geldfluss › Vorschau): alle zu erwartenden Einnahmen und Ausgaben je Monat, in Rubriken
+// Jahresvorschau (Bereich Geldfluss › Vorschau): immer Januar–Dezember, dazu schlicht je ein Randmonat davor und danach
+// (zählen nicht in den Summen); vergangene Monate des Jahres zeigen den festgehaltenen Plan. Einnahmen und Ausgaben je Monat, in Rubriken
 // mit aufklappbaren Einzelposten und ihrer Herkunft (Beleg, aus Buchungen erkannt, Regel, Annahme, eigener Posten).
 // Gerechnet wird am PC (vorschau_daten.py → D.j.vorschau) – dieselben Zahlen stehen in Vorschau-12-Monate.xlsx.
 // Hier wird nichts geschätzt, nur gezeigt und auf volle Euro gerundet: Die gerundeten Teile ergeben genau die gezeigte
@@ -57,6 +58,12 @@ function setzeArtikel(x, status, monat) {
 function wirksam(v) {
   return (v.einrichtung || []).map((x) => { const e = ENT?.get(ekey(x)); return e ? { ...x, status: e.status === 'herausgenommen' ? 'raus' : e.status === 'entfällt' ? 'entfaellt' : 'offen', monat: e.monat || x.monat, vorgemerkt: !e.sync } : x; });
 }
+// Jahresfenster: Januar–Dezember (kern) plus je ein Randmonat davor und danach; Summen zählen nur Januar–Dezember
+const kernVon = (v) => v.kern || [0, v.monate.length - 1];
+const imKern = (v, i) => { const [a, b] = kernVon(v); return i >= a && i <= b; };
+const jahrSumme = (v, werte) => werte.reduce((t, x, i) => t + (imKern(v, i) ? x : 0), 0);
+const jahrVon = (v) => v.jahr || +v.monate[kernVon(v)[0]].slice(0, 4);
+
 // Vorschau mit deiner Auswahl: Rubrik Einrichtung je Raum neu, Ausgaben und Ergebnis angepasst (Cent, genau)
 function mitAuswahl(v) {
   if (!ENT?.size || !v.einrichtung?.length) return v;
@@ -67,13 +74,14 @@ function mitAuswahl(v) {
   const neu = (rub?.posten || []).filter((p) => !p.id.startsWith('einrichtung:'));
   for (const raum of [...new Set(l.map((x) => x.raum))]) {
     const alle = l.filter((x) => x.raum === raum), of = alle.filter((x) => x.status === 'offen');
-    const werte = w.monate.map((k) => of.filter((x) => x.monat === k).reduce((t, x) => t + x.c, 0));
+    const id0 = `einrichtung:${H.norm(raum)}`;   // vergangene Monate: festgehaltener Plan bleibt
+    const werte = w.monate.map((k, i) => (i < (w.ab || 0) ? (vorher.get(id0)?.werte[i] || 0) : of.filter((x) => x.monat === k).reduce((t, x) => t + x.c, 0)));
     if (!werte.some(Boolean)) continue;
     const st = {};
     for (const x of of) st[x.stufe || 'ohne Einstufung'] = (st[x.stufe || 'ohne Einstufung'] || 0) + x.c;
     const fest = of.filter((x) => x.fest).length, raus = alle.filter((x) => x.status === 'raus').length;
     const erl = alle.filter((x) => ['gekauft', 'entfaellt', 'finanziert'].includes(x.status)).length, id = `einrichtung:${H.norm(raum)}`;
-    neu.push({ ...(vorher.get(id) || { art: 'eigen', beleg: 'Kaufliste Dettenhofen (Planung.xlsx, Blatt Einrichtung)' }), id, rubrik: 'einrichtung', name: raum, werte, summe: werte.reduce((t, x) => t + x, 0),
+    neu.push({ ...(vorher.get(id) || { art: 'eigen', beleg: 'Kaufliste Dettenhofen (Planung.xlsx, Blatt Einrichtung)' }), id, rubrik: 'einrichtung', name: raum, werte, summe: jahrSumme(w, werte),
       annahme: fest < of.length, artikel: of,
       herkunft: `${of.length} Artikel offen: ${Object.entries(st).map(([k, c]) => `${k} ${H.eur(c)}`).join(', ')} (${fest} mit festem Preis, ${of.length - fest} geschätzt)`
         + (erl ? `, ${erl} gekauft, finanziert oder entfallen` : '') + (raus ? `, ${raus} herausgenommen` : '') });
@@ -82,7 +90,7 @@ function mitAuswahl(v) {
   if (rub) {
     rub.posten = neu;
     rub.werte = w.monate.map((_, i) => neu.reduce((t, p) => t + p.werte[i], 0));
-    rub.summe = rub.werte.reduce((t, x) => t + x, 0);
+    rub.summe = jahrSumme(w, rub.werte);
     if (!neu.length) w.rubriken = w.rubriken.filter((r) => r !== rub);
   }
   const jetzt = rub && neu.length ? rub.werte : Array(n).fill(0);
@@ -179,9 +187,11 @@ function artikelHtml(l, raum) {
 }
 
 function tabelleHtml(v, G) {
-  const M = v.monate;
-  const kopf = `<tr><th class="vs-n" scope="col">Rubrik und Posten</th>${M.map((k) => `<th scope="col">${H.monKurz(k)}</th>`).join('')}<th scope="col" class="vs-s">12 Monate</th></tr>`;
-  const zellen = (werte, cls = '') => werte.map((x) => `<td class="${cls}${x < 0 ? ' neg' : ''}">${e0(x)}</td>`).join('') + `<td class="vs-s${summe(werte) < 0 ? ' neg' : ''}">${e0(summe(werte))}</td>`;
+  const M = v.monate, [ka, kb] = kernVon(v);
+  const rc = (i) => (i < ka ? ' vs-rand vs-vor' : i > kb ? ' vs-rand vs-nach' : '');   // Randmonate schlicht
+  const alt = v.alt || {};
+  const kopf = `<tr><th class="vs-n" scope="col">Rubrik und Posten</th>${M.map((k, i) => `<th scope="col" class="${rc(i)}"${alt[k] ? ` title="festgehaltener Plan vom ${H.dde(alt[k])} – Ist unter „Plan und Ist“"` : ''}>${H.monKurz(k)}${alt[k] ? '<small class="vs-altm">Plan</small>' : ''}</th>`).join('')}<th scope="col" class="vs-s">Jahr ${jahrVon(v)}</th></tr>`;
+  const zellen = (werte) => { const s = jahrSumme(v, werte); return werte.map((x, i) => `<td class="${rc(i)}${x < 0 ? ' neg' : ''}">${e0(x)}</td>`).join('') + `<td class="vs-s${s < 0 ? ' neg' : ''}">${e0(s)}</td>`; };
   let body = '';
   for (const [b, titel] of [['ein', 'Einnahmen'], ['aus', 'Ausgaben']]) {
     body += `<tr class="vs-ber"><th scope="row" class="vs-n">${titel}</th>${zellen(G.ber[b])}</tr>`;
@@ -203,14 +213,14 @@ function tabelleHtml(v, G) {
     }
   }
   body += `<tr class="vs-erg"><th scope="row" class="vs-n">Ergebnis</th>${zellen(G.erg)}</tr>`;
-  return `<div class="vs-scroll" tabindex="0" aria-label="Tabelle: 12 Monate nebeneinander, seitlich verschiebbar"><table class="vs-tab"><thead>${kopf}</thead><tbody>${body}</tbody></table></div>`;
+  return `<div class="vs-scroll" tabindex="0" aria-label="Tabelle: Monate nebeneinander, seitlich verschiebbar"><table class="vs-tab"><thead>${kopf}</thead><tbody>${body}</tbody></table></div>`;
 }
 
 function balkenHtml(v, G) {
   const max = Math.max(1, ...G.erg.map(Math.abs));
-  return `<div class="vs-bars" role="img" aria-label="Ergebnis je Monat">${v.monate.map((k, i) => {
+  return `<div class="vs-bars" role="img" aria-label="Ergebnis je Monat" style="grid-template-columns: repeat(${v.monate.length}, minmax(0, 1fr))">${v.monate.map((k, i) => {
     const x = G.erg[i], h = (Math.abs(x) / max) * 36;
-    return `<span class="vs-bar" title="${H.monLang(k)}: Einnahmen ${e0(G.ber.ein[i])} − Ausgaben ${e0(G.ber.aus[i])} = ${pm0(x)}">`
+    return `<span class="vs-bar${imKern(v, i) ? '' : ' vs-rand'}" title="${H.monLang(k)}: Einnahmen ${e0(G.ber.ein[i])} − Ausgaben ${e0(G.ber.aus[i])} = ${pm0(x)}">`
       + `<small class="${x < 0 ? 'neg' : ''}">${x ? (x < 0 ? '−' : '+') + H.kurzWert(Math.abs(x)) : '0'}</small>`
       + `<i class="${x < 0 ? 'minus' : 'plus'}" style="height:${h.toFixed(1)}%;${x < 0 ? 'top:50%' : 'bottom:50%'}"></i><em>${H.MON[+k.slice(5) - 1]}</em></span>`;
   }).join('')}</div>`;
@@ -219,7 +229,7 @@ function balkenHtml(v, G) {
 function vergleichHtml(v) {
   const l = v.vergleich || [];
   if (!l.length) {
-    return `<p class="bx-u">Der Plan für ${H.esc(H.monLang(v.monate[0]))} ist festgehalten (Stand ${H.dde(v.stand)}). Sobald der Monat begonnen hat, steht hier, was wirklich gebucht wurde – je Rubrik mit Abweichung, Posten aufklappbar.</p>`;
+    return `<p class="bx-u">Der Plan für ${H.esc(H.monLang(v.monate[v.ab || 0]))} ist festgehalten (Stand ${H.dde(v.stand)}). Sobald der Monat begonnen hat, steht hier, was wirklich gebucht wurde – je Rubrik mit Abweichung, Posten aufklappbar.</p>`;
   }
   if (!l.some((x) => x.monat === vglMonat)) vglMonat = l.at(-1).monat;
   const x = l.find((y) => y.monat === vglMonat);
@@ -255,18 +265,19 @@ export function vorschauSeite(h) {
   if (v0?.einrichtung?.length && !ENT && !ladeP) ladeP = entLaden(v0).then(() => neuZ?.());
   const v = v0?.monate?.length ? mitAuswahl(v0) : v0;
   if (!v?.monate?.length) {
-    return `<div class="cp bx">${H.bxKopf('Vorschau 12 Monate', 'Die Vorschau ist noch nicht berechnet.', 'Sie entsteht am PC beim nächsten Einlesen (vorschau_daten.py).')}</div>`;
+    return `<div class="cp bx">${H.bxKopf('Vorschau','Die Vorschau ist noch nicht berechnet.', 'Sie entsteht am PC beim nächsten Einlesen (vorschau_daten.py).')}</div>`;
   }
-  const G = gerundet(v), M = v.monate, n = M.length;
-  const sEin = summe(G.ber.ein), sAus = summe(G.ber.aus), sErg = summe(G.erg);
-  const einmal = ['einmalig', 'einrichtung'].reduce((t, k) => t + (G.rub.get(k) ? summe(G.rub.get(k)) : 0), 0);   // einmalige Zahlungen und Einrichtung
-  const tief = G.erg.indexOf(Math.min(...G.erg));
+  const G = gerundet(v), M = v.monate, [ka, kb] = kernVon(v), n = kb - ka + 1, J = jahrVon(v);
+  const js = (a) => jahrSumme(v, a);   // nur Januar–Dezember
+  const sEin = js(G.ber.ein), sAus = js(G.ber.aus), sErg = js(G.erg);
+  const einmal = ['einmalig', 'einrichtung'].reduce((t, k) => t + (G.rub.get(k) ? js(G.rub.get(k)) : 0), 0);   // einmalige Zahlungen und Einrichtung
+  const imJahr = G.erg.slice(ka, kb + 1), tief = ka + imJahr.indexOf(Math.min(...imJahr));
   const gross = v.rubriken.flatMap((r) => r.posten.map((p) => ({ p, c: p.werte[tief] }))).filter((x) => ['einmalig', 'einrichtung'].includes(x.p.rubrik) && x.c).sort((a, b) => b.c - a.c)[0];
-  const von = H.monLang(M[0]), bis = H.monLang(M[n - 1]);
-  const kern = `Bis ${H.esc(bis)} ${sErg < 0 ? `fehlen <b class="neg">${H.eur0(Math.abs(sErg) * 100)}</b>` : `bleiben <b class="pos">${H.eur0(sErg * 100)}</b>`}${einmal ? ` – ohne Einrichtung und einmalige Zahlungen ${pm0(sErg + einmal)}` : ''}.`;
-  const unter = `Einnahmen ${e0(sEin)} − Ausgaben ${e0(sAus)} von ${H.esc(von)} bis ${H.esc(bis)}`
-    + (G.erg[tief] < 0 ? ` · schwächster Monat ${H.esc(H.monLang(M[tief]))} (${pm0(G.erg[tief])}${gross ? `, darin ${H.esc(gross.p.name)} ${e0(Math.round(gross.c / 100))}` : ''})` : '');
-  const zahlen = [['Einnahmen', e0(sEin), '12 Monate'], ['Ausgaben', e0(sAus), '12 Monate'], ['Ergebnis', pm0(sErg), `Ø ${pm0(Math.round(sErg / n))} im Monat`, sErg < 0 ? 'neg' : ''],
+  const kern = `Im Jahr ${J} ${sErg < 0 ? `fehlen <b class="neg">${H.eur0(Math.abs(sErg) * 100)}</b>` : `bleiben <b class="pos">${H.eur0(sErg * 100)}</b>`}${einmal ? ` – ohne Einrichtung und einmalige Zahlungen ${pm0(sErg + einmal)}` : ''}.`;
+  const unter = `Einnahmen ${e0(sEin)} − Ausgaben ${e0(sAus)} von Januar bis Dezember ${J}`
+    + (G.erg[tief] < 0 ? ` · schwächster Monat ${H.esc(H.monLang(M[tief]))} (${pm0(G.erg[tief])}${gross ? `, darin ${H.esc(gross.p.name)} ${e0(Math.round(gross.c / 100))}` : ''})` : '')
+    + (ka > 0 || kb < M.length - 1 ? ` · ${H.esc(H.monKurz(M[0]))} und ${H.esc(H.monKurz(M.at(-1)))} am Rand zur Vollständigkeit, nicht in den Summen` : '');
+  const zahlen = [['Einnahmen', e0(sEin), `Jan – Dez ${J}`], ['Ausgaben', e0(sAus), `Jan – Dez ${J}`], ['Ergebnis', pm0(sErg), `Ø ${pm0(Math.round(sErg / n))} im Monat`, sErg < 0 ? 'neg' : ''],
     ['Einrichtung und Einmaliges', e0(einmal), 'darin enthalten']]
     .map(([t, w, u, c = '']) => `<div class="vs-zahl"><span>${t}</span><b class="${c}">${w}</b><small>${u}</small></div>`).join('');
   const zaehl = {};
@@ -275,7 +286,7 @@ export function vorschauSeite(h) {
   const hinweise = (v.hinweise || []).length ? `<p class="vs-hinweis">${v.hinweise.map(H.esc).join('<br>')}</p>` : '';
   const leben = v.rubriken.find((r) => r.key === 'leben')?.posten[0];
   return `<div class="cp bx vs">
-    ${H.bxKopf('Vorschau 12 Monate', kern, unter + ' · Beträge auf volle Euro gerundet, Summen aus den gezeigten Zahlen')}
+    ${H.bxKopf(`Vorschau ${J}`, kern, unter + ' · Beträge auf volle Euro gerundet, Summen aus den gezeigten Zahlen')}
     <div class="vs-zahlen">${zahlen}</div>
     ${H.bxKarte('Ergebnis je Monat', balkenHtml(v, G), { rechts: '<span class="klein muted">Einnahmen minus Ausgaben</span>', fuss: 'Grün = es bleibt etwas übrig, rot = Minus · Monat antippen für die Zahlen (Tooltip)' })}
     ${H.bxKarte('Monat für Monat', `<div class="vs-werkzeug"><button class="bx-link" data-vsalle="1">${[...offen].some((k) => !k.startsWith('vgl:')) ? 'Alle zuklappen' : 'Alle Rubriken aufklappen'}</button></div>${tabelleHtml(v, G)}`,
