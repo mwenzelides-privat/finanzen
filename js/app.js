@@ -1488,7 +1488,7 @@ function vermoegenSeite() {
   const gruppen = KONTO_GRUPPEN.map((g) => { const l = amTag.filter((x) => g.test(x.k)); return { g, n: l.length, c: l.filter((x) => x.c != null && x.status !== 'unbekannt').reduce((t, x) => t + x.c, 0) }; }).filter((x) => x.n);
   const wo = `<div class="bx-wo">${gruppen.map(({ g, n, c }) => `<button class="bx-wo-z${g.fremd ? ' fremd' : ''}"${geh(zuKonten)} title="${esc(g.erkl)}"><span>${esc(g.titel)}<small>${n} ${n === 1 ? 'Konto' : 'Konten'}${g.fremd ? ' · zählt nicht mit' : ''}</small></span><b>${eur0(c)}</b></button>`).join('')}</div>`;
 
-  const dpTop = dp ? [...dp.papiere.map((p) => ({ n: p.name, isin: p.isin, w: p.kurs ? p.kurs.kurswert : p.basis })), ...dp.nurKurs.map((w) => ({ n: w.isin, isin: w.isin, w: w.kurswert }))].filter((x) => x.w > 0).sort((a1, b1) => b1.w - a1.w) : [];
+  const dpTop = dp ? [...dp.papiere.map((p) => ({ n: p.name, isin: p.isin, w: p.wertHeute })), ...dp.nurKurs.map((w) => ({ n: w.isin, isin: w.isin, w: w.kurswert }))].filter((x) => x.w > 0).sort((a1, b1) => b1.w - a1.w) : [];
   const dpRest = dpTop.slice(5).reduce((t, x) => t + x.w, 0);
   const depotInhalt = !dp ? '<p class="bx-u">Depot-Daten kommen mit dem nächsten Aufbau am PC.</p>'
     : `<dl class="bx-dl"><div><dt>eingezahlt</dt><dd>${eur0(dp.eingezahlt)}</dd></div><div><dt>ausgezahlt</dt><dd>${eur0(dp.aus)}</dd></div>
