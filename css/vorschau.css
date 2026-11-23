@@ -1,0 +1,83 @@
+/* ============ Vorschau 12 Monate (js/vorschau.js) ============ */
+.vs { min-width: 0; }
+.vs .bx-karte { min-width: 0; }
+
+/* Kennzahlen oben */
+.vs-zahlen { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0 0 16px; }
+.vs-zahl { display: grid; gap: 2px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius, 12px); background: var(--surface); min-width: 0; }
+.vs-zahl span { font-size: 13px; color: var(--muted); }
+.vs-zahl b { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vs-zahl small { font-size: 12px; color: var(--muted); }
+
+/* Ergebnis je Monat: Säulen um die Nulllinie */
+.vs-bars { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; height: 170px; padding: 4px 0 0; }
+.vs-bar { position: relative; display: block; min-width: 0; border-bottom: 0; }
+.vs-bar::after { content: ''; position: absolute; left: -3px; right: -3px; top: 50%; border-top: 1px solid var(--border-strong); }
+.vs-bar i { position: absolute; left: 12%; right: 12%; border-radius: 3px; min-height: 2px; }
+.vs-bar i.plus { background: var(--ein); }
+.vs-bar i.minus { background: var(--aus); }
+.vs-bar small { position: absolute; top: 0; left: 0; right: 0; text-align: center; font-size: 11px; color: var(--text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.vs-bar em { position: absolute; bottom: 0; left: 0; right: 0; text-align: center; font-size: 11px; font-style: normal; color: var(--muted); }
+
+/* Tabelle: 12 Monate nebeneinander, erste Spalte fest, seitlich nur innerhalb der Karte verschiebbar */
+.vs-werkzeug { display: flex; justify-content: flex-end; margin: -4px 0 6px; }
+.vs-scroll { overflow-x: auto; max-width: 100%; border: 1px solid var(--border); border-radius: 10px; -webkit-overflow-scrolling: touch; }
+.vs-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.vs-tab { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 1060px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.vs-tab.vs-vgl { min-width: 420px; }
+.vs-tab th, .vs-tab td { padding: 6px 8px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
+.vs-tab thead th { position: sticky; top: 0; background: var(--surface-2); color: var(--text-2); font-weight: 600; font-size: 12px; z-index: 1; }
+.vs-tab .vs-n { position: sticky; left: 0; z-index: 2; text-align: left; background: var(--surface); width: 250px; min-width: 210px; max-width: 280px; white-space: normal; font-weight: 500; box-shadow: 1px 0 0 var(--border); }
+.vs-tab thead .vs-n { z-index: 3; background: var(--surface-2); }
+.vs-tab .vs-s { font-weight: 650; background: var(--surface-2); }
+.vs-tab td.neg, .vs-tab .neg { color: var(--aus-text); }
+.vs-ber th, .vs-ber td { font-weight: 650; background: var(--surface-2); }
+.vs-ber .vs-n { background: var(--surface-2); }
+.vs-rub th, .vs-rub td { font-weight: 600; }
+.vs-rub.auf th, .vs-rub.auf td { border-bottom-color: transparent; }
+.vs-pos th, .vs-pos td { font-weight: 400; color: var(--text-2); font-size: 12.5px; }
+.vs-pos .vs-n { padding-left: 26px; }
+.vs-erg th, .vs-erg td { font-weight: 700; border-top: 2px solid var(--accent); border-bottom: 0; background: var(--accent-soft, var(--surface-2)); }
+.vs-erg .vs-n { background: var(--accent-soft, var(--surface-2)); }
+.vs-auf { display: flex; align-items: center; gap: 6px; width: 100%; border: 0; background: none; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.vs-auf:hover .vs-pn, .vs-rub .vs-auf:hover { color: var(--accent); }
+.vs-auf small { color: var(--muted); font-weight: 400; font-size: 11px; }
+.vs-pfeil { display: inline-block; width: 12px; color: var(--muted); transition: transform var(--uebergang, .15s); }
+.vs-auf[aria-expanded="true"] .vs-pfeil { transform: rotate(90deg); }
+.vs-pn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.vs-det td { text-align: left; white-space: normal; background: var(--surface-2); padding: 8px 12px 10px 34px; }
+.vs-det-i { position: sticky; left: 34px; max-width: min(720px, calc(100vw - 90px)); display: grid; gap: 4px; font-size: 12.5px; }
+.vs-det-i p { margin: 0; }
+
+/* Herkunft-Marken */
+.vs-h { flex: none; display: inline-block; font-size: 10.5px; line-height: 16px; padding: 0 5px; border-radius: 4px; font-weight: 600; letter-spacing: .01em; }
+.vs-h-beleg { background: var(--accent); color: var(--accent-on, #fff); }
+.vs-h-vertrag { background: var(--accent-soft, var(--surface-2)); color: var(--accent); }
+.vs-h-plan { background: var(--surface-3, var(--surface-2)); color: var(--text); }
+.vs-h-annahme { background: transparent; color: var(--muted); border: 1px dashed var(--border-strong); line-height: 14px; }
+.vs-h-eigen { background: var(--gelb-soft, var(--surface-2)); color: var(--text); }
+.vs-annahme .vs-pn { font-style: italic; }
+.vs-legende { display: grid; gap: 6px; margin: 2px 0 10px; font-size: 13px; }
+.vs-leg { display: flex; align-items: center; gap: 8px; color: var(--text-2); }
+
+/* Plan und Ist */
+.vs-unten { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+.vs-seg { margin: 0 0 10px; flex-wrap: wrap; }
+.vs-fragen { margin-top: 12px; display: grid; gap: 4px; }
+.vs-frage { margin: 0; padding: 8px 10px; border-left: 3px solid var(--gelb, var(--accent)); background: var(--gelb-soft, var(--surface-2)); border-radius: 6px; font-size: 13.5px; }
+.vs-hinweis { color: var(--aus-text); font-size: 13px; }
+
+@media (max-width: 900px) {
+  .vs-unten { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .vs-zahlen { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .vs-zahl b { font-size: 18px; }
+  .vs-bars { gap: 3px; height: 150px; }
+  .vs-bar small { display: none; }
+  .vs-tab .vs-n { width: 150px; min-width: 150px; max-width: 150px; }
+  .vs-tab { min-width: 980px; }
+  .vs-pos .vs-n { padding-left: 14px; }
+  .vs-pn { white-space: normal; overflow-wrap: break-word; hyphens: auto; }
+  .vs-pos .vs-auf { flex-direction: column; align-items: flex-start; gap: 2px; }
+}

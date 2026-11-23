@@ -16,6 +16,7 @@ import { planGehalt, prognoseText, rahmenKarte, freiZeile, rahmenBinden, rahmenS
 import { vermoegenLaden, depotKarte, vermoegenKarte, vermoegenBinden, reisenSeite, reisenBinden, vermoegen, reisen } from './vermoegen.js';
 import { kreditKarte, schuldenSumme, eigeneKredite, kreditEnde, neueRaten, kredite } from './kredit.js';
 import { zuPruefenSeite, zuPruefenBinden, zuPruefenZahl } from './zupruefen.js';
+import { vorschauSeite, vorschauBinden } from './vorschau.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -855,13 +856,14 @@ function t30Passen() {
 // Jeder Bereich öffnet mit seinem Überblick (S.tab = Name des Bereichs); die Einzelheiten sind die bisherigen Seiten
 // (S.tab bleibt dort gleich, damit alle Verweise weiter gelten). Familie › Unterhalt ist intern fix/unterhalt.
 const SEGMENTE = {
-  geldfluss: [['geldfluss', 'Überblick'], ['uebersicht', 'Kategorien']],
+  geldfluss: [['geldfluss', 'Überblick'], ['uebersicht', 'Kategorien'], ['vorschau', 'Vorschau']],
   vermoegen: [['vermoegen', 'Überblick'], ['konten', 'Konten & Depot']],
   einkommen: [['einkommen', 'Überblick'], ['gehalt', 'Gehalt'], ['steuer', 'Steuer']],
   familie: [['familie', 'Überblick'], ['unterhalt', 'Unterhalt & Rechner']],
 };
 function bereichVon(x = S) {
   if (x.tab === 'start') return 'cockpit';
+  if (x.tab === 'vorschau') return 'geldfluss';
   if (UEBERBLICK[x.tab]) return x.tab;
   if (x.tab === 'fix') return x.fixtab === 'unterhalt' ? 'familie' : 'fixkosten';
   if (x.tab === 'uebersicht' || x.tab === 'kennzahlen') return 'geldfluss';
@@ -1256,7 +1258,7 @@ function cpStandZeichnen(ms, id = 'c-cp-stand') {
 // den bisherigen Seiten (Umschalter oben, Klick auf eine Zahl). Alle Zahlen kommen aus den vorhandenen Rechnungen
 // (monatsRechnung, verlauf5, sammle, vermoegen, gehalt.js, steuerprognose.js, unterhalt.js) – hier wird nichts neu gerechnet.
 // Kinder- und gemeinsame Konten zählen in keiner Summe. Ausgaben stehen ohne Vorzeichen; Rot/Grün nur für Vorzeichen und Abweichungen.
-const UEBERBLICK = { geldfluss: () => geldflussSeite(), vermoegen: () => vermoegenSeite(), einkommen: () => einkommenSeite(), familie: () => familieSeite(), zupruefen: () => zuPruefenAnsicht() };
+const UEBERBLICK = { geldfluss: () => geldflussSeite(), vorschau: () => vorschauAnsicht(), vermoegen: () => vermoegenSeite(), einkommen: () => einkommenSeite(), familie: () => familieSeite(), zupruefen: () => zuPruefenAnsicht() };
 
 // ---------------------------------------------------------------- Daten einlesen und prüfen (Leiste oben im Cockpit und in „Zu prüfen“)
 // Datenstand, letzter Aufbau, Knopf „Daten einlesen“ (wie im Menü) und – im Cockpit – wie viele neue Buchungen zu prüfen sind
@@ -1269,6 +1271,13 @@ function einlesenLeiste(mitPruefen = true) {
     <span class="ei-k"><button class="btn" data-einlesen title="Neue Dateien aus dem Eingang einlesen und die neuesten Daten laden">↻ Daten einlesen</button>${pruefen}</span></div>`;
 }
 const einlesenLeisteBinden = (box) => box.querySelectorAll('[data-einlesen]').forEach((b) => b.onclick = () => einlesen());
+// Vorschau 12 Monate (js/vorschau.js): Zahlen aus D.j.vorschau, gerechnet am PC (vorschau_daten.py)
+function vorschauAnsicht() {
+  const box = $('#s5');
+  box.innerHTML = vorschauSeite({ ...(H ??= modulHelfer()), bxKopf, bxKarte, bxLink });
+  vorschauBinden(box, vorschauAnsicht);
+  gehBinden(box);
+}
 function zuPruefenAnsicht() {
   const box = $('#s5'), h = { ...pruefHelfer(), neuZeichnen: () => aktualisieren() };
   box.innerHTML = `<div class="cp bx zp">${zuPruefenSeite(h, einlesenLeiste(false))}</div>`;
@@ -3890,7 +3899,7 @@ function hashLesen() {
   if (/^\d{4}-\d{2}$/.test(p.get('gmonat') || '')) S.gmonat = p.get('gmonat');
   if (['vm', 'vj'].includes(p.get('gbasis'))) S.gbasis = p.get('gbasis');
   if (/^\d{4}$/.test(p.get('gtjahr') || '')) S.gtjahr = p.get('gtjahr');
-  if (['kennzahlen', 'buchungen', 'uebersicht', 'konten', 'fix', 'gehalt', 'steuer', 'geldfluss', 'vermoegen', 'einkommen', 'familie', 'zupruefen'].includes(p.get('tab'))) S.tab = p.get('tab');
+  if (['kennzahlen', 'buchungen', 'uebersicht', 'konten', 'fix', 'gehalt', 'steuer', 'geldfluss', 'vermoegen', 'einkommen', 'familie', 'zupruefen', 'vorschau'].includes(p.get('tab'))) S.tab = p.get('tab');
   if (p.get('tab') === 'cockpit') S.tab = 'start';
 }
 
