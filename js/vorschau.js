@@ -72,6 +72,13 @@ function zielVon(p) {
   return null;
 }
 
+// Artikel eines Einrichtungs-Postens (offen, aus Planung.xlsx › Einrichtung): Name, Einstufung, Preis (fest oder geschätzt)
+function artikelHtml(l) {
+  const zeilen = [...l].sort((a, b) => b.c - a.c).map((x) => `<li><span>${H.esc(x.name)}<small>${H.esc(x.stufe || '')}${x.monat ? ` · ${H.monKurz(x.monat)}` : ''}${x.notiz ? ` · ${H.esc(x.notiz)}` : ''}</small></span>`
+    + `<b class="${x.fest ? '' : 'vs-ca'}" title="${x.fest ? 'fester Preis (Angebot oder Warenkorb)' : 'Schätzpreis aus deiner Kaufliste'}">${x.fest ? '' : 'ca. '}${H.eur(x.c)}</b></li>`).join('');
+  return `<ul class="vs-art">${zeilen}<li class="vs-art-s"><span>${l.length} Artikel offen</span><b>${H.eur(l.reduce((t, x) => t + x.c, 0))}</b></li></ul>`;
+}
+
 function tabelleHtml(v, G) {
   const M = v.monate;
   const kopf = `<tr><th class="vs-n" scope="col">Rubrik und Posten</th>${M.map((k) => `<th scope="col">${H.monKurz(k)}</th>`).join('')}<th scope="col" class="vs-s">12 Monate</th></tr>`;
@@ -90,6 +97,7 @@ function tabelleHtml(v, G) {
         if (pa) {
           body += `<tr class="vs-det"><td colspan="${M.length + 2}"><div class="vs-det-i"><p><b>${H.esc(HER[h]?.[1] || '')}:</b> ${H.esc(p.herkunft)}</p>`
             + (p.beleg ? `<p class="muted">${H.esc(p.beleg)}</p>` : '')
+            + (p.artikel?.length ? artikelHtml(p.artikel) : '')
             + (ziel ? H.zl('Buchungen und Einzelheiten ›', ziel) : '') + '</div></td></tr>';
         }
       }
@@ -150,15 +158,15 @@ export function vorschauSeite(h) {
   }
   const G = gerundet(v), M = v.monate, n = M.length;
   const sEin = summe(G.ber.ein), sAus = summe(G.ber.aus), sErg = summe(G.erg);
-  const einmal = G.rub.get('einmalig') ? summe(G.rub.get('einmalig')) : 0;
+  const einmal = ['einmalig', 'einrichtung'].reduce((t, k) => t + (G.rub.get(k) ? summe(G.rub.get(k)) : 0), 0);   // einmalige Zahlungen und Einrichtung
   const tief = G.erg.indexOf(Math.min(...G.erg));
-  const gross = v.rubriken.flatMap((r) => r.posten.map((p) => ({ p, c: p.werte[tief] }))).filter((x) => x.p.rubrik === 'einmalig' && x.c).sort((a, b) => b.c - a.c)[0];
+  const gross = v.rubriken.flatMap((r) => r.posten.map((p) => ({ p, c: p.werte[tief] }))).filter((x) => ['einmalig', 'einrichtung'].includes(x.p.rubrik) && x.c).sort((a, b) => b.c - a.c)[0];
   const von = H.monLang(M[0]), bis = H.monLang(M[n - 1]);
-  const kern = `Bis ${H.esc(bis)} ${sErg < 0 ? `fehlen <b class="neg">${H.eur0(Math.abs(sErg) * 100)}</b>` : `bleiben <b class="pos">${H.eur0(sErg * 100)}</b>`}${einmal ? ` – ohne einmalige Zahlungen ${pm0(sErg + einmal)}` : ''}.`;
+  const kern = `Bis ${H.esc(bis)} ${sErg < 0 ? `fehlen <b class="neg">${H.eur0(Math.abs(sErg) * 100)}</b>` : `bleiben <b class="pos">${H.eur0(sErg * 100)}</b>`}${einmal ? ` – ohne Einrichtung und einmalige Zahlungen ${pm0(sErg + einmal)}` : ''}.`;
   const unter = `Einnahmen ${e0(sEin)} − Ausgaben ${e0(sAus)} von ${H.esc(von)} bis ${H.esc(bis)}`
     + (G.erg[tief] < 0 ? ` · schwächster Monat ${H.esc(H.monLang(M[tief]))} (${pm0(G.erg[tief])}${gross ? `, darin ${H.esc(gross.p.name)} ${e0(Math.round(gross.c / 100))}` : ''})` : '');
   const zahlen = [['Einnahmen', e0(sEin), '12 Monate'], ['Ausgaben', e0(sAus), '12 Monate'], ['Ergebnis', pm0(sErg), `Ø ${pm0(Math.round(sErg / n))} im Monat`, sErg < 0 ? 'neg' : ''],
-    ['Einmalige Zahlungen', e0(einmal), 'darin enthalten']]
+    ['Einrichtung und Einmaliges', e0(einmal), 'darin enthalten']]
     .map(([t, w, u, c = '']) => `<div class="vs-zahl"><span>${t}</span><b class="${c}">${w}</b><small>${u}</small></div>`).join('');
   const zaehl = {};
   for (const r of v.rubriken) for (const p of r.posten) zaehl[herkunft(p)] = (zaehl[herkunft(p)] || 0) + 1;

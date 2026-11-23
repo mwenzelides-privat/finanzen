@@ -46,8 +46,15 @@
 .vs-auf[aria-expanded="true"] .vs-pfeil { transform: rotate(90deg); }
 .vs-pn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .vs-det td { text-align: left; white-space: normal; background: var(--surface-2); padding: 8px 12px 10px 34px; }
-.vs-det-i { position: sticky; left: 34px; max-width: min(720px, calc(100vw - 90px)); display: grid; gap: 4px; font-size: 12.5px; }
+.vs-det-i { position: sticky; left: 34px; max-width: min(720px, calc(100vw - 124px)); display: grid; gap: 4px; font-size: 12.5px; }
 .vs-det-i p { margin: 0; }
+.vs-art { list-style: none; margin: 4px 0 2px; padding: 0; display: grid; max-width: 620px; }
+.vs-art li { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.vs-art li span { display: grid; min-width: 0; }
+.vs-art li small { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.vs-art li b { white-space: nowrap; font-weight: 600; font-variant-numeric: tabular-nums; }
+.vs-art .vs-ca { font-weight: 500; color: var(--text-2); }
+.vs-art .vs-art-s { border-bottom: 0; border-top: 1px solid var(--border-strong); font-weight: 650; }
 
 /* Herkunft-Marken */
 .vs-h { flex: none; display: inline-block; font-size: 10.5px; line-height: 16px; padding: 0 5px; border-radius: 4px; font-weight: 600; letter-spacing: .01em; }
