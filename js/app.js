@@ -1274,7 +1274,7 @@ const einlesenLeisteBinden = (box) => box.querySelectorAll('[data-einlesen]').fo
 // Vorschau 12 Monate (js/vorschau.js): Zahlen aus D.j.vorschau, gerechnet am PC (vorschau_daten.py)
 function vorschauAnsicht() {
   const box = $('#s5');
-  box.innerHTML = vorschauSeite({ ...(H ??= modulHelfer()), bxKopf, bxKarte, bxLink });
+  box.innerHTML = vorschauSeite({ ...(H ??= modulHelfer()), bxKopf, bxKarte, bxLink, DIENST });
   vorschauBinden(box, vorschauAnsicht);
   gehBinden(box);
 }

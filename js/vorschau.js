@@ -11,6 +11,99 @@ const offen = new Set();          // aufgeklappte Rubriken (Schlüssel)
 const offenP = new Set();         // aufgeklappte Posten (Herkunft)
 let vglMonat = '';                // gewählter Monat im Plan/Ist
 
+// ---------------------------------------------------------------- Einrichtung: Artikel herausnehmen und wieder einplanen
+// Deine Auswahl wirkt sofort hier (die Rubrik Einrichtung wird mit ihr neu gerechnet) und wird am PC über den Einlese-Dienst
+// in Planung.xlsx (Blatt Einrichtung) eingetragen – danach baut der PC Vorschau und Excel neu. Auf anderen Geräten bleibt sie
+// vorgemerkt (IndexedDB) und geht mit, sobald die App am PC geöffnet wird. Ein übertragener Eintrag fällt weg, sobald Daten
+// da sind, die nach ihm gebaut wurden (dann steht er in Planung.xlsx – oder du hast ihn dort inzwischen selbst geändert).
+const KV_E = 'vorschau.einrichtung';
+let ENT = null, ladeP = null, neuZ = null, meldung = '';
+const ekey = (x) => `${x.raum}|${x.name}`;
+const amPc = () => matchMedia('(pointer: fine)').matches && !/android|iphone|ipad/i.test(navigator.userAgent);
+const jetztLokal = () => { const d = new Date(), p = (x) => String(x).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
+const entSpeichern = () => Promise.resolve(H.kvSchreiben(KV_E, { ent: Object.fromEntries(ENT || []) })).catch(() => {});
+async function entLaden(v) {
+  const l = await Promise.resolve(H.kvLesen(KV_E)).catch(() => null);
+  ENT = new Map(Object.entries(l?.ent || {}));
+  let weg = 0;
+  for (const [k, e] of ENT) if (e.sync && v?.erstellt && v.erstellt > String(e.zeit).slice(0, 16)) { ENT.delete(k); weg++; }
+  if (weg) await entSpeichern();
+  if ([...ENT.values()].some((e) => !e.sync)) senden();
+}
+async function senden() {
+  const offenE = [...ENT.entries()].filter(([, e]) => !e.sync);
+  if (!offenE.length) return;
+  if (!amPc() || !H.DIENST) { meldung = 'Auf diesem Gerät vorgemerkt – wird in Planung.xlsx eingetragen, sobald du die App am PC öffnest.'; return; }
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 6000);
+  try {
+    const r = await fetch(H.DIENST + '/einrichtung', { method: 'POST', headers: { 'X-Finanzen': '1', 'Content-Type': 'application/json' }, signal: ctl.signal, cache: 'no-store',
+      body: JSON.stringify({ artikel: offenE.map(([, e]) => ({ raum: e.raum, name: e.name, status: e.status, monat: e.monat })) }) });
+    const x = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(x.fehler || String(r.status));
+    for (const [k, e] of offenE) if (ENT.get(k) === e) e.sync = true;
+    meldung = `In Planung.xlsx eingetragen${x.nicht_gefunden ? ` (${x.nicht_gefunden} Artikel dort nicht gefunden)` : ''} – der PC baut Vorschau und Excel neu.`;
+    await entSpeichern();
+  } catch (e) {
+    meldung = `Vorgemerkt, noch nicht in Planung.xlsx: ${e.name === 'AbortError' ? 'Einlese-Dienst antwortet nicht' : e.message}. Ich versuche es beim nächsten Öffnen wieder.`;
+  } finally { clearTimeout(t); neuZ?.(); }
+}
+function setzeArtikel(x, status, monat) {
+  ENT.set(ekey(x), { raum: x.raum, name: x.name, status, monat, zeit: jetztLokal(), sync: false });
+  entSpeichern();
+  senden();
+  neuZ?.();
+}
+// Artikel mit deiner Auswahl: status offen | raus (herausgenommen) | gekauft | entfaellt
+function wirksam(v) {
+  return (v.einrichtung || []).map((x) => { const e = ENT?.get(ekey(x)); return e ? { ...x, status: e.status === 'herausgenommen' ? 'raus' : 'offen', monat: e.monat || x.monat, vorgemerkt: !e.sync } : x; });
+}
+// Vorschau mit deiner Auswahl: Rubrik Einrichtung je Raum neu, Ausgaben und Ergebnis angepasst (Cent, genau)
+function mitAuswahl(v) {
+  if (!ENT?.size || !v.einrichtung?.length) return v;
+  const w = structuredClone(v), l = wirksam(v), n = w.monate.length;
+  let rub = w.rubriken.find((r) => r.key === 'einrichtung');
+  const alt = rub ? rub.werte.slice() : Array(n).fill(0);
+  const vorher = new Map((rub?.posten || []).map((p) => [p.id, p]));
+  const neu = (rub?.posten || []).filter((p) => !p.id.startsWith('einrichtung:'));
+  for (const raum of [...new Set(l.map((x) => x.raum))]) {
+    const alle = l.filter((x) => x.raum === raum), of = alle.filter((x) => x.status === 'offen');
+    const werte = w.monate.map((k) => of.filter((x) => x.monat === k).reduce((t, x) => t + x.c, 0));
+    if (!werte.some(Boolean)) continue;
+    const st = {};
+    for (const x of of) st[x.stufe || 'ohne Einstufung'] = (st[x.stufe || 'ohne Einstufung'] || 0) + x.c;
+    const fest = of.filter((x) => x.fest).length, raus = alle.filter((x) => x.status === 'raus').length;
+    const erl = alle.filter((x) => x.status === 'gekauft' || x.status === 'entfaellt').length, id = `einrichtung:${H.norm(raum)}`;
+    neu.push({ ...(vorher.get(id) || { art: 'eigen', beleg: 'Kaufliste Dettenhofen (Planung.xlsx, Blatt Einrichtung)' }), id, rubrik: 'einrichtung', name: raum, werte, summe: werte.reduce((t, x) => t + x, 0),
+      annahme: fest < of.length, artikel: of,
+      herkunft: `${of.length} Artikel offen: ${Object.entries(st).map(([k, c]) => `${k} ${H.eur(c)}`).join(', ')} (${fest} mit festem Preis, ${of.length - fest} geschätzt)`
+        + (erl ? `, ${erl} gekauft oder entfallen` : '') + (raus ? `, ${raus} herausgenommen` : '') });
+  }
+  neu.sort((a, b) => b.summe - a.summe);
+  if (!rub && neu.length) { rub = { key: 'einrichtung', name: 'Einrichtung', bereich: 'aus' }; w.rubriken.splice(Math.max(0, w.rubriken.findIndex((r) => r.key === 'leben')), 0, rub); }
+  if (rub) {
+    rub.posten = neu;
+    rub.werte = w.monate.map((_, i) => neu.reduce((t, p) => t + p.werte[i], 0));
+    rub.summe = rub.werte.reduce((t, x) => t + x, 0);
+    if (!neu.length) w.rubriken = w.rubriken.filter((r) => r !== rub);
+  }
+  const jetzt = rub && neu.length ? rub.werte : Array(n).fill(0);
+  w.ausgaben = w.ausgaben.map((c, i) => c - alt[i] + jetzt[i]);
+  w.ergebnis = w.einnahmen.map((c, i) => c - w.ausgaben[i]);
+  return w;
+}
+
+// Sammelliste: alle herausgenommenen Artikel mit Summe; je Artikel „wieder einplanen in …“
+function sammelHtml(v) {
+  const l = wirksam(v).filter((x) => x.status === 'raus');
+  const opts = v.monate.map((k) => `<option value="${k}">${H.monKurz(k)}</option>`).join('');
+  const liste = !l.length ? '<p class="bx-u">Noch nichts herausgenommen. Öffne in „Monat für Monat“ die Rubrik Einrichtung, tippe auf einen Raum und dort bei einem Artikel auf „rausnehmen“.</p>'
+    : `<ul class="vs-art vs-raus-l">${l.map((x) => `<li><span>${H.esc(x.name)}<small>${H.esc(x.raum)} · ${H.esc(x.stufe || '')}${x.monat ? ` · war ${H.monKurz(x.monat)}` : ''}${x.vorgemerkt ? ' · vorgemerkt' : ''}</small></span>`
+      + `<b>${x.fest ? '' : 'ca. '}${H.eur(x.c)}</b><label class="vs-ein"><span class="vs-sr">Wieder einplanen in</span><select data-vsein="${H.esc(ekey(x))}" aria-label="${H.esc(x.name)} wieder einplanen in Monat"><option value="">einplanen in …</option>${opts}</select></label></li>`).join('')}
+      <li class="vs-art-s"><span>${l.length} Artikel herausgenommen</span><b>${H.eur(l.reduce((t, x) => t + x.c, 0))}</b></li></ul>`;
+  return liste + (meldung ? `<p class="vs-meld">${H.esc(meldung)}</p>` : '')
+    + '<p class="muted klein">Herausgenommene Artikel zählen in keinem Monat. Wieder einplanen: Monat wählen. Dasselbe geht in Planung.xlsx (Status „herausgenommen“ bzw. „offen“ und Monat).</p>';
+}
+
 const HER = {
   beleg: ['Beleg', 'laut Beleg (Vertrag, Schreiben)'],
   vertrag: ['erkannt', 'aus deinen Buchungen erkannt'],
@@ -73,9 +166,10 @@ function zielVon(p) {
 }
 
 // Artikel eines Einrichtungs-Postens (offen, aus Planung.xlsx › Einrichtung): Name, Einstufung, Preis (fest oder geschätzt)
-function artikelHtml(l) {
+function artikelHtml(l, raum) {
   const zeilen = [...l].sort((a, b) => b.c - a.c).map((x) => `<li><span>${H.esc(x.name)}<small>${H.esc(x.stufe || '')}${x.monat ? ` · ${H.monKurz(x.monat)}` : ''}${x.notiz ? ` · ${H.esc(x.notiz)}` : ''}</small></span>`
-    + `<b class="${x.fest ? '' : 'vs-ca'}" title="${x.fest ? 'fester Preis (Angebot oder Warenkorb)' : 'Schätzpreis aus deiner Kaufliste'}">${x.fest ? '' : 'ca. '}${H.eur(x.c)}</b></li>`).join('');
+    + `<b class="${x.fest ? '' : 'vs-ca'}" title="${x.fest ? 'fester Preis (Angebot oder Warenkorb)' : 'Schätzpreis aus deiner Kaufliste'}">${x.fest ? '' : 'ca. '}${H.eur(x.c)}</b>`
+    + (raum ? `<button class="vs-raus" data-vsraus="${H.esc(ekey({ raum, name: x.name }))}" title="Aus ${H.esc(x.monat ? H.monKurz(x.monat) : 'dem Monat')} herausnehmen – kommt in die Sammelliste">rausnehmen</button>` : '') + '</li>').join('');
   return `<ul class="vs-art">${zeilen}<li class="vs-art-s"><span>${l.length} Artikel offen</span><b>${H.eur(l.reduce((t, x) => t + x.c, 0))}</b></li></ul>`;
 }
 
@@ -97,7 +191,7 @@ function tabelleHtml(v, G) {
         if (pa) {
           body += `<tr class="vs-det"><td colspan="${M.length + 2}"><div class="vs-det-i"><p><b>${H.esc(HER[h]?.[1] || '')}:</b> ${H.esc(p.herkunft)}</p>`
             + (p.beleg ? `<p class="muted">${H.esc(p.beleg)}</p>` : '')
-            + (p.artikel?.length ? artikelHtml(p.artikel) : '')
+            + (p.artikel?.length ? artikelHtml(p.artikel, p.id.startsWith('einrichtung:') ? p.name : '') : '')
             + (ziel ? H.zl('Buchungen und Einzelheiten ›', ziel) : '') + '</div></td></tr>';
         }
       }
@@ -152,7 +246,9 @@ function vergleichHtml(v) {
 
 export function vorschauSeite(h) {
   H = h;
-  const D = H.D(), v = D.j.vorschau;
+  const D = H.D(), v0 = D.j.vorschau;
+  if (v0?.einrichtung?.length && !ENT && !ladeP) ladeP = entLaden(v0).then(() => neuZ?.());
+  const v = v0?.monate?.length ? mitAuswahl(v0) : v0;
   if (!v?.monate?.length) {
     return `<div class="cp bx">${H.bxKopf('Vorschau 12 Monate', 'Die Vorschau ist noch nicht berechnet.', 'Sie entsteht am PC beim nächsten Einlesen (vorschau_daten.py).')}</div>`;
   }
@@ -180,6 +276,7 @@ export function vorschauSeite(h) {
     ${H.bxKarte('Monat für Monat', `<div class="vs-werkzeug"><button class="bx-link" data-vsalle="1">${[...offen].some((k) => !k.startsWith('vgl:')) ? 'Alle zuklappen' : 'Alle Rubriken aufklappen'}</button></div>${tabelleHtml(v, G)}`,
       { id: 'vs-monate', rechts: '<span class="klein muted">Rubrik antippen: Posten · Posten antippen: Herkunft</span>',
         fuss: `Ausgaben positiv · ohne Kinder- und Gemeinschaftskonten · Lebenshaltung: ${H.esc((leben?.herkunft || '').replace(/^Annahme: /, ''))}` })}
+    ${v.einrichtung?.length ? H.bxKarte('Herausgenommen', sammelHtml(v), { id: 'vs-raus', rechts: '<span class="klein muted">Einrichtung, in keinem Monat</span>' }) : ''}
     <div class="bx-raster vs-unten">
       ${H.bxKarte('Plan und Ist', vergleichHtml(v), { id: 'vs-vgl' })}
       ${H.bxKarte('Herkunft und eigene Posten', `<div class="vs-legende">${legende}</div>
@@ -190,6 +287,9 @@ export function vorschauSeite(h) {
 }
 
 export function vorschauBinden(box, neuZeichnen) {
+  neuZ = neuZeichnen;
+  box.querySelectorAll('[data-vsraus]').forEach((b) => b.onclick = () => { const x = wirksam(H.D().j.vorschau).find((y) => ekey(y) === b.dataset.vsraus); if (x) setzeArtikel(x, 'herausgenommen', x.monat); });
+  box.querySelectorAll('[data-vsein]').forEach((sel) => sel.onchange = () => { const x = (H.D().j.vorschau?.einrichtung || []).find((y) => ekey(y) === sel.dataset.vsein); if (x && sel.value) setzeArtikel(x, 'offen', sel.value); });
   box.querySelectorAll('[data-vsrub]').forEach((b) => b.onclick = () => { const k = b.dataset.vsrub; if (offen.has(k)) offen.delete(k); else offen.add(k); neuZeichnen(); });
   box.querySelectorAll('[data-vspos]').forEach((b) => b.onclick = () => { const k = b.dataset.vspos; if (offenP.has(k)) offenP.delete(k); else offenP.add(k); neuZeichnen(); });
   box.querySelectorAll('[data-vsvgl]').forEach((b) => b.onclick = () => { vglMonat = b.dataset.vsvgl; neuZeichnen(); });
