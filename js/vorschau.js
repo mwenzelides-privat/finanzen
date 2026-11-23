@@ -17,7 +17,7 @@ let vglMonat = '';                // gewählter Monat im Plan/Ist
 // vorgemerkt (IndexedDB) und geht mit, sobald die App am PC geöffnet wird. Ein übertragener Eintrag fällt weg, sobald Daten
 // da sind, die nach ihm gebaut wurden (dann steht er in Planung.xlsx – oder du hast ihn dort inzwischen selbst geändert).
 const KV_E = 'vorschau.einrichtung';
-let ENT = null, ladeP = null, neuZ = null, meldung = '', anker = '';
+let ENT = null, ladeP = null, neuZ = null, meldung = '', anker = '', gOffen = false;
 const ekey = (x) => `${x.raum}|${x.name}`;
 const amPc = () => matchMedia('(pointer: fine)').matches && !/android|iphone|ipad/i.test(navigator.userAgent);
 const jetztLokal = () => { const d = new Date(), p = (x) => String(x).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
@@ -55,7 +55,7 @@ function setzeArtikel(x, status, monat) {
 }
 // Artikel mit deiner Auswahl: status offen | raus (herausgenommen) | gekauft | entfaellt
 function wirksam(v) {
-  return (v.einrichtung || []).map((x) => { const e = ENT?.get(ekey(x)); return e ? { ...x, status: e.status === 'herausgenommen' ? 'raus' : 'offen', monat: e.monat || x.monat, vorgemerkt: !e.sync } : x; });
+  return (v.einrichtung || []).map((x) => { const e = ENT?.get(ekey(x)); return e ? { ...x, status: e.status === 'herausgenommen' ? 'raus' : e.status === 'entfällt' ? 'entfaellt' : 'offen', monat: e.monat || x.monat, vorgemerkt: !e.sync } : x; });
 }
 // Vorschau mit deiner Auswahl: Rubrik Einrichtung je Raum neu, Ausgaben und Ergebnis angepasst (Cent, genau)
 function mitAuswahl(v) {
@@ -91,16 +91,22 @@ function mitAuswahl(v) {
   return w;
 }
 
-// Sammelliste: alle herausgenommenen Artikel mit Summe; je Artikel „wieder einplanen in …“
+// Sammelliste: alle herausgenommenen Artikel mit Summe; je Artikel „einplanen in …“ Monat oder „ganz streichen“.
+// Darunter (aufklappbar) die gestrichenen Artikel – von dort zurück in einen Monat oder in die Sammelliste.
 function sammelHtml(v) {
-  const l = wirksam(v).filter((x) => x.status === 'raus');
+  const alle = wirksam(v), l = alle.filter((x) => x.status === 'raus'), g = alle.filter((x) => x.status === 'entfaellt');
   const opts = v.monate.map((k) => `<option value="${k}">${H.monKurz(k)}</option>`).join('');
+  const zeile = (x, extra, hilfe) => `<li><span>${H.esc(x.name)}<small>${H.esc(x.raum)} · ${H.esc(x.stufe || '')}${x.monat ? ` · war ${H.monKurz(x.monat)}` : ''}${x.vorgemerkt ? ' · vorgemerkt' : ''}</small></span>`
+    + `<b>${x.fest ? '' : 'ca. '}${H.eur(x.c)}</b><label class="vs-ein"><span class="vs-sr">${hilfe}</span><select data-vsein="${H.esc(ekey(x))}" aria-label="${H.esc(x.name)}: ${hilfe}"><option value="">einplanen in …</option>${opts}<option disabled>──────</option>${extra}</select></label></li>`;
+  const summe = (a) => H.eur(a.reduce((t, x) => t + x.c, 0));
   const liste = !l.length ? '<p class="bx-u">Noch nichts herausgenommen. Öffne in „Monat für Monat“ die Rubrik Einrichtung, tippe auf einen Raum und dort bei einem Artikel auf „rausnehmen“.</p>'
-    : `<ul class="vs-art vs-raus-l">${l.map((x) => `<li><span>${H.esc(x.name)}<small>${H.esc(x.raum)} · ${H.esc(x.stufe || '')}${x.monat ? ` · war ${H.monKurz(x.monat)}` : ''}${x.vorgemerkt ? ' · vorgemerkt' : ''}</small></span>`
-      + `<b>${x.fest ? '' : 'ca. '}${H.eur(x.c)}</b><label class="vs-ein"><span class="vs-sr">Wieder einplanen in</span><select data-vsein="${H.esc(ekey(x))}" aria-label="${H.esc(x.name)} wieder einplanen in Monat"><option value="">einplanen in …</option>${opts}</select></label></li>`).join('')}
-      <li class="vs-art-s"><span>${l.length} Artikel herausgenommen</span><b>${H.eur(l.reduce((t, x) => t + x.c, 0))}</b></li></ul>`;
-  return liste + (meldung ? `<p class="vs-meld">${H.esc(meldung)}</p>` : '')
-    + '<p class="muted klein">Herausgenommene Artikel zählen in keinem Monat. Wieder einplanen: Monat wählen. Dasselbe geht in Planung.xlsx (Status „herausgenommen“ bzw. „offen“ und Monat).</p>';
+    : `<ul class="vs-art vs-raus-l">${l.map((x) => zeile(x, '<option value="streichen">ganz streichen</option>', 'Einplanen in Monat oder ganz streichen')).join('')}
+      <li class="vs-art-s"><span>${l.length} Artikel herausgenommen</span><b>${summe(l)}</b></li></ul>`;
+  const gestr = !g.length ? '' : `<details class="vs-gestr"${gOffen ? ' open' : ''}><summary>Gestrichen: ${g.length} Artikel, ${summe(g)}</summary>
+      <ul class="vs-art vs-raus-l">${g.map((x) => zeile(x, '<option value="raus">zurück in die Sammelliste</option>', 'Wieder einplanen oder zurück in die Sammelliste')).join('')}
+      <li class="vs-art-s"><span>${g.length} Artikel gestrichen</span><b>${summe(g)}</b></li></ul></details>`;
+  return liste + gestr + (meldung ? `<p class="vs-meld">${H.esc(meldung)}</p>` : '')
+    + '<p class="muted klein">Herausgenommene und gestrichene Artikel zählen in keinem Monat. Wieder einplanen: Monat wählen. „Ganz streichen“ setzt den Artikel auf „entfällt“, er steht dann unter „Gestrichen“. Dasselbe geht in Planung.xlsx (Status „herausgenommen“, „entfällt“ bzw. „offen“ und Monat).</p>';
 }
 
 const HER = {
@@ -301,7 +307,15 @@ const raumAnker = (raum) => `[data-vspos="einrichtung:${CSS.escape(H.norm(raum))
 export function vorschauBinden(box, neuZeichnen) {
   neuZ = () => stabil(neuZeichnen);
   box.querySelectorAll('[data-vsraus]').forEach((b) => b.onclick = () => { const x = wirksam(H.D().j.vorschau).find((y) => ekey(y) === b.dataset.vsraus); if (x) { anker = raumAnker(x.raum); setzeArtikel(x, 'herausgenommen', x.monat); } });
-  box.querySelectorAll('[data-vsein]').forEach((sel) => sel.onchange = () => { const x = (H.D().j.vorschau?.einrichtung || []).find((y) => ekey(y) === sel.dataset.vsein); if (x && sel.value) { anker = '#vs-raus'; setzeArtikel(x, 'offen', sel.value); } });
+  box.querySelector('.vs-gestr')?.addEventListener('toggle', (e) => { gOffen = e.target.open; });
+  box.querySelectorAll('[data-vsein]').forEach((sel) => sel.onchange = () => {
+    const x = wirksam(H.D().j.vorschau).find((y) => ekey(y) === sel.dataset.vsein), w = sel.value;
+    if (!x || !w) return;
+    anker = '#vs-raus';
+    if (w === 'streichen') setzeArtikel(x, 'entfällt', x.monat);
+    else if (w === 'raus') setzeArtikel(x, 'herausgenommen', x.monat);
+    else setzeArtikel(x, 'offen', w);
+  });
   box.querySelectorAll('[data-vsrub]').forEach((b) => b.onclick = () => { const k = b.dataset.vsrub; if (offen.has(k)) offen.delete(k); else offen.add(k); anker = `[data-vsrub="${CSS.escape(k)}"]`; neuZ(); });
   box.querySelectorAll('[data-vspos]').forEach((b) => b.onclick = () => { const k = b.dataset.vspos; if (offenP.has(k)) offenP.delete(k); else offenP.add(k); anker = `[data-vspos="${CSS.escape(k)}"]`; neuZ(); });
   box.querySelectorAll('[data-vsvgl]').forEach((b) => b.onclick = () => { vglMonat = b.dataset.vsvgl; neuZeichnen(); });
