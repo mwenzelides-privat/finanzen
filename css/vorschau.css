@@ -67,6 +67,9 @@
 .vs-art li { align-items: center; }
 .vs-raus { flex: none; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-2); border-radius: 6px; font: inherit; font-size: 11.5px; padding: 2px 8px; cursor: pointer; }
 .vs-raus:hover { color: var(--aus-text); border-color: var(--aus-text); }
+.vs-gek:hover { color: var(--accent); border-color: var(--accent); }
+.vs-art li .vs-gek { margin-left: auto; }
+.vs-art li .vs-gek + .vs-raus { margin-left: -6px; }
 .vs-raus-l { max-width: none; }
 .vs-raus-l li span { flex: 1; }
 .vs-ein select { font: inherit; font-size: 12.5px; height: 30px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); padding: 0 6px; max-width: 130px; }
@@ -75,7 +78,11 @@
 .vs-gestr summary { cursor: pointer; font-size: 13px; color: var(--text-2); padding: 4px 0; }
 .vs-gestr[open] summary { margin-bottom: 4px; }
 .vs-meld { margin: 8px 0 0; padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--accent-soft, var(--surface-2)); border-radius: 6px; font-size: 13px; }
-@media (max-width: 640px) { .vs-raus-l li:not(.vs-art-s) { flex-wrap: wrap; } .vs-raus-l li:not(.vs-art-s) span { flex-basis: 100%; } }
+.vs-det-i > * { min-width: 0; }
+@media (max-width: 640px) {
+  .vs-raus-l li:not(.vs-art-s), .vs-det .vs-art li:not(.vs-art-s) { flex-wrap: wrap; row-gap: 4px; }
+  .vs-raus-l li:not(.vs-art-s) span, .vs-det .vs-art li:not(.vs-art-s) > span { flex-basis: 100%; }
+}
 
 /* Herkunft-Marken */
 .vs-h { flex: none; display: inline-block; font-size: 10.5px; line-height: 16px; padding: 0 5px; border-radius: 4px; font-weight: 600; letter-spacing: .01em; }

@@ -18,7 +18,8 @@ let vglMonat = '';                // gewählter Monat im Plan/Ist
 // vorgemerkt (IndexedDB) und geht mit, sobald die App am PC geöffnet wird. Ein übertragener Eintrag fällt weg, sobald Daten
 // da sind, die nach ihm gebaut wurden (dann steht er in Planung.xlsx – oder du hast ihn dort inzwischen selbst geändert).
 const KV_E = 'vorschau.einrichtung';
-let ENT = null, ladeP = null, neuZ = null, meldung = '', anker = '', gOffen = false;
+let ENT = null, ladeP = null, neuZ = null, meldung = '', anker = '';
+const gOffen = new Set();   // aufgeklappte Listen „Gekauft“ / „Gestrichen“
 const ekey = (x) => `${x.raum}|${x.name}`;
 const amPc = () => matchMedia('(pointer: fine)').matches && !/android|iphone|ipad/i.test(navigator.userAgent);
 const jetztLokal = () => { const d = new Date(), p = (x) => String(x).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
@@ -56,7 +57,8 @@ function setzeArtikel(x, status, monat) {
 }
 // Artikel mit deiner Auswahl: status offen | raus (herausgenommen) | gekauft | entfaellt
 function wirksam(v) {
-  return (v.einrichtung || []).map((x) => { const e = ENT?.get(ekey(x)); return e ? { ...x, status: e.status === 'herausgenommen' ? 'raus' : e.status === 'entfällt' ? 'entfaellt' : 'offen', monat: e.monat || x.monat, vorgemerkt: !e.sync } : x; });
+  const st = { herausgenommen: 'raus', 'entfällt': 'entfaellt', gekauft: 'gekauft' };
+  return (v.einrichtung || []).map((x) => { const e = ENT?.get(ekey(x)); return e ? { ...x, status: st[e.status] || 'offen', monat: e.monat || x.monat, vorgemerkt: !e.sync } : x; });
 }
 // Jahresfenster: Januar–Dezember (kern) plus je ein Randmonat davor und danach; Summen zählen nur Januar–Dezember
 const kernVon = (v) => v.kern || [0, v.monate.length - 1];
@@ -100,9 +102,9 @@ function mitAuswahl(v) {
 }
 
 // Sammelliste: alle herausgenommenen Artikel mit Summe; je Artikel „einplanen in …“ Monat oder „ganz streichen“.
-// Darunter (aufklappbar) die gestrichenen Artikel – von dort zurück in einen Monat oder in die Sammelliste.
+// Darunter (aufklappbar) die gekauften und die gestrichenen Artikel – von dort zurück in einen Monat oder in die Sammelliste.
 function sammelHtml(v) {
-  const alle = wirksam(v), l = alle.filter((x) => x.status === 'raus'), g = alle.filter((x) => x.status === 'entfaellt');
+  const alle = wirksam(v), l = alle.filter((x) => x.status === 'raus'), g = alle.filter((x) => x.status === 'entfaellt'), gk = alle.filter((x) => x.status === 'gekauft');
   const opts = v.monate.map((k) => `<option value="${k}">${H.monKurz(k)}</option>`).join('');
   const zeile = (x, extra, hilfe) => `<li><span>${H.esc(x.name)}<small>${H.esc(x.raum)} · ${H.esc(x.stufe || '')}${x.monat ? ` · war ${H.monKurz(x.monat)}` : ''}${x.vorgemerkt ? ' · vorgemerkt' : ''}</small></span>`
     + `<b>${x.fest ? '' : 'ca. '}${H.eur(x.c)}</b><label class="vs-ein"><span class="vs-sr">${hilfe}</span><select data-vsein="${H.esc(ekey(x))}" aria-label="${H.esc(x.name)}: ${hilfe}"><option value="">einplanen in …</option>${opts}<option disabled>──────</option>${extra}</select></label></li>`;
@@ -110,11 +112,12 @@ function sammelHtml(v) {
   const liste = !l.length ? '<p class="bx-u">Noch nichts herausgenommen. Öffne in „Monat für Monat“ die Rubrik Einrichtung, tippe auf einen Raum und dort bei einem Artikel auf „rausnehmen“.</p>'
     : `<ul class="vs-art vs-raus-l">${l.map((x) => zeile(x, '<option value="streichen">ganz streichen</option>', 'Einplanen in Monat oder ganz streichen')).join('')}
       <li class="vs-art-s"><span>${l.length} Artikel herausgenommen</span><b>${summe(l)}</b></li></ul>`;
-  const gestr = !g.length ? '' : `<details class="vs-gestr"${gOffen ? ' open' : ''}><summary>Gestrichen: ${g.length} Artikel, ${summe(g)}</summary>
-      <ul class="vs-art vs-raus-l">${g.map((x) => zeile(x, '<option value="raus">zurück in die Sammelliste</option>', 'Wieder einplanen oder zurück in die Sammelliste')).join('')}
-      <li class="vs-art-s"><span>${g.length} Artikel gestrichen</span><b>${summe(g)}</b></li></ul></details>`;
-  return liste + gestr + (meldung ? `<p class="vs-meld">${H.esc(meldung)}</p>` : '')
-    + '<p class="muted klein">Herausgenommene und gestrichene Artikel zählen in keinem Monat. Wieder einplanen: Monat wählen. „Ganz streichen“ setzt den Artikel auf „entfällt“, er steht dann unter „Gestrichen“. Dasselbe geht in Planung.xlsx (Status „herausgenommen“, „entfällt“ bzw. „offen“ und Monat).</p>';
+  const zurueck = '<option value="raus">zurück in die Sammelliste</option>';
+  const klapp = (key, titel, a, wort) => !a.length ? '' : `<details class="vs-gestr" data-vsklapp="${key}"${gOffen.has(key) ? ' open' : ''}><summary>${titel}: ${a.length} Artikel, ${summe(a)}</summary>
+      <ul class="vs-art vs-raus-l">${a.map((x) => zeile(x, zurueck, 'Wieder einplanen oder zurück in die Sammelliste')).join('')}
+      <li class="vs-art-s"><span>${a.length} Artikel ${wort}</span><b>${summe(a)}</b></li></ul></details>`;
+  return liste + klapp('gek', 'Gekauft', gk, 'gekauft') + klapp('gestr', 'Gestrichen', g, 'gestrichen') + (meldung ? `<p class="vs-meld">${H.esc(meldung)}</p>` : '')
+    + '<p class="muted klein">Herausgenommene, gekaufte und gestrichene Artikel zählen in keinem Monat. Wieder einplanen: Monat wählen. „Ganz streichen“ setzt den Artikel auf „entfällt“, er steht dann unter „Gestrichen“. „gekauft“ tippst du beim Artikel in der Rubrik Einrichtung an. Dasselbe geht in Planung.xlsx (Status „herausgenommen“, „gekauft“, „entfällt“ bzw. „offen“ und Monat).</p>';
 }
 
 const HER = {
@@ -170,6 +173,7 @@ function zielVon(p) {
 function artikelHtml(l, raum) {
   const zeilen = [...l].sort((a, b) => b.c - a.c).map((x) => `<li><span>${H.esc(x.name)}<small>${H.esc(x.stufe || '')}${x.monat ? ` · ${H.monKurz(x.monat)}` : ''}${x.notiz ? ` · ${H.esc(x.notiz)}` : ''}</small></span>`
     + `<b class="${x.fest ? '' : 'vs-ca'}" title="${x.fest ? 'fester Preis (Angebot oder Warenkorb)' : 'Schätzpreis aus deiner Kaufliste'}">${x.fest ? '' : 'ca. '}${H.eur(x.c)}</b>`
+    + (raum ? `<button class="vs-raus vs-gek" data-vsgek="${H.esc(ekey({ raum, name: x.name }))}" title="Gekauft – zählt in keinem Monat mehr, steht unter „Gekauft“">gekauft</button>` : '')
     + (raum ? `<button class="vs-raus" data-vsraus="${H.esc(ekey({ raum, name: x.name }))}" title="Aus ${H.esc(x.monat ? H.monKurz(x.monat) : 'dem Monat')} herausnehmen – kommt in die Sammelliste">rausnehmen</button>` : '') + '</li>').join('');
   return `<ul class="vs-art">${zeilen}<li class="vs-art-s"><span>${l.length} Artikel offen</span><b>${H.eur(l.reduce((t, x) => t + x.c, 0))}</b></li></ul>`;
 }
@@ -306,7 +310,8 @@ const raumAnker = (raum) => `[data-vspos="einrichtung:${CSS.escape(H.norm(raum))
 export function vorschauBinden(box, neuZeichnen) {
   neuZ = () => stabil(neuZeichnen);
   box.querySelectorAll('[data-vsraus]').forEach((b) => b.onclick = () => { const x = wirksam(H.D().j.vorschau).find((y) => ekey(y) === b.dataset.vsraus); if (x) { anker = raumAnker(x.raum); setzeArtikel(x, 'herausgenommen', x.monat); } });
-  box.querySelector('.vs-gestr')?.addEventListener('toggle', (e) => { gOffen = e.target.open; });
+  box.querySelectorAll('[data-vsgek]').forEach((b) => b.onclick = () => { const x = wirksam(H.D().j.vorschau).find((y) => ekey(y) === b.dataset.vsgek); if (x) { anker = raumAnker(x.raum); setzeArtikel(x, 'gekauft', x.monat); } });
+  box.querySelectorAll('[data-vsklapp]').forEach((d) => d.addEventListener('toggle', () => { if (d.open) gOffen.add(d.dataset.vsklapp); else gOffen.delete(d.dataset.vsklapp); }));
   box.querySelectorAll('[data-vsein]').forEach((sel) => sel.onchange = () => {
     const x = wirksam(H.D().j.vorschau).find((y) => ekey(y) === sel.dataset.vsein), w = sel.value;
     if (!x || !w) return;
