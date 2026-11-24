@@ -21,6 +21,7 @@ function db() {
     r.onupgradeneeded = () => r.result.createObjectStore(STORE);
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
+    r.onblocked = () => rej(new Error('Gerätespeicher blockiert (App noch in einem anderen Fenster offen?)'));
   });
 }
 async function tx(mode, fn) {
@@ -30,8 +31,14 @@ async function tx(mode, fn) {
     const r = fn(t.objectStore(STORE));
     t.oncomplete = () => res(r?.result);
     t.onerror = () => rej(t.error);
+    t.onabort = () => rej(t.error || new Error('Gerätespeicher: Vorgang abgebrochen'));
   });
 }
+// Wartet höchstens ms Millisekunden – damit die App beim Start nie stumm hängen bleibt (z. B. wenn Google Drive die Datei gerade nicht herausgibt)
+export const mitZeit = (p, ms, text) => {
+  let t;
+  return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(text)), ms); })]).finally(() => clearTimeout(t));
+};
 export const cacheLesen = () => tx('readonly', (s) => s.get('aktuell')).catch(() => null);
 export const cacheSchreiben = (v) => tx('readwrite', (s) => s.put(v, 'aktuell'));
 // weitere Einstellungen/Entscheidungen auf dem Gerät (z. B. Steuer-Zuordnungen)

@@ -4333,10 +4333,11 @@ async function start() {
   themeSetzen();
   let v = null;
   if (LOKAL) v = await Q.lokalLaden().catch(() => null);
-  if (!v) v = await Q.cacheLesen();
-  // verknüpfte Datei am PC: ist sie neuer als die gespeicherte Fassung, gleich die neue zeigen (statt erst die alte)
+  if (!v) v = await Q.mitZeit(Q.cacheLesen(), 10000, 'Gespeicherte Daten auf diesem Gerät antworten nicht.').catch((e) => { console.warn(e); return null; });
+  // verknüpfte Datei am PC: ist sie neuer als die gespeicherte Fassung, gleich die neue zeigen (statt erst die alte).
+  // Antwortet die Datei nicht (Google Drive beschäftigt …), erst die gespeicherte Fassung zeigen.
   let pcOk = false, pcNeu = null;
-  if (v?.quelle === 'pc') { try { pcNeu = await Q.pcLaden(v, false); pcOk = true; } catch {} if (pcNeu) v = pcNeu; }
+  if (v?.quelle === 'pc') { try { pcNeu = await Q.mitZeit(Q.pcLaden(v, false), 8000, 'Datei antwortet nicht.'); pcOk = true; } catch (e) { console.warn(e); } if (pcNeu) v = pcNeu; }
   Q.vorladen?.();
   // Gespeicherte Daten vor dem automatischen Aufräumen des Browsers schützen
   navigator.storage?.persist?.().catch(() => {});
@@ -4348,4 +4349,5 @@ async function start() {
   if ('serviceWorker' in navigator && !LOKAL) navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
-start();
+// Nie eine leere Seite: geht beim Start etwas schief, zeigt die App die Startseite mit der Fehlermeldung
+start().catch((e) => { console.error(e); try { startZeigen(`Start fehlgeschlagen: ${e?.message || e}`); } catch {} });

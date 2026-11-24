@@ -297,12 +297,12 @@ export function vorschauSeite(h) {
 // Neu zeichnen, ohne dass die Seite springt: die Zeile, an der du gerade warst (anker), bleibt an derselben Stelle im Bild,
 // die Tabelle bleibt seitlich so verschoben wie vorher
 function stabil(zeichnen) {
-  const el = anker && document.querySelector(anker), oben = el?.getBoundingClientRect().top;
+  const el = anker ? document.querySelector(anker) : null, oben = el?.getBoundingClientRect().top;
   const links = document.querySelector('#vs-monate .vs-scroll')?.scrollLeft || 0;
   zeichnen();
   const sc = document.querySelector('#vs-monate .vs-scroll');
   if (sc) sc.scrollLeft = links;
-  const neuEl = anker && (document.querySelector(anker) || document.querySelector('[data-vsrub="einrichtung"]'));
+  const neuEl = anker ? (document.querySelector(anker) || document.querySelector('[data-vsrub="einrichtung"]')) : null;
   if (neuEl && oben != null) window.scrollBy(0, neuEl.getBoundingClientRect().top - oben);
 }
 const raumAnker = (raum) => `[data-vspos="einrichtung:${CSS.escape(H.norm(raum))}"]`;
