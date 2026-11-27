@@ -8,7 +8,7 @@
 // Keine Imports von app.js: Helfer kommen als H. Geld in Cent.
 
 let H = null;
-const offen = new Set(['depot', 'einmalig', 'kredite', 'einrichtung']);   // aufgeklappte Rubriken (Schlüssel) – die mit Haken anfangs offen
+const offen = new Set(['depot', 'einmalig', 'kredite', 'einrichtung', 'leben']);   // aufgeklappte Rubriken (Schlüssel) – die mit Haken anfangs offen
 const offenP = new Set();         // aufgeklappte Posten (Herkunft)
 let vglMonat = '';                // gewählter Monat im Plan/Ist
 
@@ -171,8 +171,9 @@ function bedarfRechnen(v, G, alt = false, extra = null) {
   // Start und Rest des laufenden Monats: gerechnet am PC (vorschau_daten.py, v.start) – dieselben Zahlen stehen in der Excel
   const S = v?.start, start = S ? S.frei : H.ruecklagen?.();
   if (start == null || !v?.monate?.length) return null;
-  const leben = v.rubriken.find((r) => r.key === 'leben')?.posten[0];
-  const lp = (i) => (alt && leben?.schnitt != null ? kfm(leben.schnitt) - kfm(leben.werte[i]) : 0);
+  const lr = v.rubriken.find((r) => r.key === 'leben'), leben = lr?.posten[0];
+  // alt: Lebenshaltung mit Ø 12 Monate statt der Grundlage (alle Kategorien zusammen)
+  const lp = (i) => (alt && lr ? lr.posten.reduce((t, p) => t + (p.schnitt != null ? kfm(p.schnitt) - kfm(p.werte[i]) : 0), 0) : 0);
   const zeilen = [];
   let stand = kfm(start);
   const ab = v.ab || 0, R = S?.rest;
@@ -279,7 +280,7 @@ export function geldbedarf(h) {
 // Wohin ein Posten führt (Buchungen, Gehalt, Fixkosten …)
 function zielVon(p) {
   if (p.id === 'gehalt') return { tab: 'gehalt' };
-  if (p.id === 'leben') return { tab: 'fix', fixtab: 'vertraege', konto: '', _springe: '#fix-leben' };
+  if (p.id === 'leben' || p.id.startsWith('leben:')) return { tab: 'fix', fixtab: 'vertraege', konto: '', _springe: '#fix-leben' };
   if (p.id.startsWith('unterhalt:') || p.rubrik === 'unterhalt') return H.zuBuchungen({ q: 'unterhalt', konto: '' });
   if (p.id.startsWith('kredit:')) return { tab: 'vermoegen' };
   if (p.vertrag) {
@@ -418,7 +419,7 @@ export function vorschauSeite(h) {
     ${H.bxKarte('Ergebnis je Monat', balkenHtml(v, G), { rechts: '<span class="klein muted">Einnahmen minus Ausgaben</span>', fuss: 'Grün = es bleibt etwas übrig, rot = Minus · Monat antippen für die Zahlen (Tooltip)' })}
     ${H.bxKarte('Monat für Monat', `<div class="vs-werkzeug"><button class="bx-link" data-vsalle="1">${[...offen].some((k) => !k.startsWith('vgl:')) ? 'Alle zuklappen' : 'Alle Rubriken aufklappen'}</button></div>${tabelleHtml(v, G)}`,
       { id: 'vs-monate', rechts: '<span class="klein muted">Rubrik antippen: Posten · Posten antippen: Herkunft</span>',
-        fuss: `Ausgaben positiv · ohne Kinder- und Gemeinschaftskonten · Lebenshaltung: ${H.esc((leben?.herkunft || '').replace(/^Annahme: /, ''))}` })}
+        fuss: `Ausgaben positiv · ohne Kinder- und Gemeinschaftskonten · Lebenshaltung: ${H.esc((v.leben?.text || leben?.herkunft || '').replace(/^Annahme: /, ''))}` })}
     ${v.einrichtung?.length ? H.bxKarte('Herausgenommen', sammelHtml(v), { id: 'vs-raus', rechts: '<span class="klein muted">Einrichtung, in keinem Monat</span>' }) : ''}
     <div class="bx-raster vs-unten">
       ${H.bxKarte('Plan und Ist', vergleichHtml(v), { id: 'vs-vgl' })}
