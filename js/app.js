@@ -16,7 +16,7 @@ import { planGehalt, prognoseText, rahmenKarte, freiZeile, rahmenBinden, rahmenS
 import { vermoegenLaden, depotKarte, vermoegenKarte, vermoegenBinden, reisenSeite, reisenBinden, vermoegen, reisen } from './vermoegen.js';
 import { kreditKarte, schuldenSumme, eigeneKredite, kreditEnde, neueRaten, kredite } from './kredit.js';
 import { zuPruefenSeite, zuPruefenBinden, zuPruefenZahl } from './zupruefen.js';
-import { vorschauSeite, vorschauBinden } from './vorschau.js';
+import { vorschauSeite, vorschauBinden, geldbedarf } from './vorschau.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1114,6 +1114,13 @@ function cockpitSeite() {
   const T30 = naechsteTermine(R.vertraege), gK = naechstesGehalt(), zuKal = { tab: 'fix', fixtab: 'kalender', konto: '' };
   const T3 = t30Teile(T30, gK);
   const ber = [];
+  // Geldbedarf (Vorschau): wie weit der tiefste Kontostand vor einem Gehalt unter 0 fällt – ganz oben, Klick führt zur Rechnung
+  const gb = sicher(() => geldbedarf({ ...(H ??= modulHelfer()), bxKopf, bxKarte, bxLink, DIENST })) || null;
+  if (gb) {
+    const wann = gb.tief.rest ? `im Rest ${monLang(gb.tief.k)}s` : `Ende ${monLang(gb.tief.k)}`;
+    ber.push({ t: `Geldbedarf bis ${monKurz(gb.bis)}`, sub: gb.bedarf ? `damit du nie im Minus bist (tiefster Punkt ${wann} vor dem Gehalt) · am Monatsende fehlen höchstens ${eur0(gb.bedarfEnde * 100)}` : `es reicht · am tiefsten Punkt (${wann}) bleiben ${eur0(gb.tief.tief * 100)}`,
+      w: gb.bedarf ? `−${eur0(gb.bedarf * 100)}` : 'reicht', cls_: gb.bedarf ? 'neg' : 'pos', ziel: { tab: 'vorschau', _springe: '#vs-bedarf' } });
+  }
   const gU = sicher(() => gehaltUeberblick(gehaltHelfer())) || null;
   if (gU?.z) ber.push({ t: `Gehalt aufs Konto ${MONAT[+gU.z.m.slice(5) - 1]}`, sub: `Grundgehalt ${eurE0(gU.stufe)} brutto${gU.auto ? ` · Dienstwagen kostet ${eurE0(gU.auto.netto)} netto` : ''}`, w: eurE0(gU.z.auszahlung), ziel: { tab: 'einkommen' } });
   const sP = sicher(() => prognoseRechnen(H, +D.bis.slice(0, 4))) || null;
@@ -2271,7 +2278,7 @@ function modulHelfer() {
     gehaltstag, vertragName, vertragsKey, monatsRechnung, verlauf5, lebenshaltung, sammle, periode, abgeschlosseneMonate, einkommen, kontenSumme, vollSumme, summeText,
     schoen, det: (r) => det(r, D.j), gruppenSchluessel, kvLesen: Q.kvLesen, kvSchreiben: Q.kvSchreiben, alsExcel, alsCsv, herunterladen, zeichne, basis, achsenStil,
     css, alpha, achse, kurzWert, schraffur, steuerSumme: abschnittSumme, kinder, ausgleichTags, fristQuellen: [prognoseFristen, unterhaltFristen],
-    schulden: () => (mitKrediten() ? sicher(() => schuldenSumme(KH())) || 0 : 0) };
+    schulden: () => (mitKrediten() ? sicher(() => schuldenSumme(KH())) || 0 : 0), ruecklagen };
 }
 
 // Monatsbalken der gewählten Kategorie mit dem Durchschnitt als beschriftete Linie
