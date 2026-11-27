@@ -8,7 +8,7 @@
 // Keine Imports von app.js: Helfer kommen als H. Geld in Cent.
 
 let H = null;
-const offen = new Set();          // aufgeklappte Rubriken (Schlüssel)
+const offen = new Set(['depot', 'einmalig', 'kredite', 'einrichtung']);   // aufgeklappte Rubriken (Schlüssel) – die mit Haken anfangs offen
 const offenP = new Set();         // aufgeklappte Posten (Herkunft)
 let vglMonat = '';                // gewählter Monat im Plan/Ist
 
@@ -57,8 +57,11 @@ function setzeArtikel(x, status, monat) {
 }
 // Artikel mit deiner Auswahl: status offen | raus (herausgenommen) | gekauft | entfaellt
 function wirksam(v) {
-  const st = { herausgenommen: 'raus', 'entfällt': 'entfaellt', gekauft: 'gekauft' };
-  return (v.einrichtung || []).map((x) => { const e = ENT?.get(ekey(x)); return e ? { ...x, status: st[e.status] || 'offen', monat: e.monat || x.monat, vorgemerkt: !e.sync } : x; });
+  const st = { herausgenommen: 'raus', 'entfällt': 'entfaellt', gekauft: 'gekauft' }, opt = optLesen();
+  return (v.einrichtung || []).map((x) => {
+    const e = ENT?.get(ekey(x)), y = e ? { ...x, status: st[e.status] || 'offen', monat: e.monat || x.monat, vorgemerkt: !e.sync } : x;
+    return y.status === 'offen' && opt[`e:${ekey(y)}`] === false ? { ...y, status: 'optaus' } : y;   // Haken weg: nur zum Durchrechnen nicht kaufen
+  });
 }
 // Jahresfenster: Januar–Dezember (kern) plus je ein Randmonat davor und danach; Summen zählen nur Januar–Dezember
 const kernVon = (v) => v.kern || [0, v.monate.length - 1];
@@ -68,7 +71,7 @@ const jahrVon = (v) => v.jahr || +v.monate[kernVon(v)[0]].slice(0, 4);
 
 // Vorschau mit deiner Auswahl: Rubrik Einrichtung je Raum neu, Ausgaben und Ergebnis angepasst (Cent, genau)
 function mitAuswahl(v) {
-  if (!ENT?.size || !v.einrichtung?.length) return v;
+  if ((!ENT?.size && !Object.keys(optLesen()).some((k) => k.startsWith('e:'))) || !v.einrichtung?.length) return v;
   const w = structuredClone(v), l = wirksam(v), n = w.monate.length;
   let rub = w.rubriken.find((r) => r.key === 'einrichtung');
   const alt = rub ? rub.werte.slice() : Array(n).fill(0);
@@ -78,13 +81,14 @@ function mitAuswahl(v) {
     const alle = l.filter((x) => x.raum === raum), of = alle.filter((x) => x.status === 'offen');
     const id0 = `einrichtung:${H.norm(raum)}`;   // vergangene Monate: festgehaltener Plan bleibt
     const werte = w.monate.map((k, i) => (i < (w.ab || 0) ? (vorher.get(id0)?.werte[i] || 0) : of.filter((x) => x.monat === k).reduce((t, x) => t + x.c, 0)));
-    if (!werte.some(Boolean)) continue;
+    const weg = alle.filter((x) => x.status === 'optaus');   // per Haken weggelassen: Zeile bleibt, damit man ihn wieder setzen kann
+    if (!werte.some(Boolean) && !weg.length) continue;
     const st = {};
     for (const x of of) st[x.stufe || 'ohne Einstufung'] = (st[x.stufe || 'ohne Einstufung'] || 0) + x.c;
     const fest = of.filter((x) => x.fest).length, raus = alle.filter((x) => x.status === 'raus').length;
     const erl = alle.filter((x) => ['gekauft', 'entfaellt', 'finanziert'].includes(x.status)).length, id = `einrichtung:${H.norm(raum)}`;
     neu.push({ ...(vorher.get(id) || { art: 'eigen', beleg: 'Kaufliste Dettenhofen (Planung.xlsx, Blatt Einrichtung)' }), id, rubrik: 'einrichtung', name: raum, werte, summe: jahrSumme(w, werte),
-      annahme: fest < of.length, artikel: of,
+      annahme: fest < of.length, artikel: [...of, ...weg],
       herkunft: `${of.length} Artikel offen: ${Object.entries(st).map(([k, c]) => `${k} ${H.eur(c)}`).join(', ')} (${fest} mit festem Preis, ${of.length - fest} geschätzt)`
         + (erl ? `, ${erl} gekauft, finanziert oder entfallen` : '') + (raus ? `, ${raus} herausgenommen` : '') });
   }
@@ -195,125 +199,68 @@ function bedarfRechnen(v, G, alt = false, extra = null) {
   const e = zeilen.reduce((m, z) => (z.ende < m.ende ? z : m), zeilen[0]);   // tiefster Stand am Monatsende (nach dem Gehalt)
   return { start: kfm(start), zeilen, tief: t, bedarf: Math.max(0, -t.tief), endeTief: e, bedarfEnde: Math.max(0, -e.ende), leben };
 }
-// ---- Optionen: offene (und herausgenommene) Einrichtungs-Artikel und eigene Posten mit Annahme (Einmaliges, Ratenkäufe).
-// Haken an/aus rechnet den Geldbedarf durch – nur hier auf diesem Gerät, die Planung bleibt unverändert.
+// ---- Weglassen und Depot: Haken direkt in „Monat für Monat“. Nur hier auf diesem Gerät (localStorage), die Planung bleibt.
+// Schlüssel: „e:Raum|Artikel“ (Einrichtungs-Artikel), „p:<Posten-ID>“ (eigener Posten mit Annahme: Einmaliges, Ratenkäufe),
+// „depot“ (Depot Oskar auflösen). Wert false = weglassen; beim Depot true = auflösen.
 const OPT_LS = 'fd.vs.opt';
 const optLesen = () => { try { return JSON.parse(localStorage.getItem(OPT_LS) || '{}') || {}; } catch { return {}; } };
 const optSchreiben = (o) => { try { localStorage.setItem(OPT_LS, JSON.stringify(o)); } catch {} };
-const RANG = { dringend: 0, angebot: 1, '': 2, 'wünschenswert': 3 };
-function optionen(v) {
-  const ab = v.ab || 0, os = [];
-  const idx = (m) => { const i = v.monate.indexOf(m); return i >= ab ? i : m && m < v.monate[ab] ? ab : -1; };
-  for (const x of wirksam(v)) {
-    if (!['offen', 'raus'].includes(x.status) || !x.c) continue;
-    const i = idx(x.monat);
-    if (i < 0) continue;
-    os.push({ key: `e:${ekey(x)}`, art: 'e', name: x.name, wo: x.raum, stufe: x.stufe || '', fest: x.fest, c: x.c, i, raum: x.raum, imPlan: x.status === 'offen', raus: x.status === 'raus',
-      rang: x.status === 'raus' ? 9 : RANG[norm0(x.stufe)] ?? 2 });
+const istOpt = (r, p) => ['einmalig', 'kredite'].includes(r.key) && p.art === 'eigen' && p.annahme;
+// Vorschau mit deinen Haken: weggelassene eigene Posten auf 0 (Zeile bleibt stehen), Depot als Einnahme im ersten offenen Monat.
+// Einrichtungs-Artikel wirken schon über wirksam()/mitAuswahl().
+function mitOptionen(v) {
+  const st = optLesen(), ab = v.ab || 0, dp = H.depotOskar?.();
+  if (!Object.keys(st).length && !dp) return v;
+  const w = structuredClone(v);
+  for (const r of w.rubriken) for (const p of r.posten) {
+    if (!istOpt(r, p)) continue;
+    p.opt = `p:${p.id}`;
+    if (st[p.opt] === false) { p.optAus = true; p.werte = p.werte.map((c, i) => (i >= ab ? 0 : c)); }
   }
-  for (const r of v.rubriken) {
-    if (!['einmalig', 'kredite'].includes(r.key)) continue;
-    for (const p of r.posten) {
-      if (p.art !== 'eigen' || !p.annahme) continue;
-      const nz = p.werte.map((c, i) => (i >= ab && c ? i : -1)).filter((i) => i >= 0);
-      if (!nz.length) continue;
-      os.push({ key: `p:${p.id}`, art: 'p', name: p.name, wo: r.name, stufe: '', werte: p.werte, i: nz[0], monatlich: nz.length > 1, rate: kfm(p.werte[nz[0]]),
-        c: nz.reduce((t, i) => t + p.werte[i], 0), imPlan: true, rang: /eventuell/i.test(p.name) ? 5 : 4 });
-    }
+  if (dp?.c > 0) {
+    const an = st.depot === true;
+    const p = { id: 'depot:oskar', rubrik: 'depot', name: `Depot Oskar auflösen (${H.eur0(dp.c)})`, art: 'eigen', annahme: true, opt: 'depot', optAus: !an,
+      werte: w.monate.map((_, i) => (an && i === ab ? dp.c : 0)), beleg: `Kurswert laut Baader-Kundenportal per ${H.dde(dp.stichtag)} (${dp.n} Papiere) – Verkaufskosten und Steuer nicht abgezogen`,
+      herkunft: `Wenn du das Depot auflöst: Geld im ${H.monLang(w.monate[ab])} auf dem Konto angenommen` };
+    w.rubriken.splice(w.rubriken.findIndex((r) => r.bereich === 'aus'), 0, { key: 'depot', name: 'Depot auflösen', bereich: 'ein', posten: [p], werte: p.werte });
   }
-  return os.sort((a, b) => a.rang - b.rang || a.i - b.i || b.c - a.c);
+  return w;
 }
-const norm0 = (s) => String(s || '').toLowerCase();
-const optAn = (o, st) => (o.key in st ? !!st[o.key] : o.imPlan);
-// Euro je Monat, um die sich die Ausgaben gegenüber der Vorschau ändern, wenn genau die Optionen in „an“ gekauft werden.
-// Einrichtung je Raum wie in der Vorschau gerundet (Raumsumme kaufmännisch), eigene Posten je Monat gerundet.
-function optExtra(v, os, an) {
-  const n = v.monate.length, ex = Array(n).fill(0), raeume = new Map();
-  ex.pos = new Map();   // je Posten-ID: { name, w: Euro-Änderung je Monat } – für „darin …“ in der Tabelle
-  const plus = (id, name, i, e) => { const x = ex.pos.get(id) || ex.pos.set(id, { name, w: Array(n).fill(0) }).get(id); x.w[i] += e; ex[i] += e; };
-  const rub = v.rubriken.find((r) => r.key === 'einrichtung');
-  for (const o of os) {
-    const d = (an.has(o.key) ? 1 : 0) - (o.imPlan ? 1 : 0);
-    if (!d) continue;
-    if (o.art === 'e') { const m = raeume.get(o.raum) || Array(n).fill(0); m[o.i] += d * o.c; raeume.set(o.raum, m); }
-    else o.werte.forEach((c, i) => { if (i >= (v.ab || 0) && c) plus(o.key.slice(2), o.name, i, d * kfm(c)); });
-  }
-  for (const [raum, m] of raeume) {
-    const id = `einrichtung:${H.norm(raum)}`, base = rub?.posten.find((p) => p.id === id)?.werte || Array(n).fill(0);
-    m.forEach((d, i) => { if (d) plus(id, raum, i, kfm(base[i] + d) - kfm(base[i])); });
-  }
-  return ex;
+// Einrichtungs-Raum: Haken-Zustand aus seinen Artikeln (an, aus oder gemischt)
+const raumStand = (p) => { const l = p.artikel || []; const an = l.filter((x) => x.status !== 'optaus').length; return an === l.length ? 'an' : an ? 'teils' : 'aus'; };
+const cb = (key, an, label, teils = false) => `<input type="checkbox" class="vs-cb" data-vsopt="${H.esc(key)}"${an ? ' checked' : ''}${teils ? ' data-teils="1"' : ''} aria-label="${H.esc(label)}" title="Haken weg = nicht kaufen (nur zum Durchrechnen, ändert deine Planung nicht)">`;
+
+// Kurze Antwort oben: reicht das Geld – mit und ohne Depot? Zahlen aus derselben Rechnung wie die Kontostand-Zeilen unten.
+function antwortHtml(v, G) {
+  const K = bedarfRechnen(v, G);
+  if (!K) return '';
+  const D = H.D(), st = optLesen(), dp = H.depotOskar?.(), [ka, kb] = kernVon(v), letzte = K.zeilen.at(-1).k;
+  const e = K.endeTief, t = K.tief;
+  const satz1 = e.ende >= 0
+    ? `<b class="pos">Ja, am Monatsende reicht es.</b> Bis ${H.esc(H.monLang(letzte))} bleibt dein Konto nach dem Gehalt immer im Plus – am knappsten Ende ${H.esc(H.monLang(e.k))} mit ${pm0(e.ende)}.`
+    : `<b class="neg">Nein, das reicht nicht.</b> Am Monatsende rutscht dein Konto ins Minus – am tiefsten Ende ${H.esc(H.monLang(e.k))} mit <b class="neg">${pm0(e.ende)}</b>. So viel fehlt dir.`;
+  const satz2 = t.tief < 0 ? ` Vor dem Gehalt wird es jeden Monat enger: bis zu <b class="neg">${e0(-t.tief)}</b> im Minus (${t.rest ? `Rest ${H.esc(H.monLang(t.k))}` : H.esc(H.monLang(t.k))}), bis das Gehalt am Monatsende kommt.` : '';
+  // laufender Überschuss ohne Einmaliges: Monate im Jahr nach der letzten Einmalzahlung
+  const einm = (i) => ['einmalig', 'einrichtung', 'depot'].some((k) => (G.rub.get(k)?.[i] || 0) !== 0);
+  let i0 = ka; for (let i = ka; i <= kb; i++) if (einm(i)) i0 = i + 1;
+  const ms = []; for (let i = i0; i <= kb; i++) ms.push(G.erg[i]);
+  const schnitt = ms.length ? Math.round(ms.reduce((a, b) => a + b, 0) / ms.length) : null;
+  const satz3 = schnitt == null ? '' : `<p>Danach, ohne Anschaffungen (${H.esc(H.monKurz(v.monate[i0]))} – ${H.esc(H.monKurz(v.monate[kb]))}), bleiben dir im Monat im Schnitt nur <b class="${schnitt < 0 ? 'neg' : ''}">${pm0(schnitt)}</b> – ein Puffer baut sich so kaum auf.</p>`;
+  const depot = dp?.c > 0 ? `<label class="vs-an-dp">${cb('depot', st.depot === true, 'Depot Oskar auflösen')}<span><b>Depot Oskar auflösen</b> – ${H.eur0(dp.c)} (Kurswert laut Kundenportal ${H.dde(dp.stichtag)}), Geld im ${H.esc(H.monLang(v.monate[v.ab || 0]))} auf dem Konto</span></label>` : '';
+  const eigene = Object.keys(st).some((k) => k !== 'depot' || st.depot);
+  const spar = H.sparSchnitt?.();
+  return `<div class="vs-an">${depot}
+    <p class="vs-an-k">${satz1}${satz2}</p>${satz3}
+    <p class="muted klein">Weglassen: in „Monat für Monat“ den Haken vor einer Anschaffung entfernen – Kontostand und diese Antwort rechnen sofort neu (nur zum Durchrechnen, deine Planung bleibt).${eigene ? ' <button class="bx-link" data-vsoptalle="">alles wie geplant</button>' : ''}
+      Start: frei verfügbar am ${H.dde(D.bis)} ${e0(K.start)}; Buchungen danach fehlen, außer sie stehen als eigener Posten in Planung.xlsx.${spar ? ` Nicht drin: Sparraten ins Depot (zuletzt Ø ${H.eur0(spar)} im Monat).` : ''}</p></div>`;
 }
-const BEDARF_LS = 'fd.vs.dazu';
-const dazuLesen = () => { try { return Math.max(0, Math.round(+localStorage.getItem(BEDARF_LS) || 0)); } catch { return 0; } };
-// Satz unter dem Eingabefeld: reicht der Betrag, den du dazulegst?
-function dazuText(tief, ende, dazu) {
-  if (!dazu) return 'Trag einen Betrag ein, z. B. den Wert eines Depots, das du auflösen würdest – dann siehst du, ob er reicht.';
-  const satz = (rest, wo) => (rest >= 0 ? `${wo} reicht es: es bleiben <b class="pos">${rest ? e0(rest) : '0 €'}</b>.` : `${wo} fehlen noch <b class="neg">${e0(-rest)}</b>.`);
-  return `${satz(ende + dazu, 'Am Monatsende (nach dem Gehalt)')} ${satz(tief + dazu, 'Vor dem Gehalt')}`;
-}
-function bedarfHtml(v, G) {
-  const os = optionen(v), st = optLesen(), an = new Set(os.filter((o) => optAn(o, st)).map((o) => o.key)), ex = optExtra(v, os, an);
-  const B = bedarfRechnen(v, G, false, ex);
-  if (!B) return '';
-  const BA = bedarfRechnen(v, G, true, ex), D = H.D();
-  const B0 = bedarfRechnen(v, G, false, optExtra(v, os, new Set()));   // nur das Feste: ohne alle Optionen
-  const dazu0 = dazuLesen(), festOk = B0.endeTief.ende + dazu0 >= 0;
-  // je Option: geht sie allein (das Feste + nur diese Option) mit dem dazugelegten Betrag am Monatsende noch auf?
-  const allein = (o) => bedarfRechnen(v, G, false, optExtra(v, os, new Set([o.key]))).endeTief.ende + dazu0 >= 0;
-  const optHtml = !os.length ? '' : `<div class="vs-opt">
-    <p class="vs-opt-k"><b>Offene Anschaffungen</b> – Haken weg = nicht kaufen. Nur zum Durchrechnen auf diesem Gerät, deine Planung bleibt, wie sie ist.</p>
-    <p class="klein">Nur das Feste, ohne alle diese Anschaffungen: am Monatsende ${pm0(B0.endeTief.ende)}${dazu0 ? ` (mit ${e0(dazu0)} dazu ${pm0(B0.endeTief.ende + dazu0)})` : ''} · vor dem Gehalt ${pm0(B0.tief.tief)}</p>
-    <ul class="vs-opt-l">${os.map((o) => { const ok = festOk && allein(o);
-      return `<li class="${festOk && !ok ? 'vs-opt-nein' : ''}"><label><input type="checkbox" data-vsopt="${H.esc(o.key)}"${an.has(o.key) ? ' checked' : ''}>`
-        + `<span>${H.esc(o.name)}<small>${H.esc(o.wo)}${o.stufe ? ` · ${H.esc(o.stufe)}` : ''}${o.raus ? ' · herausgenommen' : ''} · ${o.monatlich ? 'ab ' : ''}${H.esc(H.monKurz(v.monate[o.i]))}</small></span>`
-        + `<b>${o.monatlich ? `${e0(o.rate)} im Monat` : `${o.art === 'e' && !o.fest ? 'ca. ' : ''}${H.eur0(o.c)}`}</b>${festOk && !ok ? '<em>geht nicht</em>' : ''}</label></li>`; }).join('')}</ul>
-    <p class="muted klein">${festOk ? `„geht nicht“: Selbst wenn du sonst keine dieser Anschaffungen kaufst, reicht dein Geld${dazu0 ? ` mit ${e0(dazu0)} dazu` : ''} dafür am Monatsende nicht.`
-      : `Schon ohne alle diese Anschaffungen reicht es am Monatsende nicht${dazu0 ? ` – auch mit ${e0(dazu0)} dazu` : ''}. Jede davon geht nur, wenn du mehr dazulegst.`}
-      <button class="bx-link" data-vsoptalle="1">alle an</button> · <button class="bx-link" data-vsoptalle="0">alle aus</button> · <button class="bx-link" data-vsoptalle="">wie geplant</button></p></div>`;
-  const mon = (z) => (z.rest ? `Rest ${H.monLang(z.k)}` : H.monLang(z.k));
-  const wann = (z) => `${z.rest ? `im Rest ${H.monLang(z.k)}s` : `Ende ${H.monLang(z.k)}`} vor dem Gehalt`;
-  const letzte = B.zeilen.at(-1).k;
-  const bis = H.esc(H.monLang(letzte));
-  const kopf = (os.some((o) => o.key in st) ? '<span class="vs-bd-ausw">Mit deiner Auswahl unten:</span> ' : '') + (!B.bedarf ? `Dein Geld reicht bis ${bis}: am tiefsten Punkt bleiben <b class="pos">${B.tief.tief ? e0(B.tief.tief) : '0 €'}</b>.`
-    : `${B.bedarfEnde ? `Bis ${bis} fehlen dir am Monatsende (nach dem Gehalt) höchstens <b class="neg">${e0(B.bedarfEnde)}</b>. ` : `Am Monatsende (nach dem Gehalt) reicht dein Geld bis ${bis}. `}`
-      + `Damit deine Konten auch vor jedem Gehalt nie unter null fallen, brauchst du <b class="neg">${e0(B.bedarf)}</b>.`);
-  const unter = `Tiefster Stand am Monatsende: Ende ${H.esc(H.monLang(B.endeTief.k))} ${pm0(B.endeTief.ende)} · ${H.esc(wann(B.tief))}: ${pm0(B.tief.tief)} · Start: frei verfügbar am ${H.dde(D.bis)} ${e0(B.start)}`;
-  const zeile = (z) => `<tr class="${z === B.tief ? 'vs-bd-tief' : ''}${z.rest ? ' vs-bd-rest' : ''}"><th scope="row" class="vs-n">${H.esc(mon(z))}${z === B.tief ? ' <span class="vs-bd-m">tiefster Punkt</span>' : ''}
-      ${z.gross?.length ? `<small class="vs-bd-g">darin ${z.gross.map((x) => `${H.esc(x.name)} ${e0(x.c)}`).join(' · ')}</small>` : ''}${z.rest ? `<small class="vs-bd-g">ab ${z.tag + 1}. – feste Abbuchungen, restliche Lebenshaltung${z.gross?.length ? ' und eigene Posten' : ''}</small>` : ''}</th>
-    <td class="${z.anf < 0 ? 'neg' : ''}">${pm0(z.anf)}</td><td class="neg">${z.aus ? `−${e0(z.aus)}` : '–'}</td><td class="vs-bd-t ${z.tief < 0 ? 'neg' : ''}">${pm0(z.tief)}</td>
-    <td class="pos">${z.ein ? `+${e0(z.ein)}` : '–'}</td><td class="${z.ende < 0 ? 'neg' : ''}">${pm0(z.ende)}</td></tr>`;
-  const dazu = dazuLesen();
-  // eigene, noch genutzte Konten (Buchung in den letzten 60 Tagen), die mehr als 3 Tage vor dem Datenstand enden: Zahlungen danach fehlen im Start
-  const alt = (D.j.konten || []).map((k, i) => ({ k, i })).filter(({ k, i }) => !H.fremd(i) && !H.istGemeinsam(i) && !/kaution/i.test(k.name)
-    && k.bis && k.bis < H.plusTage(D.bis, -3) && k.bis >= H.plusTage(D.bis, -60)).sort((a, b) => (a.k.bis < b.k.bis ? -1 : 1));
-  const altText = alt.length ? `<li class="vs-hinweis">Noch nicht aktuell eingelesen: ${alt.map(({ k }) => `${H.esc(k.name)} (bis ${H.dde(k.bis)})`).join(', ')} – Zahlungen danach fehlen im Start, außer sie stehen als eigener Posten in Planung.xlsx.</li>` : '';
-  const tab =`<div class="vs-scroll vs-bd-scroll" tabindex="0" role="region" aria-label="Geldbedarf Monat für Monat"><table class="vs-tab vs-bd-tab">
-    <thead><tr><th scope="col" class="vs-n">Monat</th><th scope="col">Stand am Anfang</th><th scope="col">Ausgaben</th><th scope="col">tiefster Stand vor dem Gehalt</th><th scope="col">Gehalt und Einnahmen</th><th scope="col">Stand am Ende</th></tr></thead>
-    <tbody>${B.zeilen.map(zeile).join('')}</tbody></table></div>`;
-  const lebenAlt = B.leben?.schnitt != null && BA ? `<li>Lebenshaltung je Monat ${e0(kfm(B.leben.werte[v.ab || 0]))} wie in der Vorschau (${H.esc((B.leben.herkunft || '').replace(/^Annahme: /, '').split(';')[0])}). Mit Ø 12 Monate (${e0(kfm(B.leben.schnitt))}) gerechnet ${BA.bedarf ? `bräuchtest du ${e0(BA.bedarf)}` : 'würde es reichen'} – darin stecken aber auch frühere Einmalkäufe.</li>` : '';
-  return `<div class="vs-bd">
-    <p class="vs-bd-kopf">${kopf}</p><p class="muted klein">${unter}</p>
-    <label class="vs-bd-dazu"><span>Wenn du dazulegst</span><input type="number" inputmode="numeric" min="0" step="100" data-vsdazu="${B.tief.tief}" data-vsende="${B.endeTief.ende}" value="${dazu || ''}" placeholder="0"> €</label>
-    <p class="vs-bd-erg" data-vsdazu-text>${dazuText(B.tief.tief, B.endeTief.ende, dazu)}</p>
-    ${optHtml}
-    ${tab}
-    <ul class="vs-bd-annahmen muted klein">
-      <li>Start: Geld auf deinen eigenen Konten am ${H.dde(D.bis)} – ohne Mietkaution, Kinder- und gemeinsame Konten. Buchungen danach (z. B. Kartenzahlungen der letzten Tage) sind noch nicht drin.</li>
-      ${altText}
-      <li>Das Gehalt kommt am Monatsende – deshalb zählen alle Ausgaben eines Monats vor dem Gehalt. So ist der tiefste Stand eher zu niedrig als zu hoch.</li>
-      ${lebenAlt}
-      <li>Ausgaben und Einnahmen je Monat genau wie in „Monat für Monat“ unten (mit Annahmen und eigenen Posten aus Planung.xlsx); Ratenkäufe zählen mit ihren Raten.</li>
-    </ul></div>`;
-}
-// Für das Cockpit: Geldbedarf mit denselben Zahlen wie in der Vorschau
+// Für das Cockpit: tiefster Kontostand am Monatsende und vor dem Gehalt, mit deinen Haken (dieselbe Rechnung wie in der Vorschau)
 export function geldbedarf(h) {
   H = h;
   const v0 = H.D().j.vorschau;
   if (!v0?.monate?.length) return null;
-  const v = mitAuswahl(v0), G = gerundet(v), os = optionen(v), st = optLesen();
-  const B = bedarfRechnen(v, G, false, optExtra(v, os, new Set(os.filter((o) => optAn(o, st)).map((o) => o.key))));
-  return B ? { ...B, bis: B.zeilen.at(-1).k, eigeneAuswahl: os.some((o) => o.key in st) } : null;
+  const v = mitOptionen(mitAuswahl(v0)), B = bedarfRechnen(v, gerundet(v));
+  return B ? { ...B, bis: B.zeilen.at(-1).k, eigeneAuswahl: Object.keys(optLesen()).length > 0 } : null;
 }
 
 // Wohin ein Posten führt (Buchungen, Gehalt, Fixkosten …)
@@ -332,11 +279,12 @@ function zielVon(p) {
 
 // Artikel eines Einrichtungs-Postens (offen, aus Planung.xlsx › Einrichtung): Name, Einstufung, Preis (fest oder geschätzt)
 function artikelHtml(l, raum) {
-  const zeilen = [...l].sort((a, b) => b.c - a.c).map((x) => `<li><span>${H.esc(x.name)}<small>${H.esc(x.stufe || '')}${x.monat ? ` · ${H.monKurz(x.monat)}` : ''}${x.notiz ? ` · ${H.esc(x.notiz)}` : ''}</small></span>`
+  const zeilen = [...l].sort((a, b) => b.c - a.c).map((x) => `<li class="${x.status === 'optaus' ? 'vs-optaus' : ''}">${raum ? cb(`e:${ekey({ raum, name: x.name })}`, x.status !== 'optaus', `${x.name} kaufen`) : ''}<span>${H.esc(x.name)}<small>${H.esc(x.stufe || '')}${x.monat ? ` · ${H.monKurz(x.monat)}` : ''}${x.notiz ? ` · ${H.esc(x.notiz)}` : ''}</small></span>`
     + `<b class="${x.fest ? '' : 'vs-ca'}" title="${x.fest ? 'fester Preis (Angebot oder Warenkorb)' : 'Schätzpreis aus deiner Kaufliste'}">${x.fest ? '' : 'ca. '}${H.eur(x.c)}</b>`
     + (raum ? `<button class="vs-raus vs-gek" data-vsgek="${H.esc(ekey({ raum, name: x.name }))}" title="Gekauft – zählt in keinem Monat mehr, steht unter „Gekauft“">gekauft</button>` : '')
     + (raum ? `<button class="vs-raus" data-vsraus="${H.esc(ekey({ raum, name: x.name }))}" title="Aus ${H.esc(x.monat ? H.monKurz(x.monat) : 'dem Monat')} herausnehmen – kommt in die Sammelliste">rausnehmen</button>` : '') + '</li>').join('');
-  return `<ul class="vs-art">${zeilen}<li class="vs-art-s"><span>${l.length} Artikel offen</span><b>${H.eur(l.reduce((t, x) => t + x.c, 0))}</b></li></ul>`;
+  const an = l.filter((x) => x.status !== 'optaus');
+  return `<ul class="vs-art">${zeilen}<li class="vs-art-s"><span>${an.length} Artikel ${an.length < l.length ? `eingeplant (${l.length - an.length} per Haken weggelassen)` : 'offen'}</span><b>${H.eur(an.reduce((t, x) => t + x.c, 0))}</b></li></ul>`;
 }
 
 function tabelleHtml(v, G) {
@@ -354,8 +302,12 @@ function tabelleHtml(v, G) {
       if (!auf) continue;
       for (const p of r.posten) {
         const h = herkunft(p), pa = offenP.has(p.id), ziel = zielVon(p);
-        body += `<tr class="vs-pos vs-${h}"><th scope="row" class="vs-n"><button class="vs-auf" data-vspos="${H.esc(p.id)}" aria-expanded="${pa}" title="${H.esc(HER[h]?.[1] || '')} – anklicken: Herkunft">`
-          + `<span class="vs-h vs-h-${h}">${HER[h]?.[0] || h}</span><span class="vs-pn">${H.esc(p.name)}</span></button></th>${zellen(G.pos.get(p.id))}</tr>`;
+        // Haken: eigene Anschaffungen mit Annahme, Depot und Einrichtungs-Räume (alle Artikel des Raums auf einmal)
+        const rs = p.id.startsWith('einrichtung:') && p.artikel?.length ? raumStand(p) : '';
+        const haken = p.opt ? cb(p.opt, !p.optAus, `${p.name} einplanen`) : rs ? cb(`raum:${p.name}`, rs !== 'aus', `${p.name}: alle Artikel kaufen`, rs === 'teils') : '';
+        const aus = p.optAus || rs === 'aus';
+        body += `<tr class="vs-pos vs-${h}${aus ? ' vs-optaus' : ''}"><th scope="row" class="vs-n"><span class="vs-mitcb">${haken}<button class="vs-auf" data-vspos="${H.esc(p.id)}" aria-expanded="${pa}" title="${H.esc(HER[h]?.[1] || '')} – anklicken: Herkunft">`
+          + `<span class="vs-h vs-h-${h}">${HER[h]?.[0] || h}</span><span class="vs-pn">${H.esc(p.name)}</span></button></span></th>${zellen(G.pos.get(p.id))}</tr>`;
         if (pa) {
           body += `<tr class="vs-det"><td colspan="${M.length + 2}"><div class="vs-det-i"><p><b>${H.esc(HER[h]?.[1] || '')}:</b> ${H.esc(p.herkunft)}</p>`
             + (p.beleg ? `<p class="muted">${H.esc(p.beleg)}</p>` : '')
@@ -366,7 +318,15 @@ function tabelleHtml(v, G) {
     }
   }
   body += `<tr class="vs-erg"><th scope="row" class="vs-n">Ergebnis</th>${zellen(G.erg)}</tr>`;
-  return `<div class="vs-scroll" tabindex="0" aria-label="Tabelle: Monate nebeneinander, seitlich verschiebbar"><table class="vs-tab"><thead>${kopf}</thead><tbody>${body}</tbody></table></div>`;
+  // Kontostand je Monat (frei verfügbar): am Monatsende nach dem Gehalt und der tiefste Stand vorher
+  const K = bedarfRechnen(v, G), kz = new Map((K?.zeilen || []).filter((z) => !z.rest).map((z) => [z.i, z]));
+  const stand = (f, t, cls, tip) => `<tr class="vs-ks ${cls}"><th scope="row" class="vs-n" title="${H.esc(tip)}">${t}</th>${M.map((_, i) => { const z = kz.get(i), x = z ? f(z) : null;
+    return `<td class="${rc(i)}${x != null && x < 0 ? ' neg' : ''}">${x == null ? '' : pm0(x)}</td>`; }).join('')}<td class="vs-s"></td></tr>`;
+  if (K) body += stand((z) => z.ende, 'Kontostand am Monatsende', 'vs-ks-e', 'Frei verfügbar nach dem Gehalt: Stand am Monatsanfang + Ergebnis des Monats')
+    + stand((z) => z.tief, 'tiefster Stand vor dem Gehalt', 'vs-ks-t', 'Stand am Monatsanfang minus alle Ausgaben des Monats – das Gehalt kommt erst am Monatsende');
+  const r0 = K?.zeilen[0]?.rest ? K.zeilen[0] : null;
+  const fuss = K ? `<p class="muted klein vs-ks-fuss">Kontostand: frei verfügbar am ${H.dde(H.D().bis)} ${e0(K.start)}${r0 ? ` · Rest ${H.esc(H.monLang(r0.k))}: −${e0(r0.aus)} Abbuchungen, Lebenshaltung und eigene Posten, +${e0(r0.ein)} Gehalt = ${pm0(r0.ende)} am Monatsende` : ''} · dann je Monat + Ergebnis. „Tiefster Stand vor dem Gehalt“ = Stand am Monatsanfang minus alle Ausgaben des Monats.</p>` : '';
+  return `<div class="vs-scroll" tabindex="0" aria-label="Tabelle: Monate nebeneinander, seitlich verschiebbar"><table class="vs-tab"><thead>${kopf}</thead><tbody>${body}</tbody></table></div>${fuss}`;
 }
 
 function balkenHtml(v, G) {
@@ -416,7 +376,7 @@ export function vorschauSeite(h) {
   H = h;
   const D = H.D(), v0 = D.j.vorschau;
   if (v0?.einrichtung?.length && !ENT && !ladeP) ladeP = entLaden(v0).then(() => neuZ?.());
-  const v = v0?.monate?.length ? mitAuswahl(v0) : v0;
+  const v = v0?.monate?.length ? mitOptionen(mitAuswahl(v0)) : v0;
   if (!v?.monate?.length) {
     return `<div class="cp bx">${H.bxKopf('Vorschau','Die Vorschau ist noch nicht berechnet.', 'Sie entsteht am PC beim nächsten Einlesen (vorschau_daten.py).')}</div>`;
   }
@@ -440,7 +400,7 @@ export function vorschauSeite(h) {
   const leben = v.rubriken.find((r) => r.key === 'leben')?.posten[0];
   return `<div class="cp bx vs">
     ${H.bxKopf(`Vorschau ${J}`, kern, unter + ' · Beträge auf volle Euro gerundet, Summen aus den gezeigten Zahlen')}
-    ${H.bxKarte('Geldbedarf', bedarfHtml(v, G), { id: 'vs-bedarf', rechts: '<span class="klein muted">Wie viel Geld fehlt am tiefsten Punkt?</span>' })}
+    ${H.bxKarte('Reicht dein Geld?', antwortHtml(v, G), { id: 'vs-antwort', rechts: '<span class="klein muted">Kontostand bis zum Ende der Vorschau</span>' })}
     <div class="vs-zahlen">${zahlen}</div>
     ${H.bxKarte('Ergebnis je Monat', balkenHtml(v, G), { rechts: '<span class="klein muted">Einnahmen minus Ausgaben</span>', fuss: 'Grün = es bleibt etwas übrig, rot = Minus · Monat antippen für die Zahlen (Tooltip)' })}
     ${H.bxKarte('Monat für Monat', `<div class="vs-werkzeug"><button class="bx-link" data-vsalle="1">${[...offen].some((k) => !k.startsWith('vgl:')) ? 'Alle zuklappen' : 'Alle Rubriken aufklappen'}</button></div>${tabelleHtml(v, G)}`,
@@ -473,25 +433,17 @@ export function vorschauBinden(box, neuZeichnen) {
   neuZ = () => stabil(neuZeichnen);
   box.querySelectorAll('[data-vsraus]').forEach((b) => b.onclick = () => { const x = wirksam(H.D().j.vorschau).find((y) => ekey(y) === b.dataset.vsraus); if (x) { anker = raumAnker(x.raum); setzeArtikel(x, 'herausgenommen', x.monat); } });
   box.querySelectorAll('[data-vsgek]').forEach((b) => b.onclick = () => { const x = wirksam(H.D().j.vorschau).find((y) => ekey(y) === b.dataset.vsgek); if (x) { anker = raumAnker(x.raum); setzeArtikel(x, 'gekauft', x.monat); } });
-  box.querySelectorAll('[data-vsdazu]').forEach((inp) => inp.oninput = () => {
-    const dazu = Math.max(0, Math.round(+inp.value || 0));
-    try { localStorage.setItem(BEDARF_LS, String(dazu)); } catch {}
-    const t = box.querySelector('[data-vsdazu-text]');
-    if (t) t.innerHTML = dazuText(+inp.dataset.vsdazu, +inp.dataset.vsende, dazu);
+  // Haken (Weglassen, Depot): nur auf diesem Gerät, dann neu rechnen – die Zeile mit dem Haken bleibt an ihrer Stelle im Bild
+  box.querySelectorAll('[data-teils]').forEach((c) => { c.indeterminate = true; });
+  box.querySelectorAll('[data-vsopt]').forEach((c) => c.onchange = () => {
+    const st = optLesen(), k = c.dataset.vsopt;
+    const setze = (key, an) => { if (an) delete st[key]; else st[key] = false; };
+    if (k === 'depot') { if (c.checked) st.depot = true; else delete st.depot; }
+    else if (k.startsWith('raum:')) { for (const x of wirksam(H.D().j.vorschau)) if (x.raum === k.slice(5) && ['offen', 'optaus'].includes(x.status)) setze(`e:${ekey(x)}`, c.checked); }
+    else setze(k, c.checked);
+    optSchreiben(st); anker = `[data-vsopt="${CSS.escape(k)}"]`; neuZ?.();
   });
-  // nach der Eingabe (Enter / Feld verlassen): neu rechnen, damit „geht nicht“ bei den Anschaffungen zum Betrag passt
-  box.querySelectorAll('[data-vsdazu]').forEach((inp) => inp.onchange = () => { anker = '#vs-bedarf'; neuZ?.(); });
-  box.querySelectorAll('[data-vsopt]').forEach((cb) => cb.onchange = () => {
-    const st = optLesen(), o = optionen(mitAuswahl(H.D().j.vorschau)).find((x) => x.key === cb.dataset.vsopt);
-    if (!o) return;
-    if (cb.checked === o.imPlan) delete st[o.key]; else st[o.key] = cb.checked;
-    optSchreiben(st); anker = '#vs-bedarf'; neuZ?.();
-  });
-  box.querySelectorAll('[data-vsoptalle]').forEach((b) => b.onclick = () => {
-    const w = b.dataset.vsoptalle, st = {};
-    if (w !== '') for (const o of optionen(mitAuswahl(H.D().j.vorschau))) if ((w === '1') !== o.imPlan) st[o.key] = w === '1';
-    optSchreiben(st); anker = '#vs-bedarf'; neuZ?.();
-  });
+  box.querySelectorAll('[data-vsoptalle]').forEach((b) => b.onclick = () => { optSchreiben({}); anker = '#vs-antwort'; neuZ?.(); });
   box.querySelectorAll('[data-vsklapp]').forEach((d) => d.addEventListener('toggle', () => { if (d.open) gOffen.add(d.dataset.vsklapp); else gOffen.delete(d.dataset.vsklapp); }));
   box.querySelectorAll('[data-vsein]').forEach((sel) => sel.onchange = () => {
     const x = wirksam(H.D().j.vorschau).find((y) => ekey(y) === sel.dataset.vsein), w = sel.value;

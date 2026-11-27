@@ -84,43 +84,29 @@
   .vs-raus-l li:not(.vs-art-s) span, .vs-det .vs-art li:not(.vs-art-s) > span { flex-basis: 100%; }
 }
 
-/* Geldbedarf: tiefster Kontostand vor dem Gehalt */
-.vs-bd { display: grid; gap: 8px; min-width: 0; }
-.vs-bd-kopf { margin: 0; font-size: 17px; line-height: 1.4; }
-.vs-bd-kopf b { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.vs-bd > .muted { margin: 0; }
-.vs-bd-dazu { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; }
-.vs-bd-dazu input { width: 120px; height: 34px; font: inherit; font-variant-numeric: tabular-nums; text-align: right; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg); color: var(--text); padding: 0 8px; }
-.vs-bd-erg { margin: 0; font-size: 14px; }
-.vs-bd-erg b { white-space: nowrap; }
-.vs-tab.vs-bd-tab { min-width: 780px; }
-.vs-bd-tab .vs-n { width: 300px; max-width: 360px; }
-.vs-bd-g { display: block; font-size: 11px; font-weight: 400; color: var(--muted); white-space: normal; }
-.vs-bd-t { font-weight: 600; }
-.vs-bd-tief th, .vs-bd-tief td, .vs-tab .vs-bd-tief .vs-n { background: color-mix(in srgb, var(--aus-text) 8%, var(--surface)); }
-.vs-bd-m { display: inline-block; font-size: 10.5px; font-weight: 600; color: var(--aus-text); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; margin-left: 4px; }
-.vs-bd-rest th, .vs-bd-rest td { color: var(--text-2); }
-.vs-bd-annahmen { margin: 2px 0 0; padding-left: 18px; display: grid; gap: 2px; }
-.vs-bd-ausw { font-size: 13px; font-weight: 600; color: var(--accent); }
-/* Optionen: offene Anschaffungen an-/abhaken */
-.vs-opt { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); min-width: 0; }
-.vs-opt p { margin: 0; }
-.vs-opt-k { font-size: 14px; }
-.vs-opt-l { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); column-gap: 18px; }
-.vs-opt-l li { min-width: 0; border-bottom: 1px solid var(--border); }
-.vs-opt-l label { display: flex; align-items: center; gap: 8px; padding: 5px 0; cursor: pointer; font-size: 13px; min-width: 0; }
-.vs-opt-l input { flex: none; width: 17px; height: 17px; accent-color: var(--accent); }
-.vs-opt-l span { flex: 1; min-width: 0; display: grid; }
-.vs-opt-l small { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
-.vs-opt-l b { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.vs-opt-l em { flex: none; font-style: normal; font-size: 10.5px; font-weight: 600; color: var(--aus-text); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; white-space: nowrap; }
-.vs-opt-l li:has(input:not(:checked)) span, .vs-opt-l li:has(input:not(:checked)) b { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--border-strong); }
-.vs-opt .bx-link { font-size: 12px; }
+/* Reicht dein Geld? – kurze Antwort oben */
+.vs-an { display: grid; gap: 8px; min-width: 0; }
+.vs-an p { margin: 0; }
+.vs-an-k { font-size: 16px; line-height: 1.5; }
+.vs-an-k b { font-variant-numeric: tabular-nums; }
+.vs-an-dp { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface-2); cursor: pointer; font-size: 14px; }
+.vs-an-dp .vs-cb { margin-top: 2px; }
+.vs-an .bx-link { font-size: 12px; }
+/* Haken in „Monat für Monat“: weglassen bzw. Depot auflösen */
+.vs-cb { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.vs-mitcb { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.vs-mitcb .vs-auf { flex: 1; }
+.vs-optaus .vs-pn, .vs-optaus td { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--border-strong); }
+.vs-art li.vs-optaus span, .vs-art li.vs-optaus b { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--border-strong); }
+.vs-art li .vs-cb { margin-right: 2px; }
+/* Kontostand-Zeilen unter dem Ergebnis */
+.vs-ks th, .vs-ks td { font-weight: 600; background: var(--surface); }
+.vs-ks-e th, .vs-ks-e td { border-top: 1px solid var(--border-strong); }
+.vs-ks-t th, .vs-ks-t td { font-weight: 400; font-size: 12.5px; color: var(--text-2); }
+.vs-ks-t td.neg { color: var(--aus-text); }
+.vs-ks-fuss { margin: 6px 0 0; }
 @media (max-width: 640px) {
-  .vs-bd-kopf { font-size: 15.5px; }
-  .vs-bd-kopf b { font-size: 19px; }
-  .vs-tab.vs-bd-tab { min-width: 640px; }
-  .vs-bd-tab .vs-n { width: 170px; min-width: 170px; max-width: 170px; }
+  .vs-an-k { font-size: 15px; }
 }
 
 /* Herkunft-Marken */

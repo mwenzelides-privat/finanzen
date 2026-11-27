@@ -13,7 +13,7 @@ import { unterhaltLaden, unterhaltSeite, unterhaltBinden, unterhaltFristen, kind
 import { fristenLaden, fristenKarte, fristenListe, fristenBinden, fristenAlle, icsText } from './fristen.js';
 import { waechterLaden, istNeu, waechterKarte, neuLeiste, chip, waechterBinden, treffer } from './waechter.js';
 import { planGehalt, prognoseText, rahmenKarte, freiZeile, rahmenBinden, rahmenStand } from './planung.js';
-import { vermoegenLaden, depotKarte, vermoegenKarte, vermoegenBinden, reisenSeite, reisenBinden, vermoegen, reisen } from './vermoegen.js';
+import { vermoegenLaden, depotKarte, vermoegenKarte, vermoegenBinden, reisenSeite, reisenBinden, vermoegen, reisen, depot } from './vermoegen.js';
 import { kreditKarte, schuldenSumme, eigeneKredite, kreditEnde, neueRaten, kredite } from './kredit.js';
 import { zuPruefenSeite, zuPruefenBinden, zuPruefenZahl } from './zupruefen.js';
 import { vorschauSeite, vorschauBinden, geldbedarf } from './vorschau.js';
@@ -1114,12 +1114,12 @@ function cockpitSeite() {
   const T30 = naechsteTermine(R.vertraege), gK = naechstesGehalt(), zuKal = { tab: 'fix', fixtab: 'kalender', konto: '' };
   const T3 = t30Teile(T30, gK);
   const ber = [];
-  // Geldbedarf (Vorschau): wie weit der tiefste Kontostand vor einem Gehalt unter 0 fällt – ganz oben, Klick führt zur Rechnung
+  // Reicht das Geld? (Vorschau): tiefster Kontostand am Monatsende bis zum Ende der Vorschau – ganz oben, Klick führt zur Antwort
   const gb = sicher(() => geldbedarf({ ...(H ??= modulHelfer()), bxKopf, bxKarte, bxLink, DIENST })) || null;
   if (gb) {
-    const wann = gb.tief.rest ? `im Rest ${monLang(gb.tief.k)}s` : `Ende ${monLang(gb.tief.k)}`;
-    ber.push({ t: `Geldbedarf bis ${monKurz(gb.bis)}${gb.eigeneAuswahl ? ' · deine Auswahl' : ''}`, sub: gb.bedarf ? `damit du nie im Minus bist (tiefster Punkt ${wann} vor dem Gehalt) · am Monatsende fehlen höchstens ${eur0(gb.bedarfEnde * 100)}` : `es reicht · am tiefsten Punkt (${wann}) bleiben ${eur0(gb.tief.tief * 100)}`,
-      w: gb.bedarf ? `−${eur0(gb.bedarf * 100)}` : 'reicht', cls_: gb.bedarf ? 'neg' : 'pos', ziel: { tab: 'vorschau', _springe: '#vs-bedarf' } });
+    const e = gb.endeTief.ende;
+    ber.push({ t: `Kontostand bis ${monKurz(gb.bis)}${gb.eigeneAuswahl ? ' · deine Auswahl' : ''}`, sub: `${e < 0 ? 'reicht nicht – am tiefsten' : 'reicht – am knappsten'} Ende ${monLang(gb.endeTief.k)} nach dem Gehalt${gb.tief.tief < 0 ? ` · vor dem Gehalt bis −${eur0(-gb.tief.tief * 100)}` : ''}`,
+      w: `${e < 0 ? '−' : '+'}${eur0(Math.abs(e) * 100)}`, cls_: e < 0 ? 'neg' : 'pos', ziel: { tab: 'vorschau', _springe: '#vs-antwort' } });
   }
   const gU = sicher(() => gehaltUeberblick(gehaltHelfer())) || null;
   if (gU?.z) ber.push({ t: `Gehalt aufs Konto ${MONAT[+gU.z.m.slice(5) - 1]}`, sub: `Grundgehalt ${eurE0(gU.stufe)} brutto${gU.auto ? ` · Dienstwagen kostet ${eurE0(gU.auto.netto)} netto` : ''}`, w: eurE0(gU.z.auszahlung), ziel: { tab: 'einkommen' } });
@@ -2271,6 +2271,20 @@ const pruefHelfer = () => ({ D: () => D, S: () => S, setze: (p) => setze(p), neu
 
 // Helfer für die Zusatzmodule (steuerprognose, unterhalt, fristen, waechter, planung, vermoegen) – D und S über Funktionen,
 // damit H nach neuAufbauen() gültig bleibt
+// Depot Oskar (Papiere des Verrechnungskontos „Oskar …“): Kurswert laut letztem Baader-Auszug (Kundenportal) – für „Depot auflösen“
+function depotOskar() {
+  const dp = sicher(() => depot(H ??= modulHelfer()));
+  if (!dp) return null;
+  const ok = new Set(D.konten.map((k, i) => (/oskar/i.test(k.name) ? i : -1)).filter((i) => i >= 0));
+  const ps = dp.papiere.filter((p) => p.kurs && !p.leer && (p.konten || []).some((i) => ok.has(i)));
+  if (!ps.length) return null;
+  return { c: ps.reduce((t, p) => t + p.wertHeute, 0), n: ps.length, stichtag: ps.reduce((m, p) => (p.kurs.tag > m ? p.kurs.tag : m), '') };
+}
+// Ø Käufe ins Depot in den letzten 3 abgeschlossenen Monaten (Sparraten), Cent
+function sparSchnitt() {
+  const m = (D.j.depot?.monate || []).filter((x) => x.m < D.bis.slice(0, 7)).slice(-3);
+  return m.length === 3 ? Math.round(m.reduce((t, x) => t + x.kauf, 0) / 3) : 0;
+}
 function modulHelfer() {
   return { D: () => D, S: () => S, setze, neuZeichnen: () => aktualisieren(), toast, esc, eur, eur0, dde, NUM, MON, MONAT, kopf5, karte5, zahl5, zl, zs, geh, gehBinden,
     balkenListe, freiFuellen, zuBuchungen, monatZiel, zeitZiel, mVor, mkey, monKurz, monLang, plusTage, monatsletzter, tageImMonat, heuteLokal, tagKurz, plusMinus, norm,
@@ -2278,7 +2292,7 @@ function modulHelfer() {
     gehaltstag, vertragName, vertragsKey, monatsRechnung, verlauf5, lebenshaltung, sammle, periode, abgeschlosseneMonate, einkommen, kontenSumme, vollSumme, summeText,
     schoen, det: (r) => det(r, D.j), gruppenSchluessel, kvLesen: Q.kvLesen, kvSchreiben: Q.kvSchreiben, alsExcel, alsCsv, herunterladen, zeichne, basis, achsenStil,
     css, alpha, achse, kurzWert, schraffur, steuerSumme: abschnittSumme, kinder, ausgleichTags, fristQuellen: [prognoseFristen, unterhaltFristen],
-    schulden: () => (mitKrediten() ? sicher(() => schuldenSumme(KH())) || 0 : 0), ruecklagen };
+    schulden: () => (mitKrediten() ? sicher(() => schuldenSumme(KH())) || 0 : 0), ruecklagen, depotOskar, sparSchnitt };
 }
 
 // Monatsbalken der gewählten Kategorie mit dem Durchschnitt als beschriftete Linie
