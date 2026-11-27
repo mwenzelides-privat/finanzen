@@ -1118,7 +1118,7 @@ function cockpitSeite() {
   const gb = sicher(() => geldbedarf({ ...(H ??= modulHelfer()), bxKopf, bxKarte, bxLink, DIENST })) || null;
   if (gb) {
     const wann = gb.tief.rest ? `im Rest ${monLang(gb.tief.k)}s` : `Ende ${monLang(gb.tief.k)}`;
-    ber.push({ t: `Geldbedarf bis ${monKurz(gb.bis)}`, sub: gb.bedarf ? `damit du nie im Minus bist (tiefster Punkt ${wann} vor dem Gehalt) · am Monatsende fehlen höchstens ${eur0(gb.bedarfEnde * 100)}` : `es reicht · am tiefsten Punkt (${wann}) bleiben ${eur0(gb.tief.tief * 100)}`,
+    ber.push({ t: `Geldbedarf bis ${monKurz(gb.bis)}${gb.eigeneAuswahl ? ' · deine Auswahl' : ''}`, sub: gb.bedarf ? `damit du nie im Minus bist (tiefster Punkt ${wann} vor dem Gehalt) · am Monatsende fehlen höchstens ${eur0(gb.bedarfEnde * 100)}` : `es reicht · am tiefsten Punkt (${wann}) bleiben ${eur0(gb.tief.tief * 100)}`,
       w: gb.bedarf ? `−${eur0(gb.bedarf * 100)}` : 'reicht', cls_: gb.bedarf ? 'neg' : 'pos', ziel: { tab: 'vorschau', _springe: '#vs-bedarf' } });
   }
   const gU = sicher(() => gehaltUeberblick(gehaltHelfer())) || null;

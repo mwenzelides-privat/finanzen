@@ -162,7 +162,8 @@ const pm0 = (x) => (x ? `${x > 0 ? '+' : '−'}${H.eur0(Math.abs(x) * 100)}` : '
 // eines Monats vor dem Gehalt: tiefster Stand = Stand am Monatsanfang − Ausgaben; Stand am Ende = tiefster Stand + Einnahmen.
 // Geldbedarf = wie weit der tiefste dieser Stände unter 0 liegt. Alles in ganzen Euro – jede Zeile geht genau auf.
 // alt = true: Lebenshaltung mit Ø 12 Monate statt der Grundlage der Vorschau (nur zum Vergleich)
-function bedarfRechnen(v, G, alt = false) {
+// extra[i]: Euro, die im Monat i zusätzlich (+) oder weniger (−) ausgegeben werden (Optionen an-/abgehakt)
+function bedarfRechnen(v, G, alt = false, extra = null) {
   const start = H.ruecklagen?.();
   if (start == null || !v?.monate?.length) return null;
   const leben = v.rubriken.find((r) => r.key === 'leben')?.posten[0];
@@ -181,9 +182,11 @@ function bedarfRechnen(v, G, alt = false) {
     stand += ein - aus;
   }
   for (let i = ab; i < v.monate.length; i++) {
-    const aus = G.ber.aus[i] + lp(i), ein = G.ber.ein[i];
-    const gross = ['einmalig', 'einrichtung'].flatMap((k) => v.rubriken.find((r) => r.key === k)?.posten || [])
-      .map((p) => ({ name: p.name, c: G.pos.get(p.id)?.[i] || 0 })).filter((x) => x.c >= 100).sort((a, b) => b.c - a.c);
+    const aus = G.ber.aus[i] + lp(i) + (extra?.[i] || 0), ein = G.ber.ein[i];
+    const ps = ['einmalig', 'einrichtung'].flatMap((k) => v.rubriken.find((r) => r.key === k)?.posten || []);
+    const gross = [...ps.map((p) => ({ name: p.name, c: (G.pos.get(p.id)?.[i] || 0) + (extra?.pos?.get(p.id)?.w[i] || 0) })),
+      ...[...(extra?.pos || [])].filter(([id]) => id.startsWith('einrichtung:') && !ps.some((p) => p.id === id)).map(([, x]) => ({ name: x.name, c: x.w[i] }))]
+      .filter((x) => x.c >= 100).sort((a, b) => b.c - a.c);
     zeilen.push({ k: v.monate[i], i, anf: stand, aus, ein, gross });
     stand += ein - aus;
   }
@@ -191,6 +194,55 @@ function bedarfRechnen(v, G, alt = false) {
   const t = zeilen.reduce((m, z) => (z.tief < m.tief ? z : m), zeilen[0]);
   const e = zeilen.reduce((m, z) => (z.ende < m.ende ? z : m), zeilen[0]);   // tiefster Stand am Monatsende (nach dem Gehalt)
   return { start: kfm(start), zeilen, tief: t, bedarf: Math.max(0, -t.tief), endeTief: e, bedarfEnde: Math.max(0, -e.ende), leben };
+}
+// ---- Optionen: offene (und herausgenommene) Einrichtungs-Artikel und eigene Posten mit Annahme (Einmaliges, Ratenkäufe).
+// Haken an/aus rechnet den Geldbedarf durch – nur hier auf diesem Gerät, die Planung bleibt unverändert.
+const OPT_LS = 'fd.vs.opt';
+const optLesen = () => { try { return JSON.parse(localStorage.getItem(OPT_LS) || '{}') || {}; } catch { return {}; } };
+const optSchreiben = (o) => { try { localStorage.setItem(OPT_LS, JSON.stringify(o)); } catch {} };
+const RANG = { dringend: 0, angebot: 1, '': 2, 'wünschenswert': 3 };
+function optionen(v) {
+  const ab = v.ab || 0, os = [];
+  const idx = (m) => { const i = v.monate.indexOf(m); return i >= ab ? i : m && m < v.monate[ab] ? ab : -1; };
+  for (const x of wirksam(v)) {
+    if (!['offen', 'raus'].includes(x.status) || !x.c) continue;
+    const i = idx(x.monat);
+    if (i < 0) continue;
+    os.push({ key: `e:${ekey(x)}`, art: 'e', name: x.name, wo: x.raum, stufe: x.stufe || '', fest: x.fest, c: x.c, i, raum: x.raum, imPlan: x.status === 'offen', raus: x.status === 'raus',
+      rang: x.status === 'raus' ? 9 : RANG[norm0(x.stufe)] ?? 2 });
+  }
+  for (const r of v.rubriken) {
+    if (!['einmalig', 'kredite'].includes(r.key)) continue;
+    for (const p of r.posten) {
+      if (p.art !== 'eigen' || !p.annahme) continue;
+      const nz = p.werte.map((c, i) => (i >= ab && c ? i : -1)).filter((i) => i >= 0);
+      if (!nz.length) continue;
+      os.push({ key: `p:${p.id}`, art: 'p', name: p.name, wo: r.name, stufe: '', werte: p.werte, i: nz[0], monatlich: nz.length > 1, rate: kfm(p.werte[nz[0]]),
+        c: nz.reduce((t, i) => t + p.werte[i], 0), imPlan: true, rang: /eventuell/i.test(p.name) ? 5 : 4 });
+    }
+  }
+  return os.sort((a, b) => a.rang - b.rang || a.i - b.i || b.c - a.c);
+}
+const norm0 = (s) => String(s || '').toLowerCase();
+const optAn = (o, st) => (o.key in st ? !!st[o.key] : o.imPlan);
+// Euro je Monat, um die sich die Ausgaben gegenüber der Vorschau ändern, wenn genau die Optionen in „an“ gekauft werden.
+// Einrichtung je Raum wie in der Vorschau gerundet (Raumsumme kaufmännisch), eigene Posten je Monat gerundet.
+function optExtra(v, os, an) {
+  const n = v.monate.length, ex = Array(n).fill(0), raeume = new Map();
+  ex.pos = new Map();   // je Posten-ID: { name, w: Euro-Änderung je Monat } – für „darin …“ in der Tabelle
+  const plus = (id, name, i, e) => { const x = ex.pos.get(id) || ex.pos.set(id, { name, w: Array(n).fill(0) }).get(id); x.w[i] += e; ex[i] += e; };
+  const rub = v.rubriken.find((r) => r.key === 'einrichtung');
+  for (const o of os) {
+    const d = (an.has(o.key) ? 1 : 0) - (o.imPlan ? 1 : 0);
+    if (!d) continue;
+    if (o.art === 'e') { const m = raeume.get(o.raum) || Array(n).fill(0); m[o.i] += d * o.c; raeume.set(o.raum, m); }
+    else o.werte.forEach((c, i) => { if (i >= (v.ab || 0) && c) plus(o.key.slice(2), o.name, i, d * kfm(c)); });
+  }
+  for (const [raum, m] of raeume) {
+    const id = `einrichtung:${H.norm(raum)}`, base = rub?.posten.find((p) => p.id === id)?.werte || Array(n).fill(0);
+    m.forEach((d, i) => { if (d) plus(id, raum, i, kfm(base[i] + d) - kfm(base[i])); });
+  }
+  return ex;
 }
 const BEDARF_LS = 'fd.vs.dazu';
 const dazuLesen = () => { try { return Math.max(0, Math.round(+localStorage.getItem(BEDARF_LS) || 0)); } catch { return 0; } };
@@ -201,16 +253,31 @@ function dazuText(tief, ende, dazu) {
   return `${satz(ende + dazu, 'Am Monatsende (nach dem Gehalt)')} ${satz(tief + dazu, 'Vor dem Gehalt')}`;
 }
 function bedarfHtml(v, G) {
-  const B = bedarfRechnen(v, G);
+  const os = optionen(v), st = optLesen(), an = new Set(os.filter((o) => optAn(o, st)).map((o) => o.key)), ex = optExtra(v, os, an);
+  const B = bedarfRechnen(v, G, false, ex);
   if (!B) return '';
-  const BA = bedarfRechnen(v, G, true), D = H.D();
+  const BA = bedarfRechnen(v, G, true, ex), D = H.D();
+  const B0 = bedarfRechnen(v, G, false, optExtra(v, os, new Set()));   // nur das Feste: ohne alle Optionen
+  const dazu0 = dazuLesen(), festOk = B0.endeTief.ende + dazu0 >= 0;
+  // je Option: geht sie allein (das Feste + nur diese Option) mit dem dazugelegten Betrag am Monatsende noch auf?
+  const allein = (o) => bedarfRechnen(v, G, false, optExtra(v, os, new Set([o.key]))).endeTief.ende + dazu0 >= 0;
+  const optHtml = !os.length ? '' : `<div class="vs-opt">
+    <p class="vs-opt-k"><b>Offene Anschaffungen</b> – Haken weg = nicht kaufen. Nur zum Durchrechnen auf diesem Gerät, deine Planung bleibt, wie sie ist.</p>
+    <p class="klein">Nur das Feste, ohne alle diese Anschaffungen: am Monatsende ${pm0(B0.endeTief.ende)}${dazu0 ? ` (mit ${e0(dazu0)} dazu ${pm0(B0.endeTief.ende + dazu0)})` : ''} · vor dem Gehalt ${pm0(B0.tief.tief)}</p>
+    <ul class="vs-opt-l">${os.map((o) => { const ok = festOk && allein(o);
+      return `<li class="${festOk && !ok ? 'vs-opt-nein' : ''}"><label><input type="checkbox" data-vsopt="${H.esc(o.key)}"${an.has(o.key) ? ' checked' : ''}>`
+        + `<span>${H.esc(o.name)}<small>${H.esc(o.wo)}${o.stufe ? ` · ${H.esc(o.stufe)}` : ''}${o.raus ? ' · herausgenommen' : ''} · ${o.monatlich ? 'ab ' : ''}${H.esc(H.monKurz(v.monate[o.i]))}</small></span>`
+        + `<b>${o.monatlich ? `${e0(o.rate)} im Monat` : `${o.art === 'e' && !o.fest ? 'ca. ' : ''}${H.eur0(o.c)}`}</b>${festOk && !ok ? '<em>geht nicht</em>' : ''}</label></li>`; }).join('')}</ul>
+    <p class="muted klein">${festOk ? `„geht nicht“: Selbst wenn du sonst keine dieser Anschaffungen kaufst, reicht dein Geld${dazu0 ? ` mit ${e0(dazu0)} dazu` : ''} dafür am Monatsende nicht.`
+      : `Schon ohne alle diese Anschaffungen reicht es am Monatsende nicht${dazu0 ? ` – auch mit ${e0(dazu0)} dazu` : ''}. Jede davon geht nur, wenn du mehr dazulegst.`}
+      <button class="bx-link" data-vsoptalle="1">alle an</button> · <button class="bx-link" data-vsoptalle="0">alle aus</button> · <button class="bx-link" data-vsoptalle="">wie geplant</button></p></div>`;
   const mon = (z) => (z.rest ? `Rest ${H.monLang(z.k)}` : H.monLang(z.k));
   const wann = (z) => `${z.rest ? `im Rest ${H.monLang(z.k)}s` : `Ende ${H.monLang(z.k)}`} vor dem Gehalt`;
   const letzte = B.zeilen.at(-1).k;
   const bis = H.esc(H.monLang(letzte));
-  const kopf = !B.bedarf ? `Dein Geld reicht bis ${bis}: am tiefsten Punkt bleiben <b class="pos">${B.tief.tief ? e0(B.tief.tief) : '0 €'}</b>.`
+  const kopf = (os.some((o) => o.key in st) ? '<span class="vs-bd-ausw">Mit deiner Auswahl unten:</span> ' : '') + (!B.bedarf ? `Dein Geld reicht bis ${bis}: am tiefsten Punkt bleiben <b class="pos">${B.tief.tief ? e0(B.tief.tief) : '0 €'}</b>.`
     : `${B.bedarfEnde ? `Bis ${bis} fehlen dir am Monatsende (nach dem Gehalt) höchstens <b class="neg">${e0(B.bedarfEnde)}</b>. ` : `Am Monatsende (nach dem Gehalt) reicht dein Geld bis ${bis}. `}`
-      + `Damit deine Konten auch vor jedem Gehalt nie unter null fallen, brauchst du <b class="neg">${e0(B.bedarf)}</b>.`;
+      + `Damit deine Konten auch vor jedem Gehalt nie unter null fallen, brauchst du <b class="neg">${e0(B.bedarf)}</b>.`);
   const unter = `Tiefster Stand am Monatsende: Ende ${H.esc(H.monLang(B.endeTief.k))} ${pm0(B.endeTief.ende)} · ${H.esc(wann(B.tief))}: ${pm0(B.tief.tief)} · Start: frei verfügbar am ${H.dde(D.bis)} ${e0(B.start)}`;
   const zeile = (z) => `<tr class="${z === B.tief ? 'vs-bd-tief' : ''}${z.rest ? ' vs-bd-rest' : ''}"><th scope="row" class="vs-n">${H.esc(mon(z))}${z === B.tief ? ' <span class="vs-bd-m">tiefster Punkt</span>' : ''}
       ${z.gross?.length ? `<small class="vs-bd-g">darin ${z.gross.map((x) => `${H.esc(x.name)} ${e0(x.c)}`).join(' · ')}</small>` : ''}${z.rest ? `<small class="vs-bd-g">ab ${z.tag + 1}. – feste Abbuchungen, restliche Lebenshaltung${z.gross?.length ? ' und eigene Posten' : ''}</small>` : ''}</th>
@@ -229,6 +296,7 @@ function bedarfHtml(v, G) {
     <p class="vs-bd-kopf">${kopf}</p><p class="muted klein">${unter}</p>
     <label class="vs-bd-dazu"><span>Wenn du dazulegst</span><input type="number" inputmode="numeric" min="0" step="100" data-vsdazu="${B.tief.tief}" data-vsende="${B.endeTief.ende}" value="${dazu || ''}" placeholder="0"> €</label>
     <p class="vs-bd-erg" data-vsdazu-text>${dazuText(B.tief.tief, B.endeTief.ende, dazu)}</p>
+    ${optHtml}
     ${tab}
     <ul class="vs-bd-annahmen muted klein">
       <li>Start: Geld auf deinen eigenen Konten am ${H.dde(D.bis)} – ohne Mietkaution, Kinder- und gemeinsame Konten. Buchungen danach (z. B. Kartenzahlungen der letzten Tage) sind noch nicht drin.</li>
@@ -243,8 +311,9 @@ export function geldbedarf(h) {
   H = h;
   const v0 = H.D().j.vorschau;
   if (!v0?.monate?.length) return null;
-  const v = mitAuswahl(v0), G = gerundet(v), B = bedarfRechnen(v, G);
-  return B ? { ...B, bis: B.zeilen.at(-1).k } : null;
+  const v = mitAuswahl(v0), G = gerundet(v), os = optionen(v), st = optLesen();
+  const B = bedarfRechnen(v, G, false, optExtra(v, os, new Set(os.filter((o) => optAn(o, st)).map((o) => o.key))));
+  return B ? { ...B, bis: B.zeilen.at(-1).k, eigeneAuswahl: os.some((o) => o.key in st) } : null;
 }
 
 // Wohin ein Posten führt (Buchungen, Gehalt, Fixkosten …)
@@ -409,6 +478,19 @@ export function vorschauBinden(box, neuZeichnen) {
     try { localStorage.setItem(BEDARF_LS, String(dazu)); } catch {}
     const t = box.querySelector('[data-vsdazu-text]');
     if (t) t.innerHTML = dazuText(+inp.dataset.vsdazu, +inp.dataset.vsende, dazu);
+  });
+  // nach der Eingabe (Enter / Feld verlassen): neu rechnen, damit „geht nicht“ bei den Anschaffungen zum Betrag passt
+  box.querySelectorAll('[data-vsdazu]').forEach((inp) => inp.onchange = () => { anker = '#vs-bedarf'; neuZ?.(); });
+  box.querySelectorAll('[data-vsopt]').forEach((cb) => cb.onchange = () => {
+    const st = optLesen(), o = optionen(mitAuswahl(H.D().j.vorschau)).find((x) => x.key === cb.dataset.vsopt);
+    if (!o) return;
+    if (cb.checked === o.imPlan) delete st[o.key]; else st[o.key] = cb.checked;
+    optSchreiben(st); anker = '#vs-bedarf'; neuZ?.();
+  });
+  box.querySelectorAll('[data-vsoptalle]').forEach((b) => b.onclick = () => {
+    const w = b.dataset.vsoptalle, st = {};
+    if (w !== '') for (const o of optionen(mitAuswahl(H.D().j.vorschau))) if ((w === '1') !== o.imPlan) st[o.key] = w === '1';
+    optSchreiben(st); anker = '#vs-bedarf'; neuZ?.();
   });
   box.querySelectorAll('[data-vsklapp]').forEach((d) => d.addEventListener('toggle', () => { if (d.open) gOffen.add(d.dataset.vsklapp); else gOffen.delete(d.dataset.vsklapp); }));
   box.querySelectorAll('[data-vsein]').forEach((sel) => sel.onchange = () => {

@@ -101,6 +101,21 @@
 .vs-bd-m { display: inline-block; font-size: 10.5px; font-weight: 600; color: var(--aus-text); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; margin-left: 4px; }
 .vs-bd-rest th, .vs-bd-rest td { color: var(--text-2); }
 .vs-bd-annahmen { margin: 2px 0 0; padding-left: 18px; display: grid; gap: 2px; }
+.vs-bd-ausw { font-size: 13px; font-weight: 600; color: var(--accent); }
+/* Optionen: offene Anschaffungen an-/abhaken */
+.vs-opt { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); min-width: 0; }
+.vs-opt p { margin: 0; }
+.vs-opt-k { font-size: 14px; }
+.vs-opt-l { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); column-gap: 18px; }
+.vs-opt-l li { min-width: 0; border-bottom: 1px solid var(--border); }
+.vs-opt-l label { display: flex; align-items: center; gap: 8px; padding: 5px 0; cursor: pointer; font-size: 13px; min-width: 0; }
+.vs-opt-l input { flex: none; width: 17px; height: 17px; accent-color: var(--accent); }
+.vs-opt-l span { flex: 1; min-width: 0; display: grid; }
+.vs-opt-l small { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.vs-opt-l b { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vs-opt-l em { flex: none; font-style: normal; font-size: 10.5px; font-weight: 600; color: var(--aus-text); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; white-space: nowrap; }
+.vs-opt-l li:has(input:not(:checked)) span, .vs-opt-l li:has(input:not(:checked)) b { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--border-strong); }
+.vs-opt .bx-link { font-size: 12px; }
 @media (max-width: 640px) {
   .vs-bd-kopf { font-size: 15.5px; }
   .vs-bd-kopf b { font-size: 19px; }
