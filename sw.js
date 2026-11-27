@@ -2,7 +2,7 @@
 // Bei jeder Änderung an App-Dateien VERSION erhöhen.
 // Unter derselben Adresse (mwenzelides-privat.github.io) liegt auch die Gesundheitsakte: dieser Service Worker liest,
 // schreibt und löscht nur eigene Speicher („finanzen-…“) und nur Anfragen unter /finanzen/.
-const VERSION = 'd7.30.0';
+const VERSION = 'd7.31.0';
 const CACHE = 'finanzen-dash-' + VERSION;
 const APP = ['./', 'index.html', 'manifest.webmanifest', 'config.js', 'css/app.css', 'icons/icon.svg', 'icons/icon-192.png',
   'js/app.js', 'js/suche.js', 'js/quelle.js', 'js/export.js', 'js/chat.js', 'js/salden.js', 'js/steuer.js', 'js/gehalt.js', 'js/pruefen.js',

@@ -168,13 +168,23 @@ const pm0 = (x) => (x ? `${x > 0 ? '+' : '−'}${H.eur0(Math.abs(x) * 100)}` : '
 // alt = true: Lebenshaltung mit Ø 12 Monate statt der Grundlage der Vorschau (nur zum Vergleich)
 // extra[i]: Euro, die im Monat i zusätzlich (+) oder weniger (−) ausgegeben werden (Optionen an-/abgehakt)
 function bedarfRechnen(v, G, alt = false, extra = null) {
-  const start = H.ruecklagen?.();
+  // Start und Rest des laufenden Monats: gerechnet am PC (vorschau_daten.py, v.start) – dieselben Zahlen stehen in der Excel
+  const S = v?.start, start = S ? S.frei : H.ruecklagen?.();
   if (start == null || !v?.monate?.length) return null;
   const leben = v.rubriken.find((r) => r.key === 'leben')?.posten[0];
   const lp = (i) => (alt && leben?.schnitt != null ? kfm(leben.schnitt) - kfm(leben.werte[i]) : 0);
   const zeilen = [];
   let stand = kfm(start);
-  const ab = v.ab || 0, lauf = H.verlauf5(alt)?.lauf;
+  const ab = v.ab || 0, R = S?.rest;
+  if (R?.monat && R.monat < v.monate[ab]) {
+    const lp = v.laufend?.monat === R.monat ? v.laufend.posten || [] : [];
+    const gross = lp.filter((p) => p.c < 0).map((p) => ({ name: p.name, c: kfm(-p.c) })).sort((a, b) => b.c - a.c);
+    const ein = kfm(R.gehalt) + lp.filter((p) => p.c > 0).reduce((t, p) => t + kfm(p.c), 0);
+    const aus = kfm(R.fest) + kfm(R.leben) + gross.reduce((t, x) => t + x.c, 0);
+    zeilen.push({ k: R.monat, rest: true, anf: stand, aus, ein, tag: +v.start.datum.slice(8), gross });
+    stand += ein - aus;
+  }
+  const lauf = S ? null : H.verlauf5(alt)?.lauf;   // ältere Daten ohne v.start: wie im Cockpit gerechnet
   if (lauf && lauf.k < v.monate[ab]) {
     // was in diesem Monat noch kommt bzw. abgeht – dazu eigene Posten aus Planung.xlsx, die in diesem Monat fällig, aber noch nicht gebucht sind
     const lp = v.laufend?.monat === lauf.k ? v.laufend.posten || [] : [];
@@ -209,7 +219,7 @@ const istOpt = (r, p) => ['einmalig', 'kredite'].includes(r.key) && p.art === 'e
 // Vorschau mit deinen Haken: weggelassene eigene Posten auf 0 (Zeile bleibt stehen), Depot als Einnahme im ersten offenen Monat.
 // Einrichtungs-Artikel wirken schon über wirksam()/mitAuswahl().
 function mitOptionen(v) {
-  const st = optLesen(), ab = v.ab || 0, dp = H.depotOskar?.();
+  const st = optLesen(), ab = v.ab || 0, dp = v.depot_oskar || H.depotOskar?.();
   if (!Object.keys(st).length && !dp) return v;
   const w = structuredClone(v);
   for (const r of w.rubriken) for (const p of r.posten) {
@@ -234,7 +244,7 @@ const cb = (key, an, label, teils = false) => `<input type="checkbox" class="vs-
 function antwortHtml(v, G) {
   const K = bedarfRechnen(v, G);
   if (!K) return '';
-  const D = H.D(), st = optLesen(), dp = H.depotOskar?.(), [ka, kb] = kernVon(v), letzte = K.zeilen.at(-1).k;
+  const D = H.D(), st = optLesen(), dp = v.depot_oskar || H.depotOskar?.(), [ka, kb] = kernVon(v), letzte = K.zeilen.at(-1).k;
   const e = K.endeTief, t = K.tief;
   const satz1 = e.ende >= 0
     ? `<b class="pos">Ja, am Monatsende reicht es.</b> Bis ${H.esc(H.monLang(letzte))} bleibt dein Konto nach dem Gehalt immer im Plus – am knappsten Ende ${H.esc(H.monLang(e.k))} mit ${pm0(e.ende)}.`
@@ -249,7 +259,10 @@ function antwortHtml(v, G) {
   const depot = dp?.c > 0 ? `<label class="vs-an-dp">${cb('depot', st.depot === true, 'Depot Oskar auflösen')}<span><b>Depot Oskar auflösen</b> – ${H.eur0(dp.c)} (Kurswert laut Kundenportal ${H.dde(dp.stichtag)}), Geld im ${H.esc(H.monLang(v.monate[v.ab || 0]))} auf dem Konto</span></label>` : '';
   const eigene = Object.keys(st).some((k) => k !== 'depot' || st.depot);
   const spar = H.sparSchnitt?.();
-  return `<div class="vs-an">${depot}
+  const erst = v.erstellt ? `${H.dde(v.erstellt.slice(0, 10))}, ${v.erstellt.slice(11, 16)} Uhr` : '';
+  return `<div class="vs-an">
+    <p class="vs-an-stand">Rechnung vom ${erst} · Daten bis ${H.dde(D.bis)}${v.erstellt && v.erstellt.slice(0, 10) < H.heuteLokal() ? ' · <b>nicht von heute</b> – oben ↻ tippen, dann lädt die App die neueste Fassung' : ''}</p>
+    ${depot}
     <p class="vs-an-k">${satz1}${satz2}</p>${satz3}
     <p class="muted klein">Weglassen: in „Monat für Monat“ den Haken vor einer Anschaffung entfernen – Kontostand und diese Antwort rechnen sofort neu (nur zum Durchrechnen, deine Planung bleibt).${eigene ? ' <button class="bx-link" data-vsoptalle="">alles wie geplant</button>' : ''}
       Start: frei verfügbar am ${H.dde(D.bis)} ${e0(K.start)}; Buchungen danach fehlen, außer sie stehen als eigener Posten in Planung.xlsx.${spar ? ` Nicht drin: Sparraten ins Depot (zuletzt Ø ${H.eur0(spar)} im Monat).` : ''}</p></div>`;
