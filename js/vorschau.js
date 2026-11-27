@@ -19,17 +19,27 @@ let vglMonat = '';                // gewählter Monat im Plan/Ist
 // da sind, die nach ihm gebaut wurden (dann steht er in Planung.xlsx – oder du hast ihn dort inzwischen selbst geändert).
 const KV_E = 'vorschau.einrichtung';
 let ENT = null, ladeP = null, neuZ = null, meldung = '', anker = '';
+let geprueft = '';          // Datenstand (v.erstellt), gegen den die übertragenen Einträge zuletzt abgeglichen wurden
 const gOffen = new Set();   // aufgeklappte Listen „Gekauft“ / „Gestrichen“
 const ekey = (x) => `${x.raum}|${x.name}`;
 const amPc = () => matchMedia('(pointer: fine)').matches && !/android|iphone|ipad/i.test(navigator.userAgent);
 const jetztLokal = () => { const d = new Date(), p = (x) => String(x).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
 const entSpeichern = () => Promise.resolve(H.kvSchreiben(KV_E, { ent: Object.fromEntries(ENT || []) })).catch(() => {});
+// Übertragene Einträge fallen weg, sobald Daten da sind, die nach ihnen gebaut wurden (gibt die Zahl der gelöschten zurück)
+function entAbgleich(v) {
+  let weg = 0;
+  if (ENT) for (const [k, e] of ENT) if (e.sync && v?.erstellt && v.erstellt > String(e.zeit).slice(0, 16)) { ENT.delete(k); weg++; }
+  geprueft = v?.erstellt || '';
+  return weg;
+}
+// Auch nach „↻ Daten einlesen“ in derselben Sitzung: neuer Datenstand → übertragene Einträge erneut abgleichen
+function entPruefen(v) {
+  if (ENT && v?.erstellt && v.erstellt !== geprueft && entAbgleich(v)) entSpeichern();
+}
 async function entLaden(v) {
   const l = await Promise.resolve(H.kvLesen(KV_E)).catch(() => null);
   ENT = new Map(Object.entries(l?.ent || {}));
-  let weg = 0;
-  for (const [k, e] of ENT) if (e.sync && v?.erstellt && v.erstellt > String(e.zeit).slice(0, 16)) { ENT.delete(k); weg++; }
-  if (weg) await entSpeichern();
+  if (entAbgleich(v)) await entSpeichern();
   if ([...ENT.values()].some((e) => !e.sync)) senden();
 }
 async function senden() {
@@ -51,6 +61,9 @@ async function senden() {
 }
 function setzeArtikel(x, status, monat) {
   ENT.set(ekey(x), { raum: x.raum, name: x.name, status, monat, zeit: jetztLokal(), sync: false });
+  // ein alter Haken „weglassen“ gilt nicht mehr, wenn der Artikel neu gesetzt wird (sonst fehlte er nach dem Wiedereinplanen still)
+  const o = optLesen(), ok = `e:${ekey(x)}`;
+  if (ok in o) { delete o[ok]; optSchreiben(o); }
   entSpeichern();
   senden();
   neuZ?.();
@@ -109,7 +122,8 @@ function mitAuswahl(v) {
 // Darunter (aufklappbar) die gekauften und die gestrichenen Artikel – von dort zurück in einen Monat oder in die Sammelliste.
 function sammelHtml(v) {
   const alle = wirksam(v), l = alle.filter((x) => x.status === 'raus'), g = alle.filter((x) => x.status === 'entfaellt'), gk = alle.filter((x) => x.status === 'gekauft');
-  const opts = v.monate.map((k) => `<option value="${k}">${H.monKurz(k)}</option>`).join('');
+  // nur offene Monate: vergangene haben einen festgehaltenen Plan, ein dorthin eingeplanter Artikel zählte in keinem Monat
+  const opts = v.monate.slice(v.ab || 0).map((k) => `<option value="${k}">${H.monKurz(k)}</option>`).join('');
   const zeile = (x, extra, hilfe) => `<li><span>${H.esc(x.name)}<small>${H.esc(x.raum)} · ${H.esc(x.stufe || '')}${x.monat ? ` · war ${H.monKurz(x.monat)}` : ''}${x.vorgemerkt ? ' · vorgemerkt' : ''}</small></span>`
     + `<b>${x.fest ? '' : 'ca. '}${H.eur(x.c)}</b><label class="vs-ein"><span class="vs-sr">${hilfe}</span><select data-vsein="${H.esc(ekey(x))}" aria-label="${H.esc(x.name)}: ${hilfe}"><option value="">einplanen in …</option>${opts}<option disabled>──────</option>${extra}</select></label></li>`;
   const summe = (a) => H.eur(a.reduce((t, x) => t + x.c, 0));
@@ -241,6 +255,13 @@ function mitOptionen(v) {
 const raumStand = (p) => { const l = p.artikel || []; const an = l.filter((x) => x.status !== 'optaus').length; return an === l.length ? 'an' : an ? 'teils' : 'aus'; };
 const cb = (key, an, label, teils = false) => `<input type="checkbox" class="vs-cb" data-vsopt="${H.esc(key)}"${an ? ' checked' : ''}${teils ? ' data-teils="1"' : ''} aria-label="${H.esc(label)}" title="Haken weg = nicht kaufen (nur zum Durchrechnen, ändert deine Planung nicht)">`;
 
+// Wirkt einer deiner Haken? Nur Schlüssel, die zu einem vorhandenen Posten bzw. offenen Artikel gehören (alte Schlüssel zählen nicht).
+// v: Vorschau nach mitAuswahl/mitOptionen (Posten tragen p.opt)
+function auswahlWirkt(v) {
+  const st = optLesen(), l = wirksam(v);
+  return Object.keys(st).some((k) => (k.startsWith('e:') ? l.some((x) => x.status === 'optaus' && `e:${ekey(x)}` === k)
+    : (k !== 'depot' || st.depot === true) && v.rubriken.some((r) => r.posten.some((p) => p.opt === k))));
+}
 // Kurze Antwort oben: reicht das Geld – mit und ohne Depot? Zahlen aus derselben Rechnung wie die Kontostand-Zeilen unten.
 function antwortHtml(v, G) {
   const K = bedarfRechnen(v, G);
@@ -256,9 +277,14 @@ function antwortHtml(v, G) {
   let i0 = ka; for (let i = ka; i <= kb; i++) if (einm(i)) i0 = i + 1;
   const ms = []; for (let i = i0; i <= kb; i++) ms.push(G.erg[i]);
   const schnitt = ms.length ? Math.round(ms.reduce((a, b) => a + b, 0) / ms.length) : null;
-  const satz3 = schnitt == null ? '' : `<p>Danach, ohne Anschaffungen (${H.esc(H.monKurz(v.monate[i0]))} – ${H.esc(H.monKurz(v.monate[kb]))}), bleiben dir im Monat im Schnitt nur <b class="${schnitt < 0 ? 'neg' : ''}">${pm0(schnitt)}</b> – ein Puffer baut sich so kaum auf.</p>`;
+  // Wertung nur mit genannter Schwelle: unter 100 € im Monat baut sich kaum ein Puffer auf
+  const PUFFER = 100;
+  const satz3 = schnitt == null ? '' : `<p>Danach, ohne Anschaffungen (${H.esc(H.monKurz(v.monate[i0]))} – ${H.esc(H.monKurz(v.monate[kb]))}), `
+    + (schnitt < 0 ? `fehlen dir im Monat im Schnitt <b class="neg">${e0(-schnitt)}</b> – das Konto sinkt Monat für Monat.`
+      : schnitt === 0 ? 'bleibt dir im Monat im Schnitt nichts übrig.'
+      : `bleiben dir im Monat im Schnitt <b>${e0(schnitt)}</b>${schnitt < PUFFER ? ` – weniger als ${PUFFER} €, ein Puffer baut sich so kaum auf` : ''}.`) + '</p>';
   const depot = dp?.c > 0 ? `<label class="vs-an-dp">${cb('depot', st.depot === true, 'Depot Oskar auflösen')}<span><b>Depot Oskar auflösen</b> – ${H.eur0(dp.c)} (Kurswert laut Kundenportal ${H.dde(dp.stichtag)}), Geld im ${H.esc(H.monLang(v.monate[v.ab || 0]))} auf dem Konto</span></label>` : '';
-  const eigene = Object.keys(st).some((k) => k !== 'depot' || st.depot);
+  const eigene = auswahlWirkt(v);
   const spar = H.sparSchnitt?.();
   const erst = v.erstellt ? `${H.dde(v.erstellt.slice(0, 10))}, ${v.erstellt.slice(11, 16)} Uhr` : '';
   return `<div class="vs-an">
@@ -273,8 +299,12 @@ export function geldbedarf(h) {
   H = h;
   const v0 = H.D().j.vorschau;
   if (!v0?.monate?.length) return null;
+  // Einrichtungs-Auswahl (IndexedDB) auch laden, wenn die Vorschau in dieser Sitzung noch nicht offen war; danach zeichnet
+  // das Cockpit einmal neu (h.neuZeichnen prüft selbst, ob das Cockpit noch zu sehen ist)
+  if (v0.einrichtung?.length && !ENT && !ladeP) ladeP = entLaden(v0).then(() => h.neuZeichnen?.());
+  entPruefen(v0);
   const v = mitOptionen(mitAuswahl(v0)), B = bedarfRechnen(v, gerundet(v));
-  return B ? { ...B, bis: B.zeilen.at(-1).k, eigeneAuswahl: Object.keys(optLesen()).length > 0 } : null;
+  return B ? { ...B, bis: B.zeilen.at(-1).k, eigeneAuswahl: auswahlWirkt(v) } : null;
 }
 
 // Wohin ein Posten führt (Buchungen, Gehalt, Fixkosten …)
@@ -339,7 +369,7 @@ function tabelleHtml(v, G) {
   if (K) body += stand((z) => z.ende, 'Kontostand am Monatsende', 'vs-ks-e', 'Frei verfügbar nach dem Gehalt: Stand am Monatsanfang + Ergebnis des Monats')
     + stand((z) => z.tief, 'tiefster Stand vor dem Gehalt', 'vs-ks-t', 'Stand am Monatsanfang minus alle Ausgaben des Monats – das Gehalt kommt erst am Monatsende');
   const r0 = K?.zeilen[0]?.rest ? K.zeilen[0] : null;
-  const fuss = K ? `<p class="muted klein vs-ks-fuss">Kontostand: frei verfügbar am ${H.dde(H.D().bis)} ${e0(K.start)}${r0 ? ` · Rest ${H.esc(H.monLang(r0.k))}: −${e0(r0.aus)} Abbuchungen, Lebenshaltung und eigene Posten, +${e0(r0.ein)} Gehalt = ${pm0(r0.ende)} am Monatsende` : ''} · dann je Monat + Ergebnis. „Tiefster Stand vor dem Gehalt“ = Stand am Monatsanfang minus alle Ausgaben des Monats.</p>` : '';
+  const fuss = K ? `<p class="muted klein vs-ks-fuss">Kontostand: frei verfügbar am ${H.dde(H.D().bis)} ${e0(K.start)}${r0 ? ` · Rest ${H.esc(H.monLang(r0.k))}: ${r0.aus ? `−${e0(r0.aus)} Abbuchungen, Lebenshaltung und eigene Posten` : 'keine Abbuchungen mehr'}${r0.ein ? `, +${e0(r0.ein)} Gehalt und Eingänge` : ', kein Gehalt mehr in diesem Monat'} = ${pm0(r0.ende)} am Monatsende` : ''} · dann je Monat + Ergebnis. „Tiefster Stand vor dem Gehalt“ = Stand am Monatsanfang minus alle Ausgaben des Monats.</p>` : '';
   return `<div class="vs-scroll" tabindex="0" aria-label="Tabelle: Monate nebeneinander, seitlich verschiebbar"><table class="vs-tab"><thead>${kopf}</thead><tbody>${body}</tbody></table></div>${fuss}`;
 }
 
@@ -361,16 +391,18 @@ function vergleichHtml(v) {
   if (!l.some((x) => x.monat === vglMonat)) vglMonat = l.at(-1).monat;
   const x = l.find((y) => y.monat === vglMonat);
   const seg = `<div class="seg vs-seg" role="group" aria-label="Monat">${l.slice(-6).map((y) => `<button data-vsvgl="${y.monat}" class="${y.monat === vglMonat ? 'an' : ''}">${H.monKurz(y.monat)}${y.laufend ? ' (läuft)' : ''}</button>`).join('')}</div>`;
-  const r0 = (c) => Math.round(c / 100);
+  // jeder Posten kaufmännisch gerundet; der Rubrik-Plan ist die Summe der gezeigten Postenzeilen (wie in „Monat für Monat“)
   let zeilen = '', sP = { ein: 0, aus: 0 }, sI = { ein: 0, aus: 0 };
   for (const z of x.zeilen) {
-    const p = r0(z.plan), i = r0(z.ist), d = i - p, schlecht = z.bereich === 'aus' ? d > 0 : d < 0;
+    const pos = x.posten.filter((q) => q.rubrik === z.key);
+    const p = pos.length ? pos.reduce((t, q) => t + kfm(q.c), 0) : kfm(z.plan);
+    const i = kfm(z.ist), d = i - p, schlecht = z.bereich === 'aus' ? d > 0 : d < 0;
     sP[z.bereich] += p; sI[z.bereich] += i;
-    const auf = offen.has(`vgl:${z.key}`), pos = x.posten.filter((q) => q.rubrik === z.key);
+    const auf = offen.has(`vgl:${z.key}`);
     zeilen += `<tr class="vs-rub${auf ? ' auf' : ''}"><th scope="row" class="vs-n">${pos.length ? `<button class="vs-auf" data-vsrub="vgl:${z.key}" aria-expanded="${auf}"><span class="vs-pfeil" aria-hidden="true">›</span>${H.esc(z.name)}</button>` : H.esc(z.name)}</th>`
       + `<td>${e0(p)}</td><td>${e0(i)}</td><td class="${Math.abs(d) >= 1 && schlecht ? 'neg' : ''}">${pm0(d)}</td></tr>`;
     if (auf) for (const q of pos) {
-      const qp = r0(q.c), qi = q.ist == null ? null : r0(q.ist);
+      const qp = kfm(q.c), qi = q.ist == null ? null : kfm(q.ist);
       zeilen += `<tr class="vs-pos"><th scope="row" class="vs-n"><span class="vs-pn">${H.esc(q.name)}</span></th><td>${e0(qp)}</td><td>${qi == null ? '<span class="muted" title="Buchungen nicht eindeutig zuzuordnen – zählt in der Rubrik bzw. Lebenshaltung">?</span>' : e0(qi)}</td><td>${qi == null ? '' : pm0(qi - qp)}</td></tr>`;
     }
   }
@@ -390,6 +422,7 @@ export function vorschauSeite(h) {
   H = h;
   const D = H.D(), v0 = D.j.vorschau;
   if (v0?.einrichtung?.length && !ENT && !ladeP) ladeP = entLaden(v0).then(() => neuZ?.());
+  entPruefen(v0);
   const v = v0?.monate?.length ? mitOptionen(mitAuswahl(v0)) : v0;
   if (!v?.monate?.length) {
     return `<div class="cp bx">${H.bxKopf('Vorschau','Die Vorschau ist noch nicht berechnet.', 'Sie entsteht am PC beim nächsten Einlesen (vorschau_daten.py).')}</div>`;
@@ -416,7 +449,7 @@ export function vorschauSeite(h) {
     ${H.bxKopf(`Vorschau ${J}`, kern, unter + ' · Beträge auf volle Euro gerundet, Summen aus den gezeigten Zahlen')}
     ${H.bxKarte('Reicht dein Geld?', antwortHtml(v, G), { id: 'vs-antwort', rechts: '<span class="klein muted">Kontostand bis zum Ende der Vorschau</span>' })}
     <div class="vs-zahlen">${zahlen}</div>
-    ${H.bxKarte('Ergebnis je Monat', balkenHtml(v, G), { rechts: '<span class="klein muted">Einnahmen minus Ausgaben</span>', fuss: 'Grün = es bleibt etwas übrig, rot = Minus · Monat antippen für die Zahlen (Tooltip)' })}
+    ${H.bxKarte('Ergebnis je Monat', balkenHtml(v, G), { rechts: '<span class="klein muted">Einnahmen minus Ausgaben</span>', fuss: 'Grün = es bleibt etwas übrig, rot = Minus · genaue Zahlen in „Monat für Monat“ (Zeile Ergebnis)' })}
     ${H.bxKarte('Monat für Monat', `<div class="vs-werkzeug"><button class="bx-link" data-vsalle="1">${[...offen].some((k) => !k.startsWith('vgl:')) ? 'Alle zuklappen' : 'Alle Rubriken aufklappen'}</button></div>${tabelleHtml(v, G)}`,
       { id: 'vs-monate', rechts: '<span class="klein muted">Rubrik antippen: Posten · Posten antippen: Herkunft</span>',
         fuss: `Ausgaben positiv · ohne Kinder- und Gemeinschaftskonten · Lebenshaltung: ${H.esc((v.leben?.text || leben?.herkunft || '').replace(/^Annahme: /, ''))}` })}
@@ -444,7 +477,8 @@ function stabil(zeichnen) {
 const raumAnker = (raum) => `[data-vspos="einrichtung:${CSS.escape(H.norm(raum))}"]`;
 
 export function vorschauBinden(box, neuZeichnen) {
-  neuZ = () => stabil(neuZeichnen);
+  // nur neu zeichnen, solange die Vorschau noch in der Box steht – sonst überschriebe ein später Rückruf eine andere Seite
+  neuZ = () => { if (!box.querySelector('.cp.vs')) return; stabil(neuZeichnen); };
   box.querySelectorAll('[data-vsraus]').forEach((b) => b.onclick = () => { const x = wirksam(H.D().j.vorschau).find((y) => ekey(y) === b.dataset.vsraus); if (x) { anker = raumAnker(x.raum); setzeArtikel(x, 'herausgenommen', x.monat); } });
   box.querySelectorAll('[data-vsgek]').forEach((b) => b.onclick = () => { const x = wirksam(H.D().j.vorschau).find((y) => ekey(y) === b.dataset.vsgek); if (x) { anker = raumAnker(x.raum); setzeArtikel(x, 'gekauft', x.monat); } });
   // Haken (Weglassen, Depot): nur auf diesem Gerät, dann neu rechnen – die Zeile mit dem Haken bleibt an ihrer Stelle im Bild
@@ -471,9 +505,9 @@ export function vorschauBinden(box, neuZeichnen) {
   box.querySelectorAll('[data-vspos]').forEach((b) => b.onclick = () => { const k = b.dataset.vspos; if (offenP.has(k)) offenP.delete(k); else offenP.add(k); anker = `[data-vspos="${CSS.escape(k)}"]`; neuZ(); });
   box.querySelectorAll('[data-vsvgl]').forEach((b) => b.onclick = () => { vglMonat = b.dataset.vsvgl; neuZeichnen(); });
   box.querySelectorAll('[data-vsalle]').forEach((b) => b.onclick = () => {
-    const v = H.D().j.vorschau;
+    const v = mitOptionen(mitAuswahl(H.D().j.vorschau));   // wie angezeigt, also mit Depot und Einrichtung aus deiner Auswahl
     if ([...offen].some((k) => !k.startsWith('vgl:'))) { for (const k of [...offen]) if (!k.startsWith('vgl:')) offen.delete(k); }
     else v.rubriken.forEach((r) => offen.add(r.key));
-    neuZeichnen();
+    anker = '[data-vsalle]'; neuZ();
   });
 }

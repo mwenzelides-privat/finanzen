@@ -390,7 +390,16 @@ function ausstehend(f) {
     return f.zuletzt.slice(0, 7) !== k && tag <= D.bis ? tag : '';
   }
   const t = new Date(Date.parse(f.zuletzt) + f.rh.tage * 864e5).toISOString().slice(0, 10);
-  return t <= D.bis ? t : '';
+  // Regel wie vorschau_daten.py: liegt der Fälligkeitstag mehr als 45 Tage vor dem Datenstand, gilt die Zahlung als
+  // nicht mehr fällig (kein Beleg, dass sie noch kommt)
+  return t <= D.bis && t >= plusTage(D.bis, -AUSSTEHEND_TAGE) ? t : '';
+}
+const AUSSTEHEND_TAGE = 45;
+// Nicht monatlicher Vertrag, dessen Zahlung seit mehr als 45 Tagen überfällig ist (Datum der Fälligkeit, sonst '')
+function ueberfaelligAlt(f) {
+  if (!f.aktiv || f.rh.proJahr === 12) return '';
+  const t = new Date(Date.parse(f.zuletzt) + f.rh.tage * 864e5).toISOString().slice(0, 10);
+  return t < plusTage(D.bis, -AUSSTEHEND_TAGE) ? t : '';
 }
 
 // Zahlungen eines laufenden Vertrags zwischen von und bis (ISO, beide inklusive); eine ausstehende Zahlung zählt im
@@ -645,15 +654,31 @@ const vorzeichenKurz = (v) => `${v >= 0 ? '+' : '−'}${kurzWert(Math.abs(v))}`;
 // Erstattungen, Zinsen …) − laufende Fixkosten − Lebenshaltung (wie im Reiter Fixkosten gewählt, Standard Ø 12 Monate).
 function monatsRechnung() {
   if (D.mr) return D.mr;
-  const ek = einkommen(), gehalt = ek.aktuell.wert || ek.schnitt.wert;
+  const ek = einkommen();
+  // Gehalt = Lohn-/Gehalt-Buchungen des letzten Gehaltsmonats. Liegt das über 1,25 × Median der letzten 12 Gehaltsmonate
+  // (Sonderzahlung, Nachzahlung), gilt stattdessen das letzte reguläre Gehalt (sonst der Median) – wie vorschau_daten.py
+  const gm = [...ek.lohn.keys()].sort().slice(-12), med = gm.length ? median(gm.map((k) => ek.lohn.get(k))) : 0;
+  const roh = ek.lohn.get(ek.letzter) || 0;
+  let gehalt = roh || ek.schnitt.wert, gehaltWie = '';
+  if (med && roh > med * 1.25) {
+    const normal = [...gm].reverse().find((k) => ek.lohn.get(k) <= med * 1.25);
+    gehalt = normal ? ek.lohn.get(normal) : med;
+    gehaltWie = normal || 'median';
+  }
   const ref = abgeschlosseneMonate().slice(-12);
   const sonst = ref.length ? Math.max(0, median(ref.map((k) => (ek.ein.get(k) || 0) - (ek.lohn.get(k) || 0)))) : 0;
   const vertraege = fixkostenErkennen().filter((f) => f.aktiv && !f.gemeinsam);
   const fix = vertraege.reduce((t, f) => t + f.proMonat, 0);
   const leben = lebenGewaehlt();
   const lebenProg = leben;   // laufender Monat und Prognose rechnen mit derselben Lebenshaltung wie der normale Monat
-  return (D.mr = { gehalt, gehaltMonat: ek.letzter, sonst, fix, leben, lebenProg, ein: gehalt + sonst, aus: fix + leben, erg: gehalt + sonst - fix - leben, vertraege, ref, gt: gehaltstag(), lh: lebenshaltung() });
+  return (D.mr = { gehalt, gehaltMonat: ek.letzter, gehaltWie, sonst, fix, leben, lebenProg, ein: gehalt + sonst, aus: fix + leben, erg: gehalt + sonst - fix - leben, vertraege, ref, gt: gehaltstag(), lh: lebenshaltung() });
 }
+// Woher das Gehalt des normalen Monats stammt (Monat; bei bereinigter Sonderzahlung mit Hinweis „berechnet“)
+const gehaltWoher = (R, kurz = false) => {
+  const m = (k) => (kurz ? monKurz(k) : monLang(k));
+  if (!R.gehaltWie) return m(R.gehaltMonat);
+  return `${m(R.gehaltMonat)}, berechnet: ohne Sonderzahlung, ${R.gehaltWie === 'median' ? 'Median der letzten 12 Gehaltsmonate' : `wie ${m(R.gehaltWie)}`}`;
+};
 const lebenName = () => (lebenWahl === 'eigen' && lebenEigen ? 'dein eigener Wert' : lebenWahl === 'typisch' ? 'typischer Monat' : lebenWahl === 'vormonat' && lebenshaltung().monate.length ? `Vormonat ${MONAT[+lebenshaltung().monate.at(-1).slice(5) - 1]}` : 'Ø 12 Monate');
 
 // Prognose ehrlicher (planung.js): Plan-Gehalt eines Monats aus den Abrechnungen (null = aktuelles Gehalt).
@@ -695,26 +720,71 @@ function jahrSvg(akt, vj) {
 // Die letzten 12 abgeschlossenen Monate, der laufende Monat (bisher + erwartet) und 3 Monate Prognose,
 // je mit Ergebnis und Kontostand am Monatsende. Prognose: normaler Monat, feste Abbuchungen im jeweiligen Monat.
 // alt = true: dieselbe Rechnung mit Ø 12 Monate (zum Vergleich, wenn der Vormonat die Grundlage ist)
+// Kontostand der Prognose: stand = alle eigenen Konten (wie die Grafiken mit den Ist-Monatsenden), frei = ohne
+// Mietkaution (wie „Reicht dein Geld?“). Für Monate, die die Vorschau abdeckt, gelten deren Ende-Werte (vorschauStand).
 function verlauf5(alt = false) {
   const key = alt ? 'v5s' : 'v5';
-  if (D[key]) return D[key];
+  const V = D[key] || (D[key] = verlauf5Rechnen(alt));
+  return vorschauStand(V, alt ? (D.v5 || (D.v5 = verlauf5Rechnen(false))) : V);
+}
+// Frei verfügbar an einem Tag: eigene Konten ohne Mietkaution, Gemeinschafts- und Kinderkonten (wie ruecklagen()
+// und der Start der Vorschau)
+const freiSumme = (tag) => (tag < D.von ? null : summeKonten(kontostaende(D, tag).filter((x) => !fremd(x.k) && !istGemeinsam(x.i) && !/kaution/i.test(x.k.name))));
+// Ende-Werte der Vorschau („Reicht dein Geld?“, geldbedarf) je Monat in Cent – nur, wenn die Vorschau zum selben
+// Datenstand gerechnet ist. Kurz zwischengespeichert (eine Anzeige), weil sich die Auswahl in der Vorschau ändern kann.
+function vorschauEnden() {
+  if (D.vsEnden !== undefined) return D.vsEnden;
+  const d = D, v = D.j.vorschau;
+  let m = null;
+  if (v?.start?.datum === D.bis && v.monate?.length) {
+    const gb = sicher(() => geldbedarf({ ...KH(), bxKopf, bxKarte, bxLink, DIENST, neuZeichnen: () => { if (S.tab === 'start') sicher(cockpitSeite); } })) || null;
+    if (gb?.zeilen?.length) m = new Map(gb.zeilen.map((z) => [z.k, Math.round(z.ende) * 100]));
+  }
+  d.vsEnden = m;
+  setTimeout(() => { d.vsEnden = undefined; }, 0);
+  return m;
+}
+// Prognose-Monate auf die Ende-Werte der Vorschau setzen; Monate danach rechnen von dort wie bisher weiter.
+// alt (Ø 12 Monate): Vorschau-Werte plus der Unterschied, den die andere Lebenshaltung in der eigenen Rechnung macht.
+function vorschauStand(V, V0) {
+  const enden = V.heuteFrei == null ? null : vorschauEnden();
+  if (!enden) return V;
+  let frei = V0.heuteFrei, treffer = 0;
+  const monate = V.monate.map((m, i) => {
+    if (m.art === 'ist') return m;
+    const m0 = V0.monate[i];
+    frei = enden.has(m.k) ? (treffer++, enden.get(m.k)) : frei + m0.dFrei;
+    const f = frei + (m.frei - m0.frei);
+    return { ...m, frei: f, stand: f + V.gebunden, vorschau: enden.has(m.k) };
+  });
+  if (!treffer) return V;
+  return { ...V, monate, lauf: monate.find((m) => m.art === 'laeuft') || null, vorschau: true };
+}
+function verlauf5Rechnen(alt) {
   const R0 = monatsRechnung(), R = alt ? { ...R0, lebenProg: R0.lh.schnitt } : R0;
   const heute = D.bis, jetzt = heute.slice(0, 7), laeuft = heute !== monatsletzter(heute);
   const ist = istJeMonat(), w = (k) => ist.get(k) || IJM_LEER();
   const spar = R.ref.length ? Math.min(0, median(R.ref.map((k) => w(k).spar))) : 0;   // was üblicherweise aufs Depot geht
   // Kontostand je Monatsende nur, wenn die Summe vollständig ist (sonst null: Lücke in der Grafik, Hinweis in fehlt)
-  const monate = R.ref.map((k) => { const x = w(k), s = kontenSumme(monatsletzter(`${k}-01`)); return { k, art: 'ist', ein: x.ein, aus: x.aus, erg: x.ein - x.aus, fest: x.aus - x.var, lohn: x.lohn, stand: vollSumme(s), summe: s }; });
-  const heuteSumme = kontenSumme(heute), heuteStand = vollSumme(heuteSumme);
-  // Prognose ab dem heutigen Stand – ist er unvollständig, gibt es auch keine Prognose des Kontostands
-  let stand = heuteStand, lauf = null;
-  const weiter = (d) => (stand == null ? null : (stand += d));
+  const monate = R.ref.map((k) => { const x = w(k), t = monatsletzter(`${k}-01`), s = kontenSumme(t); return { k, art: 'ist', ein: x.ein, aus: x.aus, erg: x.ein - x.aus, fest: x.aus - x.var, lohn: x.lohn, stand: vollSumme(s), frei: vollSumme(freiSumme(t)), summe: s }; });
+  const heuteSumme = kontenSumme(heute), heuteStand = vollSumme(heuteSumme), heuteFrei = heuteStand == null ? null : vollSumme(freiSumme(heute));
+  // gebunden: Mietkaution (und was sonst nicht frei verfügbar ist) – bleibt in der Prognose gleich
+  const gebunden = heuteFrei == null ? 0 : heuteStand - heuteFrei;
+  // Prognose ab dem heutigen frei verfügbaren Stand – ist er unvollständig, gibt es auch keine Prognose des Kontostands
+  let frei = heuteFrei, lauf = null;
+  const weiter = (d) => (frei == null ? null : (frei += d));
+  const mitStand = (m, d) => ({ ...m, dFrei: d, frei, stand: frei == null ? null : frei + gebunden });
   if (laeuft) {
     const x = w(jetzt), ende = monatsletzter(`${jetzt}-01`);
     const offenFest = R.vertraege.reduce((t, f) => t + faellig(f, plusTage(heute, 1), ende), 0) + kreditNeu(plusTage(heute, 1), ende);
-    const gehaltKommt = x.lohn > 0 ? 0 : (planG(jetzt) ?? R.gehalt), sonstKommt = Math.max(0, R.sonst - (x.ein - x.lohn)), varKommt = Math.max(0, Math.round(R.lebenProg) - x.var);
+    // Gehalt ist da, sobald die Lohn-/Gehalt-Buchungen des Monats mindestens 50 % des geplanten Gehalts erreichen;
+    // sonst kommt der Rest (Plan minus Gebuchtes) noch – dieselbe Regel wie vorschau_daten.py
+    const gPlan = planG(jetzt) ?? R.gehalt;
+    const gehaltKommt = x.lohn >= gPlan * 0.5 ? 0 : Math.max(0, gPlan - x.lohn), sonstKommt = Math.max(0, R.sonst - (x.ein - x.lohn)), varKommt = Math.max(0, Math.round(R.lebenProg) - x.var);
     const ein = x.ein + gehaltKommt + sonstKommt, aus = x.aus + offenFest + varKommt;
-    weiter(gehaltKommt + sonstKommt - offenFest - varKommt + Math.min(0, spar - x.spar));
-    lauf = { k: jetzt, art: 'laeuft', ein, aus, erg: ein - aus, x, offenFest, gehaltKommt, varKommt, tag: +heute.slice(8), tage: +ende.slice(8), stand };
+    const d = gehaltKommt + sonstKommt - offenFest - varKommt + Math.min(0, spar - x.spar);
+    weiter(d);
+    lauf = mitStand({ k: jetzt, art: 'laeuft', ein, aus, erg: ein - aus, x, offenFest, gehaltKommt, varKommt, tag: +heute.slice(8), tage: +ende.slice(8) }, d);
     monate.push(lauf);
   }
   for (let i = 1; i <= 3; i++) {
@@ -723,7 +793,7 @@ function verlauf5(alt = false) {
     const pg = planG(k);
     const ein = (pg ?? R.gehalt) + R.sonst, aus = Math.round(R.lebenProg) + fest;
     weiter(ein - aus + spar);
-    monate.push({ k, art: 'prognose', ein, aus, erg: ein - aus, fest, stand, plan: pg != null });
+    monate.push(mitStand({ k, art: 'prognose', ein, aus, erg: ein - aus, fest, plan: pg != null }, ein - aus + spar));
   }
   const n = R.ref.length || 1, summe = (f) => monate.filter((m) => m.art === 'ist').reduce((t, m) => t + f(m), 0);
   const schnitt = { ein: summe((m) => m.ein) / n, aus: summe((m) => m.aus) / n, erg: summe((m) => m.erg) / n, lohn: summe((m) => m.lohn) / n };
@@ -733,20 +803,24 @@ function verlauf5(alt = false) {
   const lohnMed = lohnRows.length ? median(lohnRows.map((r) => r.c)) : 0;
   const sonder = D.rows.filter((r) => eigen(r) && (r.ukat === 'Lohn / Gehalt' ? lohnMed && r.c > lohnMed * 1.3 : r.c >= 100000))
     .map((r) => ({ r, extra: r.ukat === 'Lohn / Gehalt' ? r.c - lohnMed : r.c })).sort((a, b) => b.extra - a.extra);
-  return (D[key] = { monate, R, lauf, heuteStand, heuteSumme, spar, schnitt, sonder, jetzt });
+  return { monate, R, lauf, heuteStand, heuteSumme, heuteFrei, gebunden, spar, schnitt, sonder, jetzt };
 }
 const sonderText = (l) => l.map(({ r }) => zl(`${r.ukat === 'Lohn / Gehalt' ? 'dem hohen Gehalt' : esc(schoen(r.ukat || 'Einnahme'))} im ${MONAT[+r.d.slice(5, 7) - 1]} ${r.d.slice(0, 4)} (${eur0(r.c)})`, zuBuchungen({ konto: '', art: 'ein', kat: r.kat, ukat: r.ukat, ...monatZiel(r.d.slice(0, 7)) }))).join(' und ');
 
 // Ein Balken für den normalen Monat: Linie = Einkommen (Gehalt + sonstige Einnahmen), Flächen = Fixkosten (auf Wunsch
 // je Art) und Lebenshaltung, grün = was bleibt, rot schraffiert = was fehlt
+// Gezeigte Euro aus den gerundeten Teilen (wie Cockpit-Kachel und Fixkosten-Satz): Einkommen = Gehalt + Sonstiges,
+// Ausgaben = Fixkosten + Lebenshaltung, bleibt/fehlt = Einkommen − Ausgaben; die Breiten bleiben genau.
+// teile: Fixkosten je Art, x.e = gezeigter Euro-Betrag (so gerundet, dass die Teile zusammen die Fixkosten ergeben)
 function geldBalken(R, teile = null) {
   const E = R.ein, aus = R.fix + R.leben, max = Math.max(E, aus, 1), w = (c) => (Math.max(0, c) / max) * 100, rest = E - aus;
-  const t = (cls_, x) => (x.c > 0 ? `<i class="gb-t ${cls_}${w(x.c) >= 7.5 ? ' lbl' : ''}${w(x.c) >= 20 ? ' gross' : ''}" style="width:${w(x.c)}%"${x.ziel ? geh(x.ziel) : ''}${x.springe ? ` data-springe="${x.springe}"` : ''}${x.ziel || x.springe ? ' role="button" tabindex="0"' : ''} title="${esc(x.tip || `${x.n}: ${eur0(x.c)}`)}">${w(x.c) >= 7.5 ? `<span>${x.n}</span><b>${eur0(x.c)}</b>` : ''}</i>` : '');
+  const einZ = r0(R.gehalt) + r0(R.sonst), ausZ = r0(R.fix) + r0(R.leben), restZ = einZ - ausZ;
+  const t = (cls_, x) => (x.c > 0 ? `<i class="gb-t ${cls_}${w(x.c) >= 7.5 ? ' lbl' : ''}${w(x.c) >= 20 ? ' gross' : ''}" style="width:${w(x.c)}%"${x.ziel ? geh(x.ziel) : ''}${x.springe ? ` data-springe="${x.springe}"` : ''}${x.ziel || x.springe ? ' role="button" tabindex="0"' : ''} title="${esc(x.tip || `${x.n}: ${eur0(x.e ?? x.c)}`)}">${w(x.c) >= 7.5 ? `<span>${x.n}</span><b>${eur0(x.e ?? x.c)}</b>` : ''}</i>` : '');
   const fest = (teile || [{ n: 'Fixkosten', c: R.fix, ziel: { tab: 'fix', fixtab: 'vertraege' } }]).map((x) => t('gb-fest', x)).join('');
   return `<div class="gb">
-    <div class="gb-balken">${fest}${t('gb-leben', { n: 'Lebenshaltung', c: R.leben, ziel: { tab: 'fix', fixtab: 'vertraege', _springe: '#fix-leben' }, tip: `Lebenshaltung ${eur0(R.leben)} im Monat – anklicken: wofür` })}${rest > 0 ? t('gb-rest', { n: 'bleibt', c: rest }) : ''}
-      ${rest < 0 ? `<b class="gb-minus" style="left:${w(E)}%;width:${w(-rest)}%" title="fehlt ${eur0(-rest)} im Monat"></b>` : ''}<b class="gb-linie" style="left:${w(E)}%"></b></div>
-    <div class="gb-skala"><span><i class="gb-sym"></i>Einkommen ${eur0(E)}</span><span>Ausgaben ${eur0(aus)}</span>${rest < 0 ? `<span class="gb-f"><i class="gb-sym-f"></i>fehlt ${eur0(-rest)}</span>` : `<span class="gb-b">bleibt ${eur0(rest)}</span>`}</div>
+    <div class="gb-balken">${fest}${t('gb-leben', { n: 'Lebenshaltung', c: R.leben, ziel: { tab: 'fix', fixtab: 'vertraege', _springe: '#fix-leben' }, tip: `Lebenshaltung ${eur0(R.leben)} im Monat – anklicken: wofür` })}${rest > 0 && restZ > 0 ? t('gb-rest', { n: 'bleibt', c: rest, e: restZ }) : ''}
+      ${rest < 0 ? `<b class="gb-minus" style="left:${w(E)}%;width:${w(-rest)}%" title="fehlt ${eur0(Math.max(0, -restZ))} im Monat"></b>` : ''}<b class="gb-linie" style="left:${w(E)}%"></b></div>
+    <div class="gb-skala"><span><i class="gb-sym"></i>Einkommen ${eur0(einZ)}</span><span>Ausgaben ${eur0(ausZ)}</span>${restZ < 0 ? `<span class="gb-f"><i class="gb-sym-f"></i>fehlt ${eur0(-restZ)}</span>` : `<span class="gb-b">bleibt ${eur0(restZ)}</span>`}</div>
   </div>`;
 }
 
@@ -754,13 +828,14 @@ function geldBalken(R, teile = null) {
 // ausstehender Zahlung steht zusätzlich an seinem regulären Termin, wenn der in den Zeitraum fällt (wie in faellig())
 // Raten neu abgeschlossener eigener Kredite (noch keine Buchung, also noch kein erkannter Vertrag) – Prognose und 30 Tage
 const kreditNeu = (von, bis) => (mitKrediten() ? (sicher(() => neueRaten(KH(), von, bis)) || []).reduce((t, x) => t + x.c, 0) : 0);
-function naechsteTermine(vs, tage = 30) {
+// ks: nur Raten neuer Kredite dieser Konten (Kontoauswahl, wie die übergebenen Verträge); ohne ks alle
+function naechsteTermine(vs, tage = 30, { ks = null } = {}) {
   const bis = plusTage(D.bis, tage), l = [];
   for (const f of vs) {
     for (const am of [ausstehend(f), naechsteRegulaer(f)]) if (am && am <= bis) l.push({ f, am });
   }
   // als Vertrag darstellbar: Name, Rate, monatlich (vertragName erkennt f.kredit)
-  if (mitKrediten()) for (const x of sicher(() => neueRaten(KH(), plusTage(D.bis, 1), bis)) || []) {
+  if (mitKrediten()) for (const x of (sicher(() => neueRaten(KH(), plusTage(D.bis, 1), bis)) || []).filter((r) => !ks || ks.has(D.kontoIdx.get(r.x.konto)))) {
     l.push({ am: x.am, f: { kredit: true, name: `Kreditrate ${x.x.zweck || x.x.geber}`, sig: 'kredit', seit: x.x.datei, betrag: x.c, rh: { name: 'monatlich, neuer Kredit', proJahr: 12 } } });
   }
   return l.sort((a, b) => (a.am < b.am ? -1 : a.am > b.am ? 1 : b.f.betrag - a.f.betrag));
@@ -776,25 +851,28 @@ function naechstesGehalt() {
   if (V.lauf?.gehaltKommt > 0 && am <= D.bis) return { am: plusTage(D.bis, 1), c: V.lauf.gehaltKommt, ueberfaellig: true };
   return am > D.bis && am <= plusTage(D.bis, 30) ? { am, c: planG(k) ?? R.gehalt } : null;
 }
-// Abbuchungen je Tag: Tag mit Summe als Kopf, die Verträge eingerückt darunter; n = höchstens so viele Verträge
+// Abbuchungen je Tag: Tag mit Summe als Kopf, die Verträge eingerückt darunter; n = höchstens so viele Verträge.
+// Euro über die ganze Liste nach dem größten Rest gerundet: Zeilen ergeben den Tageskopf, alle zusammen die Gesamtsumme
+// (terminSumme, wie sie über der Karte steht)
+const terminSumme = (l) => rundeTeile(l.map((x) => x.f.betrag)).reduce((t, c) => t + c, 0);
 function termineHtml(l, n = 99) {
   if (!l.length) return '<div class="leer klein">Keine festen Abbuchungen in den nächsten 30 Tagen.</div>';
-  const g = naechstesGehalt(), tage = new Map();
-  for (const x of l) (tage.get(x.am) || tage.set(x.am, []).get(x.am)).push(x.f);
+  const g = naechstesGehalt(), tage = new Map(), eL = rundeTeile(l.map((x) => x.f.betrag));
+  l.forEach((x, i) => (tage.get(x.am) || tage.set(x.am, []).get(x.am)).push({ f: x.f, e: eL[i] }));
   if (g && !tage.has(g.am)) tage.set(g.am, []);
   let frei = n, h = '';
   const weg = [];
   for (const [am, fs] of [...tage].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
     const lohn = g && g.am === am;
     if (frei <= 0 && !lohn) { weg.push(...fs); continue; }
-    const zeig = fs.slice(0, Math.max(0, frei)), summe = fs.reduce((t, f) => t + f.betrag, 0);
+    const zeig = fs.slice(0, Math.max(0, frei)), summe = fs.reduce((t, x) => t + x.e, 0);
     weg.push(...fs.slice(zeig.length)); frei -= zeig.length;
     const offen = am <= D.bis;   // ausstehend: fällig, aber bis zum Datenstand nicht gebucht
     h += `<div class="nt-tag"><div class="nt-k"${offen ? ' title="Fällig, aber bis zum Datenstand nicht gebucht – zählt als „kommt noch“"' : ''}><span class="nt-d">${offen ? 'seit ' : ''}${tagKurz(am)}</span><span class="nt-a">${fs.length ? `${fs.length} ${fs.length === 1 ? 'Abbuchung' : 'Abbuchungen'}${offen ? ' · noch nicht gebucht' : ''}` : ''}</span><b class="${fs.length ? 'neg' : ''}">${fs.length ? `−${eur0(summe)}` : ''}</b></div>
       ${lohn ? `<button class="nt-z nt-lohn"${geh(zuGehalt())} title="Anklicken: alle Gehälter"><span class="nt-n">Gehalt erwartet</span><b>+${eur0(g.c)}</b></button>` : ''}
-      ${zeig.map((f) => `<button class="nt-z"${f.kredit ? geh({ tab: 'vermoegen', _springe: '#kr-karte' }) : ` data-fix="${esc(vertragsKey(f))}"`} title="${esc(vertragName(f))} · ${esc(f.rh.name)} – alle Zahlungen anzeigen"><span class="nt-n">${esc(vertragName(f))}${f.rh.proJahr < 12 ? ` <small>${esc(f.rh.name)}</small>` : ''}</span><b>${eur0(f.betrag)}</b></button>`).join('')}</div>`;
+      ${zeig.map(({ f, e }) => `<button class="nt-z"${f.kredit ? geh({ tab: 'vermoegen', _springe: '#kr-karte' }) : ` data-fix="${esc(vertragsKey(f))}"`} title="${esc(vertragName(f))} · ${esc(f.rh.name)} · ${eur(f.betrag)} – alle Zahlungen anzeigen"><span class="nt-n">${esc(vertragName(f))}${f.rh.proJahr < 12 ? ` <small>${esc(f.rh.name)}</small>` : ''}</span><b>${eur0(e)}</b></button>`).join('')}</div>`;
   }
-  if (weg.length) h += `<div class="nt-mehr">+ ${weg.length} weitere Abbuchungen · ${eur0(weg.reduce((t, f) => t + f.betrag, 0))}</div>`;
+  if (weg.length) h += `<div class="nt-mehr">+ ${weg.length} weitere Abbuchungen · ${eur0(weg.reduce((t, x) => t + x.e, 0))}</div>`;
   return `<div class="nt">${h}</div>`;
 }
 
@@ -802,8 +880,10 @@ function termineHtml(l, n = 99) {
 // Abschnitte als Liste. Euro je Abschnitt nach dem größten Rest gerundet: die Zeilen ergeben genau die Abschnittssumme,
 // die Abschnitte genau „zusammen“. Was nicht in die Karte passt, fasst t30Passen als „+ n weitere“ zusammen.
 function t30Teile(l, g) {
-  const vor = l.filter((x) => !g || x.am < g.am), nach = g ? l.filter((x) => x.am >= g.am) : [];
-  const mit = (xs) => { const e = rundeTeile(xs.map((x) => x.f.betrag)); return { xs: xs.map((x, i) => ({ ...x, e: e[i] })), s: e.reduce((t, c) => t + c, 0) }; };
+  // über die ganze Liste gerundet: beide Spalten zusammen = gerundete Gesamtsumme (wie Fixkosten und Geldfluss)
+  const e = rundeTeile(l.map((x) => x.f.betrag)), l2 = l.map((x, i) => ({ ...x, e: e[i] }));
+  const vor = l2.filter((x) => !g || x.am < g.am), nach = g ? l2.filter((x) => x.am >= g.am) : [];
+  const mit = (xs) => ({ xs, s: xs.reduce((t, x) => t + x.e, 0) });
   return { vor: mit(vor), nach: mit(nach) };
 }
 function t30Html(l, g) {
@@ -1021,14 +1101,14 @@ const cvKarte = ({ titel, wert, cls_ = '', unter = '', vis = '', ziel, marke = '
 
 function cockpitSeite() {
   const box = $('#s5'), V = verlauf5(), R = V.R, ms = V.monate, lauf = V.lauf, letzte = ms[ms.length - 1];
-  const hs = V.heuteSumme, heute = hs?.c ?? 0, s = V.schnitt, prog = letzte.stand;
+  const hs = V.heuteSumme, heute = hs?.c ?? 0, s = V.schnitt, prog = letzte.frei;   // frei verfügbar, wie „Reicht dein Geld?“
   const anfang = kontenSumme(plusTage(`${V.jetzt}-01`, -1)), seitAnfang = diffSumme(anfang, hs);
   const monatJ = MONAT[+V.jetzt.slice(5) - 1], monatE = `${MONAT[+letzte.k.slice(5) - 1]}${letzte.k.slice(0, 4) !== V.jetzt.slice(0, 4) ? ` ${letzte.k.slice(0, 4)}` : ''}`;
   const zuKonten = { tab: 'konten', stichtag: '', konto: '' };
   const ist = ms.filter((m) => m.art === 'ist');
 
   // Prognose mit ausdrücklichem Vergleich: Monatsende gegen Monatsende (letztes abgeschlossenes → Prognose), nicht gegen heute
-  const basis = ist.length ? ist[ist.length - 1] : null, bStand = basis?.stand ?? null;
+  const basis = ist.length ? ist[ist.length - 1] : null, bStand = basis?.frei ?? null;
   const diff = prog != null && bStand != null ? prog - bStand : null;
   const stabil = diff != null && Math.abs(diff) < Math.max(20000, Math.abs(bStand) * 0.03);
   const bMonat = basis ? MONAT[+basis.k.slice(5) - 1] : '';
@@ -1036,8 +1116,9 @@ function cockpitSeite() {
   const vergleich = diff == null ? '' : stabil ? `etwa so viel wie Ende ${bMonat}` : `${eur0(Math.abs(dZ))} ${dZ > 0 ? 'mehr' : 'weniger'} als Ende ${bMonat} (${eur0(bStand)})`;
   const seitText = anfang ? `${seitAnfang == null ? '–' : pmHtml(dGezeigt(anfang.c, hs.c))} seit 1. ${monatJ}` : '';
   // Vergleich: dieselbe Prognose mit Ø 12 Monate (nur wenn die Grundlage der Vormonat ist)
-  const progAlt = lebenWahl === 'vormonat' ? sicher(() => verlauf5(true).monate.at(-1).stand) : '';
-  const progGrund = `Plan-Gehalt, feste Abbuchungen je Monat, Lebenshaltung wie im normalen Monat: ${esc(lebenName())} (${eur0(R.leben)})`;
+  const progAlt = lebenWahl === 'vormonat' ? sicher(() => verlauf5(true).monate.at(-1).frei) : '';
+  const progGrund = letzte.vorschau ? 'Kontostand wie in „Reicht dein Geld?“ (Vorschau aus Planung.xlsx), frei verfügbar ohne Mietkaution'
+    : `Plan-Gehalt, feste Abbuchungen je Monat, Lebenshaltung wie im normalen Monat: ${esc(lebenName())} (${eur0(R.leben)}) · ohne Mietkaution`;
 
   const hero = `<section class="card cp-hero">
     <div class="cp-hero-k">
@@ -1046,7 +1127,7 @@ function cockpitSeite() {
         <p class="cp-hero-u">${seitText}${lauf?.gehaltKommt ? ' · das Gehalt kommt noch' : ''}${hs && !hs.voll ? ` · ${esc(fehltText(hs))}` : ''}</p></div>
       <div class="cp-hero-p"><span class="marke">Prognose</span>
         ${prog == null ? '<p>Eine Prognose geht nicht: der Stand heute ist unvollständig.</p>'
-          : `<p>Ende ${monatE} auf deinen Konten</p><b class="${prog < 0 ? 'neg' : ''}">≈ ${eur0(prog)}</b>${vergleich ? `<small>${vergleich}</small>` : ''}${progAlt !== '' && progAlt != null ? `<small class="cp-alt">mit Ø 12 Monate gerechnet: ≈ ${eur0(progAlt)}</small>` : ''}`}</div>
+          : `<p>Ende ${monatE} frei verfügbar (ohne Mietkaution)</p><b class="${prog < 0 ? 'neg' : ''}">≈ ${eur0(prog)}</b>${vergleich ? `<small>${vergleich}</small>` : ''}${letzte.vorschau ? `<small>wie ${zl('„Reicht dein Geld?“', { tab: 'vorschau', _springe: '#vs-antwort' })}</small>` : ''}${progAlt !== '' && progAlt != null ? `<small class="cp-alt">mit Ø 12 Monate gerechnet: ≈ ${eur0(progAlt)}</small>` : ''}`}</div>
     </div>
     <div class="cp-hero-g"><div class="cp-kt"><h2>Einnahmen und Ausgaben je Monat</h2></div>
       <p class="cp-leg"><i class="cp-leg-e"></i>Einnahmen <i class="cp-leg-a"></i>Ausgaben <span>· Zahl darunter: Ergebnis · schraffiert: erwartet</span></p>
@@ -1091,7 +1172,7 @@ function cockpitSeite() {
       const bis = MONAT[J.n - 1], a = r0(J.akt.at(-1)), v = J.vj ? r0(J.vj.at(-1)) : null, zr = `${J.j}-01_${mkey(J.j, J.n)}`;
       return cvKarte({ titel: `${J.j} bisher`, wert: plusMinus(a), cls_: a < 0 ? 'neg' : 'pos', ziel: zuBuchungen({ konto: '', jahr: '', monat: '', zr }),
         unter: `Einnahmen minus Ausgaben, Januar bis ${bis} zusammengezählt`,
-        tip: `Ergebnis ${J.j} von Januar bis ${bis}: ${plusMinus(a)}${v != null ? ` · ${J.j - 1} im selben Zeitraum: ${plusMinus(v)}` : ''} · ohne Kinder- und gemeinsame Konten`,
+        tip: `Ergebnis ${J.j} von Januar bis ${bis}: ${plusMinus(a)}${v != null ? ` · ${J.j - 1} im selben Zeitraum: ${plusMinus(v)}` : ''} · Einnahmen minus Ausgaben, ohne Sparen und Umbuchungen (in den Buchungen: „Ergebnis“) · ohne Kinder- und gemeinsame Konten`,
         vis: `<span class="jb">${jahrSvg(J.akt, J.vj)}<span class="cv-rleg jb-leg"><span><i class="jb-i-akt"></i>${J.j}<b class="${a < 0 ? 'neg' : ''}">${plusMinus(a)}</b></span>${v != null ? `<span><i class="jb-i-vj"></i>${J.j - 1}<b class="${v < 0 ? 'neg' : ''}">${plusMinus(v)}</b></span>
           <span class="jb-d">${a - v >= 0 ? 'besser' : 'schlechter'} als ${J.j - 1}<b>${eur0(Math.abs(a - v))}</b></span>` : ''}</span><span class="jb-ax"><span>Jan</span><span>${MON[J.n - 1]}</span></span></span>` });
     })(),
@@ -1115,7 +1196,8 @@ function cockpitSeite() {
   const T3 = t30Teile(T30, gK);
   const ber = [];
   // Reicht das Geld? (Vorschau): tiefster Kontostand am Monatsende bis zum Ende der Vorschau – ganz oben, Klick führt zur Antwort
-  const gb = sicher(() => geldbedarf({ ...(H ??= modulHelfer()), bxKopf, bxKarte, bxLink, DIENST })) || null;
+  // neuZeichnen: sobald die Einrichtungs-Auswahl (IndexedDB) geladen ist, das Cockpit einmal neu – nur wenn es noch zu sehen ist
+  const gb = sicher(() => geldbedarf({ ...(H ??= modulHelfer()), bxKopf, bxKarte, bxLink, DIENST, neuZeichnen: () => { if (S.tab === 'start') sicher(cockpitSeite); } })) || null;
   if (gb) {
     const e = gb.endeTief.ende;
     ber.push({ t: `Kontostand bis ${monKurz(gb.bis)}${gb.eigeneAuswahl ? ' · deine Auswahl' : ''}`, sub: `${e < 0 ? 'reicht nicht – am tiefsten' : 'reicht – am knappsten'} Ende ${monLang(gb.endeTief.k)} nach dem Gehalt${gb.tief.tief < 0 ? ` · vor dem Gehalt bis −${eur0(-gb.tief.tief * 100)}` : ''}`,
@@ -1280,6 +1362,7 @@ function einlesenLeiste(mitPruefen = true) {
 const einlesenLeisteBinden = (box) => box.querySelectorAll('[data-einlesen]').forEach((b) => b.onclick = () => einlesen());
 // Vorschau 12 Monate (js/vorschau.js): Zahlen aus D.j.vorschau, gerechnet am PC (vorschau_daten.py)
 function vorschauAnsicht() {
+  if (S.tab !== 'vorschau') return;   // späte Rückrufe (Laden, Einlese-Dienst) dürfen keine andere Seite in #s5 überschreiben
   const box = $('#s5');
   box.innerHTML = vorschauSeite({ ...(H ??= modulHelfer()), bxKopf, bxKarte, bxLink, DIENST });
   vorschauBinden(box, vorschauAnsicht);
@@ -1364,7 +1447,7 @@ function geldflussSeite() {
   ].join('');
 
   const wf = wasserfall([
-    { n: 'Gehalt', c: R.gehalt, w: eur0(R.gehalt), cls_: 'wf-ein', ziel: zuGehalt(), tip: `Gehaltseingang aufs Konto (${monLang(R.gehaltMonat)})` },
+    { n: 'Gehalt', c: R.gehalt, w: eur0(R.gehalt), cls_: 'wf-ein', ziel: zuGehalt(), tip: `Gehaltseingang aufs Konto (${gehaltWoher(R)})` },
     { n: 'Sonstiges', c: R.sonst, w: eur0(R.sonst), cls_: 'wf-ein2', ziel: { tab: 'uebersicht', kart: 'ein', wahl: '', jahr: '', monat: '', zr: '', konto: '' }, tip: 'Typische sonstige Einnahmen: Erstattungen, Zinsen …' },
     { n: 'Fixkosten', c: -R.fix, w: eur0(R.fix), cls_: 'wf-fest', ziel: zuFix, tip: `${R.vertraege.length} laufende Verträge` },
     { n: 'Lebens&shy;haltung', c: -R.leben, w: eur0(R.leben), cls_: 'wf-leben', ziel: zuLeben, tip: `Lebenshaltung (${lebenName()})` },
@@ -1386,9 +1469,11 @@ function geldflussSeite() {
   // Verträge kompakt: je Art die laufende Summe im Monat
   const arten = new Map();
   for (const f of R.vertraege) { const art = fixArt(f), x = arten.get(art) || arten.set(art, { art, c: 0, n: 0 }).get(art); x.c += f.proMonat; x.n++; }
-  const al = [...arten.values()].sort((x, y) => y.c - x.c), termine = naechsteTermine(R.vertraege), tSumme = termine.reduce((t, x) => t + x.f.betrag, 0);
-  const vertraege = balkenListe(al.slice(0, 6).map((x) => ({ n: FIX_KURZ[x.art] || esc(x.art), c: x.c, p: pzG(x.c), ziel: zuFix, farbe: 'var(--fest)', tip: `${x.art}: ${eur0(x.c)} im Monat · ${x.n} ${x.n === 1 ? 'Vertrag' : 'Verträge'}` }))
-    .concat(al.length > 6 ? [{ n: `${al.length - 6} weitere Arten`, c: al.slice(6).reduce((t, x) => t + x.c, 0), p: pzG(al.slice(6).reduce((t, x) => t + x.c, 0)), ziel: zuFix, farbe: 'var(--fest)' }] : []));
+  const al = [...arten.values()].sort((x, y) => y.c - x.c), termine = naechsteTermine(R.vertraege), tSumme = terminSumme(termine);
+  // gezeigte Euro je Zeile nach dem größten Rest: die Zeilen ergeben genau den Kopf (Fixkosten im Monat)
+  const alRest = al.slice(6).reduce((t, x) => t + x.c, 0), alE = rundeTeile([...al.slice(0, 6).map((x) => x.c), ...(al.length > 6 ? [alRest] : [])]);
+  const vertraege = balkenListe(al.slice(0, 6).map((x, i) => ({ n: FIX_KURZ[x.art] || esc(x.art), c: x.c, w: eur0(alE[i]), p: pzG(x.c), ziel: zuFix, farbe: 'var(--fest)', tip: `${x.art}: ${eur0(alE[i])} im Monat · ${x.n} ${x.n === 1 ? 'Vertrag' : 'Verträge'}` }))
+    .concat(al.length > 6 ? [{ n: `${al.length - 6} weitere Arten`, c: alRest, w: eur0(alE[6]), p: pzG(alRest), ziel: zuFix, farbe: 'var(--fest)' }] : []));
 
   // Ausgabenrahmen des laufenden Monats
   const rs = sicher(() => rahmenStand(H)) || null;
@@ -1851,7 +1936,7 @@ let startOhneSteuer = false;   // Startseite wurde gezeichnet, bevor die Steuer-
 function startSeite() {
   startOhneSteuer = true;
   const box = $('#s5'), V = verlauf5(), R = V.R, ms = V.monate, lauf = V.lauf, letzte = ms[ms.length - 1];
-  const gMon = monLang(R.gehaltMonat), hs = V.heuteSumme, heute = hs?.c ?? 0, s = V.schnitt;
+  const gMon = gehaltWoher(R), hs = V.heuteSumme, heute = hs?.c ?? 0, s = V.schnitt;
   const anfang = kontenSumme(plusTage(`${V.jetzt}-01`, -1)), seitAnfang = diffSumme(anfang, hs), prog = letzte.stand;
   const monatJ = MONAT[+V.jetzt.slice(5) - 1], monatE = MONAT[+letzte.k.slice(5) - 1];
   const ref = V.monate.filter((m) => m.art === 'ist').map((m) => m.k);
@@ -1909,7 +1994,7 @@ function startSeite() {
   startOhneSteuer = !st;
   if (st) monat += `<button class="s5-hinweis"${geh({ tab: 'steuer' })}><b>Steuer ${st.jahr}</b> ${st.offen ? `· ${st.offen} Entscheidungen offen` : '· alles entschieden'} <span class="link">→</span></button>`;
 
-  const termine = naechsteTermine(R.vertraege), tSumme = termine.reduce((t, x) => t + x.f.betrag, 0);
+  const termine = naechsteTermine(R.vertraege), tSumme = terminSumme(termine);
   box.innerHTML = kopf5(`Übersicht <span class="s5-stand">Daten bis ${dde(D.bis)}</span>`, satz)
     + `<div class="s5-zahlen">${zahlen}</div>
     <div class="s5-raster s5-start">
@@ -2350,12 +2435,12 @@ function tabKonten() {
   const zeitJb = ganzJahr ? { jahr: tag.slice(0, 4), monat: '' } : { zr: `${tag.slice(0, 4)}-01_${bisM}` }, jahrZiel = zuBuchungen(zeitJb);
   let satz = `Am ${dde(tag)} liegen auf ${ks ? 'den gewählten Konten' : 'deinen Konten'} ${zs(`<b class="${saldo < 0 ? 'neg' : ''}">${summeText(sT)}</b>`, '.kon5 .ko')}${sT.voll ? '' : ` – ${esc(fehltText(sT))}`}${kaution ? ` – davon ${zl(`${eur0(kaution)} Mietkaution`, zuBuchungen({ konto: kautionK.k.name }))}, frei verfügbar also <b class="${saldo - kaution < 0 ? 'neg' : ''}">${eur0(saldo - kaution)}${offenZ}</b>` : ''}.`;
   if (tag.slice(5) !== '12-31' && seitJb != null) satz += ` Seit Jahresbeginn ${zl(`<b class="${seitJb >= 0 ? 'pos' : 'neg'}">${plusMinus(seitJb)}</b>`, jahrZiel)}.`;
-  if (ende?.stand != null) satz += ` Läuft alles so weiter wie geplant, sind es Ende ${MONAT[+ende.k.slice(5) - 1]} etwa ${zl(`<b class="${ende.stand < 0 ? 'neg' : ''}">${eur0(ende.stand)}</b>`, { tab: 'start' })}.`;
+  if (ende?.frei != null) satz += ` Läuft alles so weiter wie geplant, sind Ende ${MONAT[+ende.k.slice(5) - 1]} etwa ${zl(`<b class="${ende.frei < 0 ? 'neg' : ''}">${eur0(ende.frei)}</b>`, { tab: 'start' })} frei verfügbar${ende.vorschau ? ' (wie in „Reicht dein Geld?“)' : ''}.`;
   const zahlen = [
     zahl5(heute ? 'Heute auf den Konten' : `Stand ${dde(tag)}`, summeText(sT), !sT.voll ? esc(fehltText(sT)) : `${ks ? `${gew.length} gewählte Konten` : 'ohne Depot, gemeinsame und Kinderkonten · je Konto ↓'}${summeHinweis(sT) ? ` · ${summeHinweis(sT)}` : ''}`, { cls: saldo < 0 ? 'neg' : '', springe: '.kon5 .ko' }),
     zahl5('Frei verfügbar', `${eur0(saldo - kaution)}${offenZ}`, kaution ? `ohne Mietkaution (${eur0(kaution)}) · Kautionskonto →` : 'keine Kaution gebunden', { cls: saldo - kaution < 0 ? 'neg' : '', ...(kaution ? { ziel: zuBuchungen({ konto: kautionK.k.name }) } : { springe: '.kon5 .ko' }) }),
     zahl5(`Seit 1. Januar ${tag.slice(0, 4)}`, seitJb == null ? '–' : plusMinus(seitJb), seitJb == null ? `nicht berechenbar: ${esc(fehltText(sJb && !sJb.voll ? sJb : sT))}` : `Stand 31.12.: ${summeText(sJb)} · ${ganzJahr ? `Buchungen ${tag.slice(0, 4)}` : `Buchungen Jan–${MON[+bisM.slice(5) - 1]} ${tag.slice(0, 4)}`} →`, { cls: seitJb == null ? '' : seitJb >= 0 ? 'pos' : 'neg', ziel: jahrZiel }),
-    ende ? zahl5(`Prognose Ende ${MONAT[+ende.k.slice(5) - 1]}`, ende.stand == null ? '–' : `≈ ${eur0(ende.stand)}`, ende.stand == null ? 'nicht berechenbar: der Stand heute ist unvollständig' : `wenn alles läuft wie ein normaler Monat (${pmHtml(V.R.erg)})`, { cls: ende.stand < 0 ? 'neg' : '', ziel: { tab: 'start' } })
+    ende ? zahl5(`Prognose Ende ${MONAT[+ende.k.slice(5) - 1]} frei verfügbar`, ende.frei == null ? '–' : `≈ ${eur0(ende.frei)}`, ende.frei == null ? 'nicht berechenbar: der Stand heute ist unvollständig' : ende.vorschau ? 'ohne Mietkaution · wie „Reicht dein Geld?“ (Vorschau)' : `ohne Mietkaution · wenn alles läuft wie ein normaler Monat (${pmHtml(V.R.erg)})`, { cls: ende.frei < 0 ? 'neg' : '', ziel: ende.vorschau ? { tab: 'vorschau', _springe: '#vs-antwort' } : { tab: 'start' } })
       : zahl5('Konten', NUM.format(gew.length), unbekannt.length ? `${unbekannt.length} ohne Daten für diesen Tag` : 'mit Daten zu diesem Tag', { springe: '.kon5 .ko' }),
   ].join('');
 
@@ -2590,7 +2675,7 @@ function tabBuchungen(conds) {
       <b class="bz-b ${cls(r.c)}">${eur(r.c)}</b></div>`;
     if (auf) h += buchDetail(r);
   });
-  let fuss = `<div class="bt-summe"><span>Summe ${rows.length === 1 ? 'der Buchung' : `aller ${NUM.format(rows.length)} Treffer`}<small>Einnahmen ${eur(ein)} · Ausgaben ${eur(-aus)}${nExtra ? ` · Sparen/Umbuchungen ${eur(extra)}` : ''}</small></span><b class="${cls(ein - aus + extra)}">${eur(ein - aus + extra)}</b></div>`;
+  let fuss = `<div class="bt-summe"><span>Summe ${rows.length === 1 ? 'der Buchung' : `aller ${NUM.format(rows.length)} Treffer`}<small>Einnahmen ${eur(ein)} · Ausgaben ${eur(-aus)} · Ergebnis (Einnahmen − Ausgaben) <b class="${cls(ein - aus)}">${eur(ein - aus)}</b>${nExtra ? ` · Sparen/Umbuchungen ${eur(extra)}` : ''}</small></span><b class="${cls(ein - aus + extra)}">${eur(ein - aus + extra)}</b></div>`;
   if (rows.length > limit) fuss += `<div class="mehr">${NUM.format(limit)} von ${NUM.format(rows.length)} angezeigt <button class="btn sm" id="mehr">Weitere ${NUM.format(Math.min(500, rows.length - limit))} anzeigen</button></div>`;
   buchPdf = { rows, seite, ein, aus, extra, nExtra, von, bis };   // für den PDF-Export: dieselben Treffer und Summen
   const ausw = sicher(() => bkAuswertung(rows, conds, seite, ein, aus)) || '';
@@ -3211,7 +3296,7 @@ function tabFixkosten() {
   const ueber = nachArt(aktiv), arten = nachArt(liste), ueberAlle = ks ? nachArt(R.vertraege) : ueber;
   // B = Einkommen (Gehalt + typische sonstige Einnahmen) für das, was übrig bleibt; Quote und Puffer wie überall vom aktuellen Gehalt G
   fixKontext = { B: E, G, bz: { vom: 'vom Gehalt', name: 'Einkommen' }, pm: R.fix, L, lauf: R.vertraege, ruecklage: ruecklagen() };
-  const termine = naechsteTermine(aktiv), tSumme = termine.reduce((t, x) => t + x.f.betrag, 0);
+  const termine = naechsteTermine(aktiv, 30, { ks }), tSumme = terminSumme(termine);
   const jaehrl = aktiv.filter((f) => f.rh.proJahr < 12);
   const vertrZiel = S.fixtab === 'vertraege' ? (sel) => ({ springe: sel }) : () => ({ ziel: { fixtab: 'vertraege' } });
   const vz = (inhalt, sel = '.fix5 .vgs') => (S.fixtab === 'vertraege' ? zs(inhalt, sel) : zl(inhalt, { fixtab: 'vertraege' }));
@@ -3221,7 +3306,7 @@ function tabFixkosten() {
     ${rest >= 0 ? 'Nach' : 'Mit'} Lebenshaltung (${S.fixtab === 'vertraege' ? zs(eur0(L), '#fix-leben') : zl(eur0(L), { fixtab: 'vertraege', _springe: '#fix-leben' })}) und sonstigen Einnahmen (${zl(`+${eur0(R.sonst)}`, { tab: 'uebersicht', kart: 'ein', wahl: '', jahr: '' })}) ${rest >= 0 ? 'bleiben' : 'fehlen'} ${zl(`<b class="${rest >= 0 ? 'pos' : 'neg'}">${eur0(Math.abs(rest))}</b>`, { tab: 'start' })} im Monat.`;
   const zahlen = [
     zahl5('Fixkosten im Monat', eur0(pm), `${aktiv.length} laufende Verträge · jährliche anteilig · Liste ↓`, vertrZiel('.fix5 .vgs')),
-    zahl5('Anteil am Gehalt', pct(pm), `${ks ? 'nur Verträge der gewählten Konten · ' : ''}von ${eur0(G)} netto (${monKurz(R.gehaltMonat)}) · Faustregel höchstens 50 % · Gehälter →`, { cls: pm <= G * 0.5 ? 'pos' : 'neg', ziel: zuGehalt() }),
+    zahl5('Anteil am Gehalt', pct(pm), `${ks ? 'nur Verträge der gewählten Konten · ' : ''}von ${eur0(G)} netto (${gehaltWoher(R, true)}) · Faustregel höchstens 50 % · Gehälter →`, { cls: pm <= G * 0.5 ? 'pos' : 'neg', ziel: zuGehalt() }),
     zahl5('Fixkosten im Jahr', eur0(pm * 12), jaehrl.length ? `davon ${eur0(jaehrl.reduce((t, f) => t + f.proJahr, 0))} nicht monatlich (${jaehrl.length} Verträge) · Kalender →` : 'alles monatlich', { ziel: { fixtab: 'kalender' } }),
     zahl5('Nächste 30 Tage', eur0(tSumme), `${termine.length} feste Abbuchungen · Kalender ansehen`, { ziel: { fixtab: 'kalender' } }),
   ].join('');
@@ -3229,6 +3314,8 @@ function tabFixkosten() {
   const gross = ueberAlle.filter((g) => g.summe >= (R.fix + L) * 0.04), klein = ueberAlle.filter((g) => g.summe > 0 && g.summe < (R.fix + L) * 0.04), kleinS = klein.reduce((t, g) => t + g.summe, 0);
   const teile = [...gross.map((g) => ({ n: FIX_KURZ[g.art] || esc(g.art), c: g.summe, tip: `${g.art}: ${eur0(g.summe)} im Monat · ${pct(g.summe)} vom Gehalt – anklicken: Verträge`, ...vertrZiel(`#${fvId(g.art)}`) })),
     ...(kleinS ? [{ n: 'Übrige', c: kleinS, tip: `${klein.map((g) => `${g.art} ${eur0(g.summe)}`).join(', ')} – zusammen ${eur0(kleinS)} im Monat`, ...vertrZiel(`#${fvId(klein[0].art)}`) }] : [])];
+  // gezeigte Euro der Teile: nach dem größten Rest, zusammen = gerundete Fixkosten (Ausgaben im Balken gehen auf)
+  { const eT = rundeTeile(teile.map((x) => x.c)); teile.forEach((x, i) => { x.e = eT[i]; }); }
   const lh = lebenshaltung();
   if (lebenWahl === 'eigen' && !lebenEigen) lebenWahl = 'vormonat';
   const knopf = (k, t, wert) => `<button data-leben="${k}" class="${lebenWahl === k ? 'an' : ''}">${t}${wert != null ? ` <small>${eur0(wert)}</small>` : ''}</button>`;
@@ -3236,7 +3323,7 @@ function tabFixkosten() {
     <section class="card s5-karte fix5-balken"><div class="s5-kt"><div class="s5-kt-t"><h2>Dein Monat in einem Balken</h2>
       <p class="s5-erkl">Dunkel = Fixkosten je Art, hell = Lebenshaltung, rot schraffiert = was fehlt. Der senkrechte Strich ist dein Einkommen (Gehalt + übliche sonstige Einnahmen). Fläche anklicken: Einzelheiten.${ks ? ' <b>Gilt für alle Konten</b> – die Kontenauswahl wirkt nur auf die Verträge.' : ''}</p></div></div>
       ${geldBalken({ ...R, ein: E, aus: R.fix + L, erg: rest }, teile)}
-      <details class="fix-grundlage"${fixGrundlageAuf ? ' open' : ''}><summary>Gerechnet mit Gehalt ${eur0(G)} (${monLang(R.gehaltMonat)}), sonstigen Einnahmen ${eur0(R.sonst)} (typischer Monat) und Lebenshaltung ${eur0(L)} (${lebenName()}) · <span class="link">Lebenshaltung ändern</span></summary>
+      <details class="fix-grundlage"${fixGrundlageAuf ? ' open' : ''}><summary>Gerechnet mit Gehalt ${eur0(G)} (${gehaltWoher(R)}), sonstigen Einnahmen ${eur0(R.sonst)} (typischer Monat) und Lebenshaltung ${eur0(L)} (${lebenName()}) · <span class="link">Lebenshaltung ändern</span></summary>
         <div class="fix-einst"><div class="fix-bezug-zeile"><span>Lebenshaltung</span><div class="seg fix-bezug">${lh.monate.length ? knopf('vormonat', `Vormonat ${MON[+lh.monate.at(-1).slice(5) - 1]}`, lh.werte.at(-1)) : ''}${knopf('schnitt', 'Ø 12 Monate', lh.schnitt)}${knopf('typisch', 'typischer Monat', lh.typisch)}${knopf('eigen', 'eigener Wert')}</div>
           ${lebenWahl === 'eigen' ? `<label class="fix-eigen"><input type="number" id="leben-eigen" min="0" step="50" inputmode="numeric" value="${Math.round(L / 100)}"> € / Monat</label>` : ''}</div></div>
         <p class="muted klein">Lebenshaltung = alle übrigen Ausgaben deiner Konten (Einkauf, Tanken, Freizeit, Urlaub, Anschaffungen) ohne Fixkosten und ohne Gemeinschaftskonto, ${esc(monatsText(lh.monate))}. „Typischer Monat“ ist der Median – einzelne teure Monate zählen dann weniger. Die Wahl gilt überall: normaler Monat, laufender Monat und Prognose. Beim Vormonat zeigt das Cockpit zum Vergleich die Prognose mit Ø 12 Monate.</p>
@@ -3372,29 +3459,35 @@ function fixVertraegeAnsicht(o) {
   const farbe = (art) => farbeVon.get(art) || 'var(--muted)';
   const maxG = Math.max(1, ...arten.map((g) => g.summe));
   const anzahl = (n) => `${n} ${n === 1 ? 'Vertrag' : 'Verträge'}`;
+  // gezeigte Euro je laufendem Vertrag über alle Verträge nach dem größten Rest gerundet: die Zeilen ergeben den Kopf
+  // ihrer Art, die Köpfe zusammen „Summe laufend“ (= gerundete Gesamtsumme)
+  const lauf0 = arten.flatMap((g) => g.fs.filter((f) => f.aktiv)), eL = rundeTeile(lauf0.map((f) => f.proMonat));
+  const zeilenE = new Map(lauf0.map((f, i) => [f, eL[i]]));
+  const artE = new Map(arten.map((g) => [g.art, g.fs.reduce((t, f) => t + (zeilenE.get(f) || 0), 0)]));
+  const pmE = eL.reduce((t, c) => t + c, 0);
   const gruppe = (g) => {
     const fs = [...g.fs].sort((a, b) => (b.aktiv - a.aktiv) || b.proMonat - a.proMonat);
     const kind = (f) => {
-      const titel = fixTitel(f, g.art), vt = verlaufText(f), n = naechsteAbbuchung(f);
-      const rhythmus = `${f.rh.name} ${e2(f.betrag)}`, wann = f.aktiv ? (n ? (n <= D.bis ? `fällig seit ${dde(n).slice(0, 6)}, noch nicht gebucht` : `nächste ${dde(n).slice(0, 6)}`) : '') : `beendet ${dde(f.zuletzt).slice(3)}`;
+      const titel = fixTitel(f, g.art), vt = verlaufText(f), n = naechsteAbbuchung(f), alt = ueberfaelligAlt(f);
+      const rhythmus = `${f.rh.name} ${e2(f.betrag)}`, wann = f.aktiv ? (alt ? `überfällig seit ${dde(alt).slice(0, 6)} – vermutlich beendet` : n ? (n <= D.bis ? `fällig seit ${dde(n).slice(0, 6)}, noch nicht gebucht` : `nächste ${dde(n).slice(0, 6)}`) : '') : `beendet ${dde(f.zuletzt).slice(3)}`;
       const unter = [titel !== f.name ? f.name : '', vt].filter(Boolean).map(esc).join(' · ');
       return `<button class="vg-z${f.aktiv ? '' : ' beendet'}" data-fix="${esc(vertragsKey(f))}" title="${esc(vertragName(f))} – alle Zahlungen anzeigen">
         <span class="vg-zn">${esc(titel)}${unter ? `<small>${unter}</small>` : ''}<small class="vg-mobil">${esc([rhythmus, wann].filter(Boolean).join(' · '))}</small></span>
         <span class="vg-zr">${esc(rhythmus)}${wann ? `<small>${esc(wann)}</small>` : ''}</span>
-        <b class="vg-zw">${f.aktiv ? eur0(f.proMonat) : '–'}</b><span class="vg-zp">${f.aktiv ? pct(f.proMonat) : ''}</span></button>`;
+        <b class="vg-zw">${f.aktiv ? eur0(zeilenE.get(f)) : '–'}</b><span class="vg-zp">${f.aktiv ? pct(f.proMonat) : ''}</span></button>`;
     };
     return `<section class="vg" id="${fvId(g.art)}" style="--vg:${farbe(g.art)}">
       <div class="vg-k"><span class="vg-n"><b>${esc(g.art)}</b><small>${g.laufend ? anzahl(g.laufend) : 'beendet'}${g.fs.length > g.laufend && g.laufend ? ` · ${g.fs.length - g.laufend} beendet` : ''}${['Kindesunterhalt', 'Trennungsunterhalt'].includes(g.art) ? ` · ${zl('Monat für Monat →', { fixtab: 'unterhalt' })}` : ''}</small></span>
-        <span class="vg-b"><i style="width:${Math.max(1, (g.summe / maxG) * 100)}%"></i></span><b class="vg-w">${g.summe ? eur0(g.summe) : '–'}</b><span class="vg-p">${g.summe ? pct(g.summe) : ''}</span></div>
+        <span class="vg-b"><i style="width:${Math.max(1, (g.summe / maxG) * 100)}%"></i></span><b class="vg-w">${g.summe ? eur0(artE.get(g.art)) : '–'}</b><span class="vg-p">${g.summe ? pct(g.summe) : ''}</span></div>
       <div class="vg-l">${fs.map(kind).join('')}</div></section>`;
   };
   const vertraege = `<div class="vg-kopf"><span>Art · Vertrag</span><span></span><span>pro Monat</span><span>% Gehalt</span></div>${arten.map(gruppe).join('')}
-    <div class="vg-summe"><span>Summe laufend<small>${eur0(pm * 12)} im Jahr</small></span><span></span><b>${eur0(pm)}</b><span>${pct(pm)}</span></div>`;
+    <div class="vg-summe"><span>Summe laufend<small>${eur0(pm * 12)} im Jahr</small></span><span></span><b>${eur0(pmE)}</b><span>${pct(pm)}</span></div>`;
   const gem = vomGemeinsamen.length ? `<p class="s5-erkl"><b>Vom Gemeinschaftskonto bezahlt</b> (nicht mitgezählt – ihr deckt sie aus euren Einzahlungen): ${vomGemeinsamen.filter((f) => f.aktiv).map((f) => `${esc(f.name)} ${e2(f.betrag)}`).join(' · ') || '–'}</p>` : '';
   // Wofür: ein Balken = alle Fixkosten, darunter die Arten mit Anteil
   const wofuer = !da.length ? '<div class="leer klein">Keine laufenden Fixkosten.</div>'
-    : `<div class="wf5-b">${da.map((g) => `<i style="width:${(g.summe / pm) * 100}%;background:${farbe(g.art)}" data-springe="#${fvId(g.art)}" title="${esc(g.art)}: ${eur0(g.summe)} im Monat"></i>`).join('')}</div>
-      <div class="wf5">${da.map((g) => `<button class="wf5-z" data-springe="#${fvId(g.art)}" title="Anklicken: die Verträge"><i style="background:${farbe(g.art)}"></i><span class="wf5-n">${esc(g.art)}<small>${anzahl(g.laufend)} · ${pct(g.summe)} vom Gehalt</small></span><b>${eur0(g.summe)}</b><span class="wf5-p">${Math.round((g.summe / pm) * 100)} %</span></button>`).join('')}</div>`;
+    : `<div class="wf5-b">${da.map((g) => `<i style="width:${(g.summe / pm) * 100}%;background:${farbe(g.art)}" data-springe="#${fvId(g.art)}" title="${esc(g.art)}: ${eur0(artE.get(g.art) ?? g.summe)} im Monat"></i>`).join('')}</div>
+      <div class="wf5">${da.map((g) => `<button class="wf5-z" data-springe="#${fvId(g.art)}" title="Anklicken: die Verträge"><i style="background:${farbe(g.art)}"></i><span class="wf5-n">${esc(g.art)}<small>${anzahl(g.laufend)} · ${pct(g.summe)} vom Gehalt</small></span><b>${eur0(artE.get(g.art) ?? g.summe)}</b><span class="wf5-p">${Math.round((g.summe / pm) * 100)} %</span></button>`).join('')}</div>`;
   return `<div class="s5-raster fix5">
     ${karte5('Verträge', 'nach Art gruppiert: oben die Summe der Art, eingerückt die einzelnen Verträge · anklicken: alle Zahlungen', `<div class="seg fix-seg">${seg('laufend', `Laufend (${aktiv.length})`)}${nFrueher ? seg('frueher', `+ frühere seit 2020 (${nFrueher})`) : ''}${nFrueher + nAelter ? seg('alle', `alle (${alle.length})`) : ''}</div>${liste.length ? `<div class="vgs">${vertraege}</div>` : '<div class="leer">Keine regelmäßigen Zahlungen gefunden.</div>'}${gem}`, 's5-b2')}
     <div class="s5-spalte">
@@ -3943,7 +4036,7 @@ let appVersion = '';
 function standZeigen() {
   const j = D.j;
   // zwei Zeilen: Datenstand, darunter die Versionsnummer (steht nur in sw.js – einmal lesen)
-  const zeigen = () => { $('#stand').innerHTML = `<span>${NUM.format(D.rows.length)} Buchungen · ${dde(D.von)} – ${dde(D.bis)}</span>${appVersion ? `<small>Version ${esc(appVersion)}</small>` : ''}`; };
+  const zeigen = () => { $('#stand').innerHTML = `<span>${NUM.format(D.rows.length)} Buchungen · ${dde(D.von)} – ${dde(D.bis)}</span>${appVersion ? `<small>Version ${esc(appVersion)}</small>` : ''}${quelle?.nichtGespeichert ? '<small class="neg">offline nicht verfügbar (Gerätespeicher)</small>' : ''}`; };
   zeigen();
   if (!appVersion) fetch('sw.js', { cache: 'no-store' }).then((r) => r.text()).then((t) => {
     const m = /VERSION = '([^']+)'/.exec(t);
@@ -3953,7 +4046,7 @@ function standZeigen() {
   const herkunft = { drive: `aus Google Drive${mail ? ` (${mail})` : ''}`, pc: `aus der verknüpften Datei ${quelle.name} auf diesem PC`, datei: `aus der Datei ${quelle.name}`, lokal: 'lokale Testdaten' }[quelle.quelle] || '';
   const erstellt = j.erstellt ? `${dde(j.erstellt.slice(0, 10))}, ${j.erstellt.slice(11, 16)} Uhr` : '';
   $('#fuss').textContent = `Daten ${herkunft}, erstellt am ${erstellt}. Neue Kontodaten einfach in Google Drive › 10 Finanzen › Eingang legen – der PC übernimmt sie automatisch; danach hier ↻.${nachpruefungText() ? ` ${nachpruefungText()} – Einzelheiten unter „Daten einlesen“.` : ''}`;
-  $('#menu-quelle').textContent = `Aktuell: ${NUM.format(D.rows.length)} Buchungen ${herkunft}, erstellt am ${erstellt}.`;
+  $('#menu-quelle').textContent = `Aktuell: ${NUM.format(D.rows.length)} Buchungen ${herkunft}, erstellt am ${erstellt}.${quelle?.nichtGespeichert ? ' Offline nicht verfügbar (Gerätespeicher): die Kopie auf diesem Gerät konnte nicht gespeichert werden.' : ''}`;
   $('#btn-neu').hidden = false;
   $('#btn-neu').title = 'Neue Dateien aus dem Eingang (Google Drive › 10 Finanzen › Eingang) einlesen und die neuesten Daten laden';
   if ($('#m-pc-tipp')) $('#m-pc-tipp').hidden = !Q.pcMoeglich() || quelle.quelle === 'pc';
@@ -4095,17 +4188,18 @@ async function dienst(pfad, methode = 'GET') {
   } finally { clearTimeout(t); }
 }
 
-// neueste Daten aus der jeweiligen Quelle laden (ohne eigene Meldungen); true = es gab neue Daten
+// neueste Daten aus der jeweiligen Quelle laden (ohne eigene Meldungen): { neu: es gab neue Daten, fehler: Text, wenn
+// das Laden nicht ging; 'datei' = eine einmal gewählte Datei lässt sich nicht automatisch neu laden }
 async function datenNeuLaden(fragen) {
   try {
-    if (quelle?.quelle === 'pc') { const neu = await Q.pcLaden(quelle, fragen); erlaubnisBalken(false); if (neu) anzeigen(neu); return !!neu; }
+    if (quelle?.quelle === 'pc') { const neu = await Q.pcLaden(quelle, fragen); erlaubnisBalken(false); if (neu) anzeigen(neu); return { neu: !!neu }; }
     if (quelle?.quelle === 'drive') {
-      if (!Q.hatToken()) { if (!fragen) return false; await Q.anmelden(); }
-      const neu = await Q.driveLaden(quelle); if (neu) anzeigen(neu); return !!neu;
+      if (!Q.hatToken()) { if (!fragen) return { neu: false, fehler: 'nicht bei Google angemeldet' }; await Q.anmelden(); }
+      const neu = await Q.driveLaden(quelle); if (neu) anzeigen(neu); return { neu: !!neu };
     }
-    if (quelle?.quelle === 'lokal') { const neu = await Q.lokalLaden(); if (neu && neu.text !== quelle.text) { anzeigen(neu); return true; } }
-  } catch (e) { if (e.erlaubnis) erlaubnisBalken(true); else if (fragen) toast(e.message); }
-  return false;
+    if (quelle?.quelle === 'lokal') { const neu = await Q.lokalLaden(); if (neu && neu.text !== quelle.text) { anzeigen(neu); return { neu: true }; } return { neu: false }; }
+  } catch (e) { if (e.erlaubnis) erlaubnisBalken(true); else if (fragen) toast(e.message); return { neu: false, fehler: e.message || 'unbekannter Fehler' }; }
+  return { neu: false, fehler: quelle?.quelle === 'datei' ? 'datei' : '' };
 }
 
 let einlesenLaeuft = false;
@@ -4119,11 +4213,11 @@ async function einlesen() {
     let st = null;
     try { st = await dienst('/einlesen', 'POST'); } catch { st = null; }
     if (!st) {
-      if (quelle?.quelle !== 'pc') await datenNeuLaden(true);
+      const r = quelle?.quelle !== 'pc' ? await datenNeuLaden(true) : { neu: false };
       // ohne PC-Dienst (Handy): zeigen, was im Eingang noch auf den PC wartet
       let wartend = null;
       if (Q.hatToken()) { try { wartend = await Q.eingangDateien(); } catch { wartend = null; } }
-      return einlesenMeldung({ ohneDienst: true, wartend });
+      return einlesenMeldung({ ohneDienst: true, wartend, fehler: r.fehler });
     }
     const start = Date.now(), seit = st.gestartet;
     txt.textContent = 'Wird eingelesen …';
@@ -4138,9 +4232,9 @@ async function einlesen() {
       }
     } finally { clearInterval(tick); balken.weg(); }
     const e = st.letztes && (!seit || st.letztes.zeit >= seit.slice(0, 19)) ? st.letztes : null;
-    let neu = await datenNeuLaden(false);
+    let neu = (await datenNeuLaden(false)).neu;
     // Google Drive braucht nach dem Aufbau etwas, bis die neue Datei hochgeladen ist
-    for (let i = 0; !neu && quelle?.quelle === 'drive' && e?.status === 'aufgebaut' && i < 4; i++) { await warte(8000); neu = await datenNeuLaden(false); }
+    for (let i = 0; !neu && quelle?.quelle === 'drive' && e?.status === 'aufgebaut' && i < 4; i++) { await warte(8000); neu = (await datenNeuLaden(false)).neu; }
     einlesenMeldung({ e, automatisch: st.automatisch });
   } finally {
     einlesenLaeuft = false; btn.classList.remove('dreht'); btn.disabled = false; txt.textContent = 'Daten einlesen';
@@ -4167,7 +4261,7 @@ function einlesenBalken(automatisch) {
   };
 }
 
-function einlesenMeldung({ e, ohneDienst, automatisch, wartend }) {
+function einlesenMeldung({ e, ohneDienst, automatisch, wartend, fehler = '' }) {
   let dlg = $('#dlg-einlesen');
   if (!dlg) { dlg = Object.assign(document.createElement('dialog'), { id: 'dlg-einlesen', className: 'dlg' }); document.body.append(dlg); }
   const stand = D?.j?.erstellt ? `${dde(D.j.erstellt.slice(0, 10))}, ${D.j.erstellt.slice(11, 16)} Uhr` : '';
@@ -4180,6 +4274,8 @@ function einlesenMeldung({ e, ohneDienst, automatisch, wartend }) {
         <table class="hilfe-tab datei-tab">${wartend.map((f) => `<tr><td>${esc(f.name)}<div class="klein muted">abgelegt ${zeit(f.createdTime || f.modifiedTime)}</div></td></tr>`).join('')}</table>
         <p>Einlesen kann nur dein PC – das Handy hat dafür kein Programm. Er übernimmt die ${wartend.length === 1 ? 'Datei' : 'Dateien'} automatisch, sobald er an ist (bei der Anmeldung und danach alle 30 Minuten); danach hier noch einmal ↻.</p>
         <p class="klein muted">Bisheriger Datenstand: ${stand}.</p>`
+      : fehler === 'datei' ? `<h2>Diese Datei kann nicht automatisch neu geladen werden</h2><p>Neue Datei über Start › Datei wählen öffnen.</p><p class="klein muted">Bisheriger Datenstand: ${stand}.</p>`
+      : fehler ? `<h2>Daten konnten nicht geladen werden</h2><p class="neg">${esc(fehler)}</p><p>Bisheriger Datenstand: ${stand}.</p>`
       : `<h2>Neueste Daten geladen</h2><p>Datenstand: <b>${stand}</b>.</p>
         ${wartend ? '<p>Im Eingang wartet nichts – alles ist übernommen.</p>' : ''}
         <p class="muted">Neue Dateien im Eingang (Google Drive › 10 Finanzen › Eingang) übernimmt dein PC automatisch – bei der Anmeldung und alle 30 Minuten, solange er an ist. Am PC geht es mit diesem Knopf auch sofort.</p>`;

@@ -136,7 +136,9 @@
   .vs-zahlen { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .vs-zahl b { font-size: 18px; }
   .vs-bars { gap: 3px; height: 150px; }
-  .vs-bar small { display: none; }
+  /* Werte bleiben sichtbar (Tooltips gibt es auf Touch-Geräten nicht) – klein und etwas breiter als die Säule, mittig */
+  .vs-bar small { font-size: 9px; letter-spacing: -.3px; left: -2px; right: -2px; }
+  .vs-bar.vs-rand small { font-size: 8px; }
   .vs-tab .vs-n { width: 150px; min-width: 150px; max-width: 150px; }
   .vs-tab { min-width: 1080px; }
   .vs-pos .vs-n { padding-left: 14px; }

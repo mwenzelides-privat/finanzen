@@ -41,6 +41,9 @@ export const mitZeit = (p, ms, text) => {
 };
 export const cacheLesen = () => tx('readonly', (s) => s.get('aktuell')).catch(() => null);
 export const cacheSchreiben = (v) => tx('readwrite', (s) => s.put(v, 'aktuell'));
+// Offline-Kopie nach dem Laden: scheitert das Speichern (Speicher voll, privater Modus) oder hängt es, werden die schon
+// geprüften Daten trotzdem gezeigt – nur mit dem Hinweis, dass sie offline nicht verfügbar sind (v.nichtGespeichert)
+const offlineSichern = (v) => mitZeit(cacheSchreiben(v), 5000, 'Gerätespeicher antwortet nicht').catch((e) => { console.warn('Offline-Kopie nicht gespeichert', e); v.nichtGespeichert = true; });
 // weitere Einstellungen/Entscheidungen auf dem Gerät (z. B. Steuer-Zuordnungen)
 export const kvLesen = (k) => tx('readonly', (s) => s.get(k)).catch(() => null);
 export const kvSchreiben = (k, v) => tx('readwrite', (s) => s.put(v, k));
@@ -72,7 +75,7 @@ export function dateiWaehlen() {
         const text = await f.text();
         const j = pruefen(text);
         const v = { text, quelle: 'datei', name: f.name, geaendert: new Date(f.lastModified).toISOString(), geladen: new Date().toISOString() };
-        await cacheSchreiben(v);
+        await offlineSichern(v);
         res({ ...v, j });
       } catch (e) { rej(e); }
     };
@@ -95,7 +98,7 @@ async function pcLesen(h, aktuell) {
   const text = await f.text();
   const j = pruefen(text);
   const v = { text, quelle: 'pc', name: f.name, geaendert, geladen: new Date().toISOString() };
-  await cacheSchreiben(v);
+  await offlineSichern(v);
   return { ...v, j };   // j = schon geprüfte Daten, nur im Speicher
 }
 
@@ -208,7 +211,7 @@ export async function driveLaden(aktuell) {
   const text = await (await api(`${API}/${f.id}?alt=media`)).text();
   const j = pruefen(text);
   const v = { text, quelle: 'drive', id: f.id, name: f.name, geaendert: f.modifiedTime, geladen: new Date().toISOString() };
-  await cacheSchreiben(v);
+  await offlineSichern(v);
   return { ...v, j };
 }
 

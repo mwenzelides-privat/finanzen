@@ -2,7 +2,7 @@
 // Bei jeder Änderung an App-Dateien VERSION erhöhen.
 // Unter derselben Adresse (mwenzelides-privat.github.io) liegt auch die Gesundheitsakte: dieser Service Worker liest,
 // schreibt und löscht nur eigene Speicher („finanzen-…“) und nur Anfragen unter /finanzen/.
-const VERSION = 'd7.32.0';
+const VERSION = 'd7.33.0';
 const CACHE = 'finanzen-dash-' + VERSION;
 const APP = ['./', 'index.html', 'manifest.webmanifest', 'config.js', 'css/app.css', 'icons/icon.svg', 'icons/icon-192.png',
   'js/app.js', 'js/suche.js', 'js/quelle.js', 'js/export.js', 'js/chat.js', 'js/salden.js', 'js/steuer.js', 'js/gehalt.js', 'js/pruefen.js',
@@ -30,7 +30,8 @@ self.addEventListener('activate', (e) => {
 // nur im eigenen Speicher suchen (caches.match ohne open() durchsucht alle Speicher der Adresse, auch die der Gesundheitsakte)
 const eigen = (req, opt) => caches.open(CACHE).then((c) => c.match(req, opt));
 
-// App-Dateien: erst Netz (immer aktuell), sonst Offline-Kopie. Bibliotheken: Offline-Kopie zuerst.
+// App-Dateien: erst Netz (immer aktuell) – antwortet es nicht binnen 3 Sekunden (schlechte Verbindung), die
+// Offline-Kopie; das Netz aktualisiert den Speicher dann im Hintergrund. Bibliotheken: Offline-Kopie zuerst.
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
@@ -40,8 +41,14 @@ self.addEventListener('fetch', (e) => {
     return;
   }
   if (url.origin !== location.origin || !url.pathname.startsWith(new URL(self.registration.scope).pathname)) return;
-  e.respondWith(fetch(req).then((res) => {
+  const netz = fetch(req).then((res) => {
     if (res.ok) { const cp = res.clone(); caches.open(CACHE).then((c) => c.put(req, cp)); }
     return res;
-  }).catch(() => eigen(req, { ignoreSearch: true }).then((r) => r || eigen('index.html'))));
+  });
+  const zeit = new Promise((r) => setTimeout(() => r(null), 3000));
+  e.respondWith(Promise.race([netz.catch(() => null), zeit])
+    .then((res) => res || eigen(req, { ignoreSearch: true }))
+    .then((res) => res || netz)
+    .catch(() => eigen(req, { ignoreSearch: true }).then((r) => r || eigen('index.html'))));
+  e.waitUntil(netz.catch(() => {}));
 });
